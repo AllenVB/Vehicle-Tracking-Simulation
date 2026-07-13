@@ -18,7 +18,7 @@ INSERT INTO role (code, name) VALUES
 -- ── Admin user (dev password: "password") ─────────────────────────────────
 INSERT INTO app_user (tenant_id, username, email, password_hash, full_name)
 SELECT t.id, 'admin', 'admin@demo.local',
-       '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Demo Admin'
+       '$2b$10$leGL2nKyCjHUSNWvkgmecuNs/CgY3cqbAEl/ggXS/.HLYVymTrM7S', 'Demo Admin'
 FROM tenant t WHERE t.slug = 'demo';
 
 INSERT INTO user_role (user_id, role_id)

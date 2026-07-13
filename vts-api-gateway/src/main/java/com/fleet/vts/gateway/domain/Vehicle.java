@@ -54,16 +54,16 @@ public class Vehicle {
     private Integer year;
 
     @Column(name = "type")
-    private String type;
+    private String type = "CAR";
 
     @Column(name = "fuel_type")
-    private String fuelType;
+    private String fuelType = "DIESEL";
 
     @Column(name = "status")
-    private String status;
+    private String status = "ACTIVE";
 
     @Column(name = "odometer_km")
-    private Long odometerKm;
+    private Long odometerKm = 0L;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
