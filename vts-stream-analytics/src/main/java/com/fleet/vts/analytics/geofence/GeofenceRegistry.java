@@ -1,6 +1,7 @@
 package com.fleet.vts.analytics.geofence;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
@@ -32,6 +33,7 @@ public class GeofenceRegistry {
     private final JdbcTemplate jdbc;
     private volatile List<Area> areas;
 
+    @Autowired
     public GeofenceRegistry(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
         this.areas = List.of();
