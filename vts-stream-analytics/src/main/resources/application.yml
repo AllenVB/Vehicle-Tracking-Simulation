@@ -3,6 +3,11 @@ spring:
     name: vts-stream-analytics
   profiles:
     default: dev
+  # Read-only: active geofence polygons are loaded at startup for point-in-polygon
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vts}
+    username: ${DB_USER:vts}
+    password: ${DB_PASSWORD:vts}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     streams:
