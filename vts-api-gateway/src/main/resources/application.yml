@@ -15,10 +15,14 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
-  # Flyway owns the schema; migrations land in step 2 (V1..V15)
+  # Flyway owns the schema (migrations V1..V15). Scale-varying values are passed
+  # as placeholders so the same SQL adapts per profile (see profile blocks below).
   flyway:
     enabled: true
     baseline-on-migrate: false
+    placeholders:
+      telemetry_chunk_interval: 1 day
+      retention_days: "30"
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -45,3 +49,14 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+---
+# Load profile: smaller chunks and shorter retention for high-ingest testing.
+spring:
+  config:
+    activate:
+      on-profile: load
+  flyway:
+    placeholders:
+      telemetry_chunk_interval: 1 hour
+      retention_days: "7"
