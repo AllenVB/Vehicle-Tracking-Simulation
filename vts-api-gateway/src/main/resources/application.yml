@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: vts-api-gateway
+  profiles:
+    default: dev
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vts}
+    username: ${DB_USER:vts}
+    password: ${DB_PASSWORD:vts}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  # Flyway owns the schema; migrations land in step 2 (V1..V15)
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: 8080
+
+# JWT is validated locally (HS256/RS256); issuer config comes with the auth work
+vts:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:change-me-in-prod-this-is-a-dev-only-secret-key-256bit}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

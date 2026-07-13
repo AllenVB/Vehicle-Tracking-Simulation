@@ -1,0 +1,24 @@
+# Prometheus scrape config. Application services expose /actuator/prometheus.
+# Targets are added here as each service joins docker-compose in later steps.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Spring Boot services (Micrometer -> Prometheus). Enabled per service as
+  # they are containerised. Metrics path is Actuator's Prometheus endpoint.
+  - job_name: vts-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: []
+        # - vts-ingestion-service:8081
+        # - vts-processing-service:8082
+        # - vts-stream-analytics:8083
+        # - vts-notification-service:8084
+        # - vts-api-gateway:8080
+        # - vts-scheduler-service:8086
+        # - vts-simulator:8085

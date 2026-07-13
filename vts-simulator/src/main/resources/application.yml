@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: vts-simulator
+  profiles:
+    default: dev
+  # Java 21 virtual threads: one carrier-light thread per simulated vehicle tick
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8085
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# Ingestion endpoint the simulator posts telemetry batches to
+vts:
+  simulator:
+    ingestion-base-url: http://localhost:8081
+  # Fleet size and tick interval come ONLY from the active profile below,
+  # never hard-coded in Java.
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+vts:
+  simulator:
+    vehicle-count: 100
+    tick: 5s
+
+---
+spring:
+  config:
+    activate:
+      on-profile: load
+vts:
+  simulator:
+    vehicle-count: 1000
+    tick: 1s

@@ -1,0 +1,17 @@
+# Load-test override: 3-broker Kafka cluster and scaled ingestion replicas.
+# Use together with the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.load.yml up -d
+#
+# Intended for the `load` Spring profile (1000 vehicles, 1s tick). The full
+# multi-broker wiring and service scaling is fleshed out in phase 2; this file
+# is the designated override point so the base dev file stays single-broker.
+name: vts
+
+services:
+  kafka:
+    environment:
+      # Placeholder: replicas are raised to 3 across the broker set in phase 2.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2

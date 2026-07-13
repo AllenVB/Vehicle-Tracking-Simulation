@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: vts-processing-service
+  profiles:
+    default: dev
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/vts?reWriteBatchedInserts=true}
+    username: ${DB_USER:vts}
+    password: ${DB_PASSWORD:vts}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      type: batch
+      ack-mode: manual
+    consumer:
+      group-id: vts-processing
+      enable-auto-commit: false
+      max-poll-records: 500
+      auto-offset-reset: earliest
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}

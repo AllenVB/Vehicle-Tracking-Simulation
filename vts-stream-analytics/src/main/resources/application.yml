@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: vts-stream-analytics
+  profiles:
+    default: dev
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    streams:
+      application-id: vts-stream-analytics
+      properties:
+        # RocksDB-backed state stores hold per-vehicle stateful rule context
+        num.stream.threads: 4
+        processing.guarantee: at_least_once
+        default.deserialization.exception.handler: org.apache.kafka.streams.errors.LogAndContinueExceptionHandler
+
+server:
+  port: 8083
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}

@@ -1,0 +1,12 @@
+# Dashboard provider. Dashboard JSON files land here in step 12 (observability).
+apiVersion: 1
+
+providers:
+  - name: vts
+    orgId: 1
+    folder: VTS
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
