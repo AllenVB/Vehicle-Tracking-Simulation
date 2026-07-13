@@ -63,6 +63,6 @@ CREATE TABLE audit_log (
     entity_type VARCHAR(80),
     entity_id   VARCHAR(80),
     detail      JSONB,
-    ip_address  INET,
+    ip_address  VARCHAR(45),           -- textual IPv4/IPv6
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
