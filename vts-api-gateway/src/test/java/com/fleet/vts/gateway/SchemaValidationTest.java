@@ -1,6 +1,7 @@
 package com.fleet.vts.gateway;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -28,6 +29,9 @@ import org.springframework.test.context.DynamicPropertySource;
                 + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
                 + "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration"
 })
+// Integration test: needs a running TimescaleDB (see VTS_SCHEMA_JDBC_URL).
+// Run with: mvn -Dvts.itest=true test  (after starting the DB container).
+@EnabledIfSystemProperty(named = "vts.itest", matches = "true")
 class SchemaValidationTest {
 
     private static final String JDBC_URL = System.getenv()

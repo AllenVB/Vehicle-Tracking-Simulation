@@ -1,0 +1,56 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "title": "VTS — Fleet Telematics Overview",
+  "uid": "vts-overview",
+  "tags": ["vts"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": {"from": "now-30m", "to": "now"},
+  "refresh": "10s",
+  "templating": {"list": []},
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Telemetry ingested / persisted (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum(rate(telemetry_ingested_total[1m]))", "legendFormat": "ingested"},
+        {"expr": "sum(rate(telemetry_persisted_total[1m]))", "legendFormat": "persisted"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Violations produced / Notifications sent (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "sum(rate(violation_produced_total[1m]))", "legendFormat": "violations"},
+        {"expr": "sum(rate(notification_sent_total[1m]))", "legendFormat": "notifications"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Kafka consumer lag (records)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "sum by (client_id) (kafka_consumer_fetch_manager_records_lag)", "legendFormat": "{{client_id}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Dead-lettered telemetry (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "sum(rate(telemetry_dead_lettered_total[1m]))", "legendFormat": "dlq"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM heap used by service",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "targets": [
+        {"expr": "sum by (application) (jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "{{application}}"}
+      ]
+    }
+  ]
+}

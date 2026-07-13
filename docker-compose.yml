@@ -130,6 +130,77 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
 
+  # ── Application services ────────────────────────────────────────────────
+  # api-gateway owns the schema (runs Flyway on startup); the others start after
+  # it and re-connect with retries until the schema is ready.
+  api-gateway:
+    build: {context: ., args: {MODULE: vts-api-gateway}}
+    container_name: vts-api-gateway
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    environment: &db-kafka-redis
+      DB_URL: jdbc:postgresql://postgres:5432/vts
+      DB_USER: vts
+      DB_PASSWORD: vts
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports: ["8080:8080"]
+    restart: unless-stopped
+
+  ingestion-service:
+    build: {context: ., args: {MODULE: vts-ingestion-service}}
+    container_name: vts-ingestion-service
+    depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
+    environment: *db-kafka-redis
+    ports: ["8081:8081"]
+    restart: unless-stopped
+
+  processing-service:
+    build: {context: ., args: {MODULE: vts-processing-service}}
+    container_name: vts-processing-service
+    depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
+    environment:
+      <<: *db-kafka-redis
+      DB_URL: jdbc:postgresql://postgres:5432/vts?reWriteBatchedInserts=true
+    ports: ["8082:8082"]
+    restart: unless-stopped
+
+  stream-analytics:
+    build: {context: ., args: {MODULE: vts-stream-analytics}}
+    container_name: vts-stream-analytics
+    depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
+    environment: *db-kafka-redis
+    ports: ["8083:8083"]
+    restart: unless-stopped
+
+  notification-service:
+    build: {context: ., args: {MODULE: vts-notification-service}}
+    container_name: vts-notification-service
+    depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
+    environment: *db-kafka-redis
+    ports: ["8084:8084"]
+    restart: unless-stopped
+
+  scheduler-service:
+    build: {context: ., args: {MODULE: vts-scheduler-service}}
+    container_name: vts-scheduler-service
+    depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
+    environment: *db-kafka-redis
+    ports: ["8086:8086"]
+    restart: unless-stopped
+
+  simulator:
+    build: {context: ., args: {MODULE: vts-simulator}}
+    container_name: vts-simulator
+    depends_on: {ingestion-service: {condition: service_started}}
+    environment:
+      VTS_SIMULATOR_INGESTION_BASE_URL: http://ingestion-service:8081
+    ports: ["8085:8085"]
+    restart: unless-stopped
+
 volumes:
   kafka-data:
   postgres-data:
