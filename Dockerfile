@@ -21,4 +21,8 @@ FROM eclipse-temurin:21-jre AS runtime
 ARG MODULE
 WORKDIR /app
 COPY --from=build /app/${MODULE}/target/${MODULE}-0.0.1-SNAPSHOT.jar app.jar
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Without a cap the JVM sizes its heap from the HOST's RAM (25% each), so eight
+# services creep to many GB. Heap is pinned to a share of the container's mem_limit
+# (set per service in docker-compose), which the JVM reads via container support.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=50 -XX:MaxMetaspaceSize=128m"
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

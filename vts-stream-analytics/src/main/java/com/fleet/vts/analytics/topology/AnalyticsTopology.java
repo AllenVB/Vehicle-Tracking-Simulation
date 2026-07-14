@@ -82,12 +82,17 @@ public class AnalyticsTopology {
         raw.process(new TripRule(tripStateSerde))
                 .to(Topics.TRIP, Produced.with(Serdes.String(), tripSerde));
 
-        // SUSTAINED_SPEEDING: 5-min hopping window (advance 1 min); fire once per
-        // window when >= 80% of readings exceed the limit.
+        // SUSTAINED_SPEEDING: 5-min TUMBLING window; fire once per window when
+        // >= 80% of readings exceed the limit.
+        //
+        // This was a hopping window advancing every minute, which meant a vehicle
+        // cruising over the limit emitted a violation every single minute — with a
+        // third of the fleet permanently speeding that alone was ~33 events/min and
+        // dominated the violation stream. A tumbling window emits at most once per
+        // 5 minutes per vehicle, matching the rule's cooldown_seconds (300).
         raw.filter((k, e) -> e != null && e.speedKmh() != null)
                 .groupByKey(Grouped.with(Serdes.String(), telemetrySerde))
-                .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(5), Duration.ZERO)
-                        .advanceBy(Duration.ofMinutes(1)))
+                .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(5), Duration.ZERO))
                 .aggregate(SpeedWindowAgg::empty,
                         (k, e, agg) -> agg.add(e, SPEED_LIMIT),
                         Materialized.<String, SpeedWindowAgg, org.apache.kafka.streams.state.WindowStore<org.apache.kafka.common.utils.Bytes, byte[]>>

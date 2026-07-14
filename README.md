@@ -148,10 +148,16 @@ yani internet olmadan da ayakta kalır.
 1. **Telemetri tekil `save()` ile yazılmaz** — batch Kafka consumer + `JdbcTemplate.batchUpdate()` + `ON CONFLICT DO NOTHING`; telemetri için JPA entity yok; `reWriteBatchedInserts=true`.
 2. **Event başına Redis round-trip yok** — durumlu state Kafka Streams state store (RocksDB); toplu Redis işlemleri pipeline.
 3. **WebSocket'e event başına mesaj yok** — gateway in-memory tutar, `@Scheduled(1s)` ile SADECE değişenleri (delta) yayınlar; client viewport (bbox) gönderir.
-4. **İhlaller okuma başına üretilmez** — araç+kural bazlı **cooldown** ile debounce edilir: sürekli hız aşan bir araç, kuralın `cooldown_seconds` penceresinde tek ihlal üretir. Bu, ihlal hacmini telemetri hızıyla değil **ayrık olaylarla** orantılı tutar (ölçülen etki: ~20 ihlal/sn → ~0.07/sn).
-5. **Kafka partition = 24** (profilden bağımsız) — sonradan artırmak per-vehicle ordering'i ve Streams state store'larını bozar.
-6. **Telemetri = TimescaleDB hypertable** — dashboard sorguları ham tabloya değil continuous aggregate'e vurur.
-7. **Her tabloda `tenant_id` + Outbox Pattern** baştan.
+4. **İhlaller okuma başına üretilmez** — ihlal hacmi telemetri hızıyla değil **ayrık olaylarla** orantılı olmalı. Üç yerde debounce edilir:
+   - *Durumsuz kurallar* (`SPEED_LIMIT`, `LOW_BATTERY`, `LOW_FUEL`): `RuleEngine`'de araç+kural bazlı cooldown — sürekli hız aşan araç, kuralın `cooldown_seconds` penceresinde tek ihlal üretir.
+   - *Sert fren*: `HarshBrakingRule`'da araç bazlı 120 sn cooldown (RocksDB state store).
+   - *Sürekli hız aşımı*: 5 dk'lık **tumbling** pencere. (Eskiden `advanceBy(1 dk)` hopping pencereydi; sürekli hız aşan her araç **dakikada bir** ihlal üretiyordu ve tek başına selin **%83'ünü** oluşturuyordu.)
+
+   Ölçülen toplam etki: **~20 ihlal/sn → ~0.2 ihlal/sn**.
+5. **Bellek sınırsız bırakılmaz** — JVM, konteyner limiti yoksa heap tavanını *host* RAM'inden seçer (%25); 8 servis çarpınca RAM zamanla şişer. Servis başına `mem_limit` + `MaxRAMPercentage` ile heap sabitlenir. Ayrıca Kafka Streams'te **5 store × 24 partition ≈ 120 RocksDB örneği** her biri kendi cache'ini açacağı için, hepsi tek ve sınırlı bir LRU cache + write-buffer manager paylaşır (`BoundedRocksDBConfig`). Java servisleri toplamı: **~2.4 GB, sert tavan 3.7 GB**.
+6. **Kafka partition = 24** (profilden bağımsız) — sonradan artırmak per-vehicle ordering'i ve Streams state store'larını bozar.
+7. **Telemetri = TimescaleDB hypertable** — dashboard sorguları ham tabloya değil continuous aggregate'e vurur.
+8. **Her tabloda `tenant_id` + Outbox Pattern** baştan.
 
 ---
 

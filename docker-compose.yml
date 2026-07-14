@@ -138,6 +138,7 @@ services:
   api-gateway:
     build: {context: ., args: {MODULE: vts-api-gateway}}
     container_name: vts-api-gateway
+    mem_limit: 512m
     depends_on:
       postgres: {condition: service_healthy}
       kafka: {condition: service_healthy}
@@ -155,6 +156,7 @@ services:
   ingestion-service:
     build: {context: ., args: {MODULE: vts-ingestion-service}}
     container_name: vts-ingestion-service
+    mem_limit: 448m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
     environment: *db-kafka-redis
     ports: ["8081:8081"]
@@ -163,6 +165,7 @@ services:
   processing-service:
     build: {context: ., args: {MODULE: vts-processing-service}}
     container_name: vts-processing-service
+    mem_limit: 512m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
     environment:
       <<: *db-kafka-redis
@@ -173,14 +176,20 @@ services:
   stream-analytics:
     build: {context: ., args: {MODULE: vts-stream-analytics}}
     container_name: vts-stream-analytics
+    mem_limit: 896m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
-    environment: *db-kafka-redis
+    environment:
+      <<: *db-kafka-redis
+      # Fixed heap instead of a percentage: this service also holds RocksDB state
+      # off-heap, so it needs real headroom under mem_limit or it risks an OOM kill.
+      JAVA_OPTS: -Xmx384m -XX:MaxMetaspaceSize=128m
     ports: ["8083:8083"]
     restart: unless-stopped
 
   notification-service:
     build: {context: ., args: {MODULE: vts-notification-service}}
     container_name: vts-notification-service
+    mem_limit: 448m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
     environment: *db-kafka-redis
     ports: ["8084:8084"]
@@ -189,6 +198,7 @@ services:
   scheduler-service:
     build: {context: ., args: {MODULE: vts-scheduler-service}}
     container_name: vts-scheduler-service
+    mem_limit: 448m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
     environment: *db-kafka-redis
     ports: ["8086:8086"]
@@ -197,6 +207,7 @@ services:
   simulator:
     build: {context: ., args: {MODULE: vts-simulator}}
     container_name: vts-simulator
+    mem_limit: 448m
     depends_on: {ingestion-service: {condition: service_started}}
     environment:
       VTS_SIMULATOR_INGESTION_BASE_URL: http://ingestion-service:8081

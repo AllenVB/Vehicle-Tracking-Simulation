@@ -95,6 +95,33 @@ class AnalyticsTopologyTest {
     }
 
     @Test
+    void harshBrakingIsDebouncedWithinCooldownWindow() {
+        // Braking hard again seconds later must NOT produce a second violation;
+        // once the 120s cooldown has passed it fires again.
+        start(emptyRegistry());
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(1)), t.plusSeconds(1)); // fires
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t.plusSeconds(2)), t.plusSeconds(2));
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(3)), t.plusSeconds(3)); // suppressed
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t.plusSeconds(4)), t.plusSeconds(4));
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(5)), t.plusSeconds(5)); // suppressed
+
+        long during = violations().readValuesToList().stream()
+                .filter(v -> v.ruleType() == RuleType.HARSH_BRAKING).count();
+        assertEquals(1, during, "three hard brakes inside the cooldown must yield one violation");
+
+        // Past the 120s window the next hard brake fires again.
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t.plusSeconds(130)), t.plusSeconds(130));
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(131)), t.plusSeconds(131));
+
+        long after = violations().readValuesToList().stream()
+                .filter(v -> v.ruleType() == RuleType.HARSH_BRAKING).count();
+        assertEquals(1, after, "a hard brake after the cooldown fires again");
+    }
+
+    @Test
     void noHarshBrakingOnGentleSlowdown() {
         start(emptyRegistry());
         Instant t = Instant.parse("2026-07-13T10:00:00Z");

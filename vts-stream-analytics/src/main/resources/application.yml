@@ -13,10 +13,14 @@ spring:
     streams:
       application-id: vts-stream-analytics
       properties:
-        # RocksDB-backed state stores hold per-vehicle stateful rule context
+        # RocksDB-backed state stores hold per-vehicle stateful rule context.
+        # Their native memory is bounded by a shared cache (see BoundedRocksDBConfig);
+        # otherwise ~120 RocksDB instances (stores x partitions) each take their own.
         num.stream.threads: 4
         processing.guarantee: at_least_once
         default.deserialization.exception.handler: org.apache.kafka.streams.errors.LogAndContinueExceptionHandler
+        rocksdb.config.setter: com.fleet.vts.analytics.config.BoundedRocksDBConfig
+        statestore.cache.max.bytes: 16777216
 
 server:
   port: 8083
