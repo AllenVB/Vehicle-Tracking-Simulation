@@ -63,6 +63,8 @@
         connectWs();
         refreshDispatch();
         setInterval(refreshDispatch, 3000);   // sevkiyat bilgisi (hafif, yavaş değişir)
+        loadScores();
+        setInterval(loadScores, 60000);       // skorlar günlük hesaplanır, sık çekmeye gerek yok
 
         document.getElementById("plateNo").addEventListener("input", e => {
             const n = parseInt(e.target.value, 10);
@@ -121,6 +123,9 @@
     function connectWs() {
         const stomp = new StompJs.Client({
             webSocketFactory: () => new SockJS("/ws"),
+            // SockJS el sıkışmasına Authorization başlığı konulamaz; token CONNECT
+            // frame'inde gider ve sunucuda doğrulanır.
+            connectHeaders: { Authorization: "Bearer " + token },
             reconnectDelay: 3000
         });
         stomp.onConnect = () => {
@@ -307,6 +312,26 @@
         if (j.destination == null) return "rota bekleniyor…";
         return `→ ${j.destination} · ${j.remainingKm} km`
             + (j.etaMinutes >= 0 ? ` · ~${j.etaMinutes} dk` : "");
+    }
+
+    // ── Sürücü skorları ─────────────────────────────────────────────────────
+    async function loadScores() {
+        try {
+            const res = await fetch("/api/v1/drivers/scores?days=30&limit=5", { headers: auth() });
+            if (!res.ok) return;
+            const el = document.getElementById("scoreList");
+            el.innerHTML = "";
+            (await res.json()).forEach((d, i) => {
+                const s = Number(d.score);
+                const cls = s >= 85 ? "good" : s >= 65 ? "mid" : "bad";
+                const row = document.createElement("div");
+                row.className = "row scoreRow";
+                row.innerHTML = `<span class="rank">${i + 1}</span>` +
+                    `<span class="nm">${d.name}<div class="meta">${d.distanceKm} km · ${d.violationCount} ihlal</div></span>` +
+                    `<span class="sc ${cls}">${s.toFixed(1)}</span>`;
+                el.appendChild(row);
+            });
+        } catch (_) { /* yoksay */ }
     }
 
     // ── İhlaller ────────────────────────────────────────────────────────────

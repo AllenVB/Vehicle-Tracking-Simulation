@@ -214,7 +214,9 @@ services:
     depends_on: {ingestion-service: {condition: service_started}}
     environment:
       VTS_SIMULATOR_INGESTION_BASE_URL: http://ingestion-service:8081
-    ports: ["8085:8085"]
+    # Kontrol API'si iç ağda kalır; UI ona gateway proxy'si üzerinden erişir.
+    # Dışarı açmak, kimliksiz bir "aracı ışınla" ucunu herkese açmak demekti.
+    expose: ["8085"]
     restart: unless-stopped
 
 volumes:

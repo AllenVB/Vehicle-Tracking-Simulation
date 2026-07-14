@@ -73,6 +73,38 @@ public class ReportingController {
                 OffsetDateTime.ofInstant(to, ZoneOffset.UTC));
     }
 
+    /** Driver scoreboard: best drivers over the window, by average daily score. */
+    @GetMapping("/drivers/scores")
+    public List<Map<String, Object>> driverScores(@AuthenticationPrincipal Jwt jwt,
+                                                  @RequestParam(defaultValue = "30") int days,
+                                                  @RequestParam(defaultValue = "20") int limit) {
+        return jdbc.query("""
+                SELECT d.id,
+                       d.first_name || ' ' || d.last_name AS name,
+                       round(avg(s.score), 1)             AS avg_score,
+                       round(sum(s.distance_km), 0)       AS distance_km,
+                       sum(s.violation_count)             AS violation_count,
+                       count(*)                           AS days_scored
+                FROM driver_score_daily s
+                JOIN driver d ON d.id = s.driver_id
+                WHERE s.tenant_id = ? AND s.score_date >= current_date - ?::int
+                GROUP BY d.id, name
+                ORDER BY avg_score DESC NULLS LAST
+                LIMIT ?
+                """,
+                (rs, n) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("driverId", rs.getLong("id"));
+                    m.put("name", rs.getString("name"));
+                    m.put("score", rs.getBigDecimal("avg_score"));
+                    m.put("distanceKm", rs.getBigDecimal("distance_km"));
+                    m.put("violationCount", rs.getLong("violation_count"));
+                    m.put("daysScored", rs.getLong("days_scored"));
+                    return m;
+                },
+                CurrentUser.tenantId(jwt), days, Math.min(Math.max(limit, 1), 100));
+    }
+
     @GetMapping("/vehicles/{id}/trips")
     public List<Map<String, Object>> vehicleTrips(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
                                                   @RequestParam(defaultValue = "20") int limit) {

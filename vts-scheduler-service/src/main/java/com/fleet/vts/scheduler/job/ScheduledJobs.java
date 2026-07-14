@@ -52,29 +52,79 @@ public class ScheduledJobs {
                         + "WHERE status = 'ACTIVE' AND (last_seen_at IS NULL OR last_seen_at < now() - INTERVAL '5 minutes')"));
     }
 
-    /** Daily driver score from yesterday's violations. 00:30 every day. */
+    /**
+     * Driver score for a day, from what the driver actually did: distance driven (trips)
+     * and violations of every kind. Penalties are per 100 km — otherwise the driver who
+     * simply drives more looks like the worst driver, which is the classic way to get a
+     * scoreboard nobody trusts. A driver with almost no distance is not scored harshly.
+     */
+    private static final String SCORE_FOR_DAY = """
+            WITH dist AS (
+                SELECT tenant_id, driver_id, sum(distance_km) AS km
+                FROM trip
+                WHERE driver_id IS NOT NULL
+                  AND started_at >= ?::date AND started_at < (?::date + 1)
+                GROUP BY 1, 2
+            ),
+            viol AS (
+                SELECT tenant_id, driver_id,
+                       count(*)                                              AS total,
+                       count(*) FILTER (WHERE rule_code = 'SPEED_LIMIT')     AS speeding,
+                       count(*) FILTER (WHERE rule_code = 'HARSH_BRAKING')   AS harsh,
+                       count(*) FILTER (WHERE rule_code = 'IDLING')          AS idling
+                FROM violation
+                WHERE driver_id IS NOT NULL
+                  AND occurred_at >= ?::date AND occurred_at < (?::date + 1)
+                GROUP BY 1, 2
+            ),
+            merged AS (
+                SELECT coalesce(v.tenant_id, d.tenant_id) AS tenant_id,
+                       coalesce(v.driver_id, d.driver_id) AS driver_id,
+                       coalesce(d.km, 0)                  AS km,
+                       coalesce(v.total, 0)               AS total,
+                       coalesce(v.speeding, 0)            AS speeding,
+                       coalesce(v.harsh, 0)               AS harsh,
+                       coalesce(v.idling, 0)              AS idling
+                FROM viol v FULL OUTER JOIN dist d
+                  ON v.tenant_id = d.tenant_id AND v.driver_id = d.driver_id
+            )
+            INSERT INTO driver_score_daily
+                (tenant_id, driver_id, score_date, distance_km, harsh_braking_count,
+                 speeding_count, idling_seconds, violation_count, score)
+            SELECT tenant_id, driver_id, ?::date, km, harsh, speeding, idling * 60, total,
+                   greatest(0, least(100,
+                       100 - ((speeding * 3 + harsh * 5 + idling * 2)
+                              / greatest(km, 25)) * 100))
+            FROM merged
+            ON CONFLICT (tenant_id, driver_id, score_date) DO UPDATE SET
+                distance_km         = EXCLUDED.distance_km,
+                harsh_braking_count = EXCLUDED.harsh_braking_count,
+                speeding_count      = EXCLUDED.speeding_count,
+                idling_seconds      = EXCLUDED.idling_seconds,
+                violation_count     = EXCLUDED.violation_count,
+                score               = EXCLUDED.score
+            """;
+
+    /** Yesterday's final score, once the day is closed. 00:30 every day. */
     @Scheduled(cron = "0 30 0 * * *")
     @SchedulerLock(name = "driver-scoring")
     public void computeDriverScores() {
-        runner.run("driver-scoring", () -> jdbc.update("""
-                INSERT INTO driver_score_daily
-                    (tenant_id, driver_id, score_date, violation_count, speeding_count, harsh_braking_count, score)
-                SELECT v.tenant_id, v.driver_id, (now() - INTERVAL '1 day')::date,
-                       count(*),
-                       count(*) FILTER (WHERE v.rule_code = 'SPEED_LIMIT'),
-                       count(*) FILTER (WHERE v.rule_code = 'HARSH_BRAKING'),
-                       greatest(0, 100 - count(*) * 2)
-                FROM violation v
-                WHERE v.driver_id IS NOT NULL
-                  AND v.occurred_at >= (now() - INTERVAL '1 day')::date
-                  AND v.occurred_at <  now()::date
-                GROUP BY v.tenant_id, v.driver_id
-                ON CONFLICT (tenant_id, driver_id, score_date) DO UPDATE SET
-                    violation_count     = EXCLUDED.violation_count,
-                    speeding_count      = EXCLUDED.speeding_count,
-                    harsh_braking_count = EXCLUDED.harsh_braking_count,
-                    score               = EXCLUDED.score
-                """));
+        runner.run("driver-scoring", () -> scoreDay("(now() - INTERVAL '1 day')::date"));
+    }
+
+    /**
+     * Today's score, refreshed continuously. Without this the scoreboard would be frozen
+     * until 00:30 — i.e. it would look broken for the entire time anyone is watching.
+     */
+    @Scheduled(fixedDelay = 120_000)
+    @SchedulerLock(name = "driver-scoring-today", lockAtMostFor = "PT5M")
+    public void computeTodayDriverScores() {
+        runner.run("driver-scoring-today", () -> scoreDay("now()::date"));
+    }
+
+    private int scoreDay(String dayExpr) {
+        String sql = SCORE_FOR_DAY.replace("?::date", dayExpr);
+        return jdbc.update(sql);
     }
 
     /** Count maintenance plans due by odometer or date. 08:00 every day. */

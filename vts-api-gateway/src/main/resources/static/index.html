@@ -34,7 +34,13 @@
         .sect { font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
                 color: var(--muted); padding: 10px 14px 5px; }
         #vehicleList { flex: 1 1 auto; overflow-y: auto; min-height: 60px; }
-        #alertList { flex: 0 0 30%; overflow-y: auto; border-top: 1px solid var(--line); }
+        #scoreList { flex: 0 0 20%; overflow-y: auto; border-top: 1px solid var(--line); }
+        #alertList { flex: 0 0 22%; overflow-y: auto; border-top: 1px solid var(--line); }
+        .scoreRow { display: flex; align-items: center; gap: 8px; }
+        .scoreRow .rank { color: var(--muted); font-size: 10px; width: 14px; }
+        .scoreRow .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .scoreRow .sc { font-weight: 700; font-size: 13px; }
+        .sc.good { color: #5dcaa5; } .sc.mid { color: #f0997b; } .sc.bad { color: var(--alert); }
         .row { padding: 7px 14px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 12px; }
         .row:hover { background: var(--panel-2); }
         .row.sel { background: #24405a; border-left: 3px solid var(--accent); }
@@ -109,6 +115,9 @@
 
     <div class="sect">Araçlar</div>
     <div id="vehicleList"></div>
+
+    <div class="sect">Sürücü skorları <span style="text-transform:none;color:var(--muted)">(30 gün)</span></div>
+    <div id="scoreList"></div>
 
     <div class="sect">Canlı ihlaller</div>
     <div id="alertList"></div>

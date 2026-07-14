@@ -35,6 +35,15 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
     public static final String STORE = "trip-state";
     private static final long STOP_MILLIS = Duration.ofMinutes(5).toMillis();
 
+    /**
+     * Consecutive readings that are further apart than this are a jump, not driving:
+     * a real GPS glitch, an operator teleport, or a restart repositioning the vehicle.
+     * At a 1-second tick even 120 km/h covers ~33 m, so 2 km is far beyond any legitimate
+     * step. Counting jumps as distance inflates trip length — and with it every
+     * km-normalised driver score, which is how a scoreboard quietly becomes nonsense.
+     */
+    private static final double MAX_STEP_KM = 2.0;
+
     private final Serde<TripState> stateSerde;
 
     public TripRule(Serde<TripState> stateSerde) {
@@ -71,8 +80,11 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                         context.forward(new Record<>(record.key(),
                                 ongoing(st, e.vehicleId()), record.timestamp()));
                     } else {
-                        st.setDistanceKm(st.getDistanceKm()
-                                + GeoUtils.haversineKm(st.getLastLat(), st.getLastLon(), e.lat(), e.lon()));
+                        double step = GeoUtils.haversineKm(
+                                st.getLastLat(), st.getLastLon(), e.lat(), e.lon());
+                        if (step <= MAX_STEP_KM) {   // a jump is repositioning, not distance driven
+                            st.setDistanceKm(st.getDistanceKm() + step);
+                        }
                         st.setLastLat(e.lat());
                         st.setLastLon(e.lon());
                         st.setLastMoveTs(ts);
