@@ -91,8 +91,8 @@ public class ViolationController {
                 rs.getLong("id"), rs.getLong("vehicle_id"), (Long) rs.getObject("driver_id"),
                 rs.getString("rule_code"), rs.getString("type"), rs.getString("severity"),
                 rs.getObject("occurred_at", OffsetDateTime.class).toInstant(),
-                (Double) rs.getObject("value"), (Double) rs.getObject("threshold"),
-                (Double) rs.getObject("lat"), (Double) rs.getObject("lon")), args.toArray());
+                toDouble(rs.getObject("value")), toDouble(rs.getObject("threshold")),
+                toDouble(rs.getObject("lat")), toDouble(rs.getObject("lon"))), args.toArray());
 
         String nextCursor = null;
         if (rows.size() > capped) {
@@ -102,6 +102,11 @@ public class ViolationController {
                     (last.occurredAt().toEpochMilli() + ":" + last.id()).getBytes());
         }
         return new Page(rows, nextCursor);
+    }
+
+    /** NUMERIC columns arrive as BigDecimal; normalise to Double (null-safe). */
+    private static Double toDouble(Object value) {
+        return value == null ? null : ((Number) value).doubleValue();
     }
 
     @PostMapping("/{id}/ack")

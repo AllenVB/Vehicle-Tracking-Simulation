@@ -13,5 +13,6 @@ public record RuleView(
         RuleType type,
         Severity severity,
         double threshold,
-        boolean enabled) {
+        boolean enabled,
+        int cooldownSeconds) {
 }

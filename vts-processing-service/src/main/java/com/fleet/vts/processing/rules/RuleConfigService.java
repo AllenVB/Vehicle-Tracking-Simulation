@@ -24,7 +24,7 @@ import java.util.Optional;
 public class RuleConfigService {
 
     private record RuleDef(Long ruleId, String code, RuleType type, Severity severity,
-                           double thresholdDefault, boolean enabled) {
+                           double thresholdDefault, boolean enabled, int cooldownSeconds) {
     }
 
     private final JdbcTemplate jdbc;
@@ -61,7 +61,7 @@ public class RuleConfigService {
                 }
             }
             result.put(def.code(), new RuleView(def.ruleId(), def.code(), def.type(),
-                    def.severity(), threshold, def.enabled()));
+                    def.severity(), threshold, def.enabled(), def.cooldownSeconds()));
         }
         return result;
     }
@@ -75,7 +75,7 @@ public class RuleConfigService {
 
     private Map<String, RuleDef> loadRules(Long tenantId) {
         Map<String, RuleDef> map = new HashMap<>();
-        jdbc.query("SELECT id, code, type, severity, threshold_value, enabled "
+        jdbc.query("SELECT id, code, type, severity, threshold_value, enabled, cooldown_seconds "
                         + "FROM rule WHERE tenant_id = ?",
                 rs -> {
                     Number threshold = (Number) rs.getObject("threshold_value");
@@ -85,7 +85,8 @@ public class RuleConfigService {
                             RuleType.valueOf(rs.getString("type")),
                             Severity.valueOf(rs.getString("severity")),
                             threshold != null ? threshold.doubleValue() : Double.NaN,
-                            rs.getBoolean("enabled")));
+                            rs.getBoolean("enabled"),
+                            rs.getInt("cooldown_seconds")));
                 }, tenantId);
         return map;
     }
