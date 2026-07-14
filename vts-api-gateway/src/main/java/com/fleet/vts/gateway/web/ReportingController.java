@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -70,6 +71,29 @@ public class ReportingController {
                 CurrentUser.tenantId(jwt), id,
                 OffsetDateTime.ofInstant(from, ZoneOffset.UTC),
                 OffsetDateTime.ofInstant(to, ZoneOffset.UTC));
+    }
+
+    @GetMapping("/vehicles/{id}/trips")
+    public List<Map<String, Object>> vehicleTrips(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
+                                                  @RequestParam(defaultValue = "20") int limit) {
+        return jdbc.query("""
+                SELECT id, started_at, ended_at, distance_km, status
+                FROM trip
+                WHERE tenant_id = ? AND vehicle_id = ?
+                ORDER BY started_at DESC
+                LIMIT ?
+                """,
+                (rs, n) -> {
+                    OffsetDateTime ended = rs.getObject("ended_at", OffsetDateTime.class);
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("id", rs.getLong("id"));
+                    m.put("startedAt", rs.getObject("started_at", OffsetDateTime.class).toInstant().toString());
+                    m.put("endedAt", ended == null ? null : ended.toInstant().toString());
+                    m.put("distanceKm", rs.getObject("distance_km"));
+                    m.put("status", rs.getString("status"));
+                    return m;
+                },
+                CurrentUser.tenantId(jwt), id, limit);
     }
 
     @GetMapping("/trips/{id}/route")

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VTS · Canlı Filo Haritası</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        :root {
+            --bg: #0f1720; --panel: #16212e; --panel-2: #1c2b3a; --line: #26384a;
+            --text: #e6edf3; --muted: #8aa0b4; --accent: #1d9e75; --alert: #e24b4a;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+        body { display: flex; background: var(--bg); color: var(--text); }
+
+        /* Sidebar */
+        #sidebar { width: 320px; flex: 0 0 320px; background: var(--panel); border-right: 1px solid var(--line);
+                   display: flex; flex-direction: column; overflow: hidden; }
+        #sidebar header { padding: 16px 18px; border-bottom: 1px solid var(--line); }
+        #sidebar header h1 { font-size: 15px; margin: 0; letter-spacing: .3px; }
+        #sidebar header .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+        .stats { display: flex; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+        .stat { flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; text-align: center; }
+        .stat b { display: block; font-size: 18px; }
+        .stat span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+
+        .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+                         padding: 12px 16px 6px; }
+        #vehicleList, #alertList { overflow-y: auto; }
+        #vehicleList { flex: 1 1 auto; min-height: 80px; }
+        #alertList { flex: 0 0 34%; border-top: 1px solid var(--line); }
+        .row { padding: 9px 16px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px;
+               display: flex; justify-content: space-between; gap: 8px; }
+        .row:hover { background: var(--panel-2); }
+        .row .plate { font-weight: 600; }
+        .row .meta { color: var(--muted); font-size: 11px; }
+        .alertRow { border-left: 3px solid var(--alert); }
+        .alertRow .code { color: #ffb3b3; font-weight: 600; }
+        .sev { font-size: 10px; padding: 1px 6px; border-radius: 10px; background: var(--panel-2); color: var(--muted); }
+
+        /* Map */
+        #map { flex: 1; height: 100%; background: #0b1016; }
+
+        /* Login overlay */
+        #login { position: fixed; inset: 0; background: rgba(9,14,20,.92); display: flex;
+                 align-items: center; justify-content: center; z-index: 2000; }
+        #login .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+                       padding: 28px; width: 320px; }
+        #login h2 { margin: 0 0 4px; font-size: 18px; }
+        #login p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+        #login label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+        #login input { width: 100%; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line);
+                       background: var(--panel-2); color: var(--text); font-size: 14px; }
+        #login button { width: 100%; margin-top: 18px; padding: 10px; border: 0; border-radius: 7px;
+                        background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; cursor: pointer; }
+        #login button:disabled { opacity: .6; cursor: default; }
+        #loginErr { color: var(--alert); font-size: 12px; margin-top: 10px; min-height: 15px; }
+
+        /* Vehicle marker (rotating arrow) */
+        .veh-icon { transition: transform .9s linear; }
+        .veh-arrow { width: 26px; height: 26px; }
+        .veh-arrow.alert { animation: pulse .6s ease-in-out 6 alternate; }
+        @keyframes pulse { to { filter: drop-shadow(0 0 6px var(--alert)); } }
+        .leaflet-popup-content { font-size: 13px; }
+    </style>
+</head>
+<body>
+<aside id="sidebar">
+    <header>
+        <h1>VTS · Canlı Filo Haritası</h1>
+        <div class="sub" id="statusLine">Bağlanılıyor…</div>
+    </header>
+    <div class="stats">
+        <div class="stat"><b id="statTotal">0</b><span>Araç</span></div>
+        <div class="stat"><b id="statLive">0</b><span>Canlı</span></div>
+        <div class="stat"><b id="statAlerts">0</b><span>İhlal</span></div>
+    </div>
+    <div class="section-title">Araçlar <span style="text-transform:none;color:var(--muted)">(rota için tıkla)</span></div>
+    <div id="vehicleList"></div>
+    <div class="section-title">Canlı ihlaller</div>
+    <div id="alertList"></div>
+</aside>
+<div id="map"></div>
+
+<div id="login">
+    <div class="card">
+        <h2>Giriş</h2>
+        <p>Canlı filo haritasına erişmek için giriş yapın.</p>
+        <label>Kullanıcı adı</label>
+        <input id="username" value="admin" autocomplete="username"/>
+        <label>Parola</label>
+        <input id="password" type="password" value="password" autocomplete="current-password"/>
+        <button id="loginBtn">Giriş yap</button>
+        <div id="loginErr"></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

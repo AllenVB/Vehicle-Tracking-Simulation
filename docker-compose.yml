@@ -66,7 +66,9 @@ services:
     image: timescale/timescaledb-ha:pg16
     container_name: vts-postgres
     ports:
-      - "5432:5432"
+      # Host 5433 to avoid clashing with any local Postgres on 5432; services
+      # still reach it in-network as postgres:5432. Host tools: localhost:5433.
+      - "5433:5432"
     environment:
       POSTGRES_DB: vts
       POSTGRES_USER: vts

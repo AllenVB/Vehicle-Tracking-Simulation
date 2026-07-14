@@ -51,6 +51,11 @@ public class LiveMapState {
         return viewports;
     }
 
+    /** Current position of every known vehicle, for a client's initial map load. */
+    public List<Position> snapshot() {
+        return new ArrayList<>(latest.values());
+    }
+
     /** Positions from {@code changed} that fall inside {@code bbox}. */
     public List<Position> withinViewport(List<Position> changed, Bbox bbox) {
         List<Position> result = new ArrayList<>();
