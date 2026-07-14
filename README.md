@@ -143,11 +143,28 @@ Plaka, tipi de taşır: `VTS-001-Otomobil`, `VTS-027-Tır`, `VTS-063-Motor`.
 Her araca açılışta **rastgele 0–120 km/s** taban seyir hızı atanır; sınırı aşan araç
 ihlal üretir (aşağıdaki cooldown'a tabi).
 
-### Gerçek yol takibi (OSRM)
-Açılışta her il için OSRM'den gerçek bir **sürüş rotası** çekilir; araçlar bu yola
-oturmuş polyline üzerinde ilerler — araziden/denizden geçmezler. OSRM'e ulaşılamazsa
-sistem otomatik olarak sentetik döngülere düşer (3 başarısız denemeden sonra vazgeçer),
-yani internet olmadan da ayakta kalır.
+### Yolculuklar: hedef, gerçek yol, kalan km
+Araçlar amaçsız dönmez; **gerçek yolculuk** yapar:
+
+1. Yakın illerden bir **hedef** seçilir.
+2. OSRM'den o hedefe **gerçek sürüş rotası** çekilir (karayolu geometrisi).
+3. Araç rotada ilerler; **kalan km** gerçek yol uzunluğundan hesaplanır (düz çizgi değil).
+4. Varışta **hız 0 → park (5.5–12 dk)** → trip kapanır → yeni hedef.
+
+Bu, sistemin yarısını uyandıran tasarım kararıdır: araç hiç durmazsa **trip hiç kapanmaz**,
+o zaman `trip`, `trip_point`, `stop_event`, sürücü skoru ve bakım verisi *kalıcı olarak boş*
+kalır. Araçlar rotalarında **rastgele bir ilerlemeyle** başlar — yoksa ilk varışlar (ve ilk
+trip'ler) saatler sonra görünürdü.
+
+OSRM'e ulaşılamazsa sistem düz çizgi rotaya düşer: araç yine gider, yine varır, trip yine
+kapanır — sadece yol geometrisi olmaz. İnternet olmadan da ayakta kalır.
+
+### Sürücü skorları
+`driver_score_daily`: 30 günlük geçmiş seed'lenir (sürücü başına kalıcı bir "karakter" biası
+ile — yoksa herkes aynı ortalamayı alır ve sıralama anlamsız olur). Günlük iş ise skoru
+**gerçek veriden** hesaplar: trip mesafesi + tüm ihlal türleri, ceza **100 km başına
+normalize** edilir. Normalize etmezsen çok süren sürücü otomatik olarak "en kötü" görünür —
+skor tablolarının güvenilirliğini yok eden klasik hata.
 
 ---
 
@@ -163,9 +180,11 @@ yani internet olmadan da ayakta kalır.
 
    Ölçülen toplam etki: **~20 ihlal/sn → ~0.2 ihlal/sn**.
 5. **Bellek sınırsız bırakılmaz** — JVM, konteyner limiti yoksa heap tavanını *host* RAM'inden seçer (%25); 8 servis çarpınca RAM zamanla şişer. Servis başına `mem_limit` + `MaxRAMPercentage` ile heap sabitlenir. Ayrıca Kafka Streams'te **5 store × 24 partition ≈ 120 RocksDB örneği** her biri kendi cache'ini açacağı için, hepsi tek ve sınırlı bir LRU cache + write-buffer manager paylaşır (`BoundedRocksDBConfig`). Java servisleri toplamı: **~2.4 GB, sert tavan 3.7 GB**.
-6. **Kafka partition = 24** (profilden bağımsız) — sonradan artırmak per-vehicle ordering'i ve Streams state store'larını bozar.
-7. **Telemetri = TimescaleDB hypertable** — dashboard sorguları ham tabloya değil continuous aggregate'e vurur.
-8. **Her tabloda `tenant_id` + Outbox Pattern** baştan.
+6. **Trip mesafesi ham GPS toplamı değildir** — ardışık okumalar arası 2 km'yi aşan adımlar *konumlandırma* (operatör ışınlaması, yeniden başlatma, GPS sıçraması) sayılır ve mesafeye eklenmez. Eklenirse trip uzunluğu ve onunla birlikte km bazında normalize edilen her sürücü skoru sessizce çöpe döner.
+7. **Kafka partition = 24** (profilden bağımsız) — sonradan artırmak per-vehicle ordering'i ve Streams state store'larını bozar.
+8. **Telemetri = TimescaleDB hypertable** — dashboard sorguları ham tabloya değil continuous aggregate'e vurur.
+9. **Her tabloda `tenant_id` + Outbox Pattern** baştan.
+10. **Canlı akış kimliksiz dinlenemez** — STOMP `CONNECT` frame'inde JWT doğrulanır. SockJS el sıkışmasına `Authorization` başlığı konulamadığı için handshake public kalır; kimlik CONNECT'te kontrol edilir. Aksi halde token'sız herkes tüm filoyu izleyebilir.
 
 ---
 

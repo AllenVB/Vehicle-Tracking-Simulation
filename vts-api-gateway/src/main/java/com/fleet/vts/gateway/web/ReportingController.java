@@ -73,6 +73,29 @@ public class ReportingController {
                 OffsetDateTime.ofInstant(to, ZoneOffset.UTC));
     }
 
+    /**
+     * Active geofences as GeoJSON, so the map can actually show the zones it keeps
+     * raising enter/exit events for. Without this the alerts are unexplainable: you see
+     * "entered a restricted zone" but no zone.
+     */
+    @GetMapping("/geofences")
+    public List<Map<String, Object>> geofences(@AuthenticationPrincipal Jwt jwt) {
+        return jdbc.query("""
+                SELECT id, name, kind, ST_AsGeoJSON(area::geometry) AS geojson
+                FROM geofence
+                WHERE tenant_id = ? AND active = true
+                """,
+                (rs, n) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("id", rs.getLong("id"));
+                    m.put("name", rs.getString("name"));
+                    m.put("kind", rs.getString("kind"));   // EXCLUSION / INCLUSION
+                    m.put("geojson", rs.getString("geojson"));
+                    return m;
+                },
+                CurrentUser.tenantId(jwt));
+    }
+
     /** Driver scoreboard: best drivers over the window, by average daily score. */
     @GetMapping("/drivers/scores")
     public List<Map<String, Object>> driverScores(@AuthenticationPrincipal Jwt jwt,

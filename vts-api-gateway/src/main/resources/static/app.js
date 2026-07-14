@@ -22,6 +22,7 @@
     const manual = new Set();                 // elle sabitlenen vehicleId'ler
     const journey = new Map();                // vehicleId -> {destination, remainingKm, etaMinutes, parked}
     let selected = null;                      // seçili vehicleId
+    let routeLayer = null;                    // seçili aracın son trip rotası
     let alerts = 0, fitted = false;
 
     // ── Giriş ───────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@
         setInterval(refreshDispatch, 3000);   // sevkiyat bilgisi (hafif, yavaş değişir)
         loadScores();
         setInterval(loadScores, 60000);       // skorlar günlük hesaplanır, sık çekmeye gerek yok
+        loadGeofences();
 
         document.getElementById("plateNo").addEventListener("input", e => {
             const n = parseInt(e.target.value, 10);
@@ -218,7 +220,12 @@
 
     // ── Seçim ───────────────────────────────────────────────────────────────
     function select(vehicleId) {
+        const changedSelection = vehicleId !== selected;
         selected = vehicleId;
+        if (changedSelection && vehicleId == null && routeLayer) {
+            live.removeLayer(routeLayer);
+            routeLayer = null;
+        }
         // Seçim varken çift-tık zoom kapalı → çift tık sadece taşır.
         if (selected != null) ctrl.doubleClickZoom.disable();
         else ctrl.doubleClickZoom.enable();
@@ -239,6 +246,7 @@
             btn.disabled = !isManual;
             const p = pos.get(selected);
             if (p) { ctrl.panTo([p.lat, p.lon]); live.panTo([p.lat, p.lon]); }
+            if (changedSelection) showLastTrip(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
             if (row) row.scrollIntoView({ block: "nearest" });
         } else {
@@ -312,6 +320,44 @@
         if (j.destination == null) return "rota bekleniyor…";
         return `→ ${j.destination} · ${j.remainingKm} km`
             + (j.etaMinutes >= 0 ? ` · ~${j.etaMinutes} dk` : "");
+    }
+
+    // ── Geofence bölgeleri ──────────────────────────────────────────────────
+    async function loadGeofences() {
+        try {
+            const res = await fetch("/api/v1/geofences", { headers: auth() });
+            if (!res.ok) return;
+            (await res.json()).forEach(g => {
+                const exclusion = g.kind === "EXCLUSION";
+                L.geoJSON(JSON.parse(g.geojson), {
+                    style: {
+                        color: exclusion ? "#e24b4a" : "#5dcaa5",
+                        weight: 2, fillOpacity: 0.12, dashArray: exclusion ? null : "4"
+                    }
+                }).bindTooltip(`${g.name} (${exclusion ? "yasak" : "izinli"})`).addTo(live);
+            });
+        } catch (_) { /* yoksay */ }
+    }
+
+    // ── Geçmiş rota (son kapanan trip) ──────────────────────────────────────
+    async function showLastTrip(vehicleId) {
+        if (routeLayer) { live.removeLayer(routeLayer); routeLayer = null; }
+        try {
+            const t = await fetch(`/api/v1/vehicles/${vehicleId}/trips?limit=1`, { headers: auth() });
+            if (!t.ok) return;
+            const trips = await t.json();
+            if (!trips.length) { flash("Bu araç için kapanmış trip yok."); return; }
+
+            const r = await fetch(`/api/v1/trips/${trips[0].id}/route`, { headers: auth() });
+            if (!r.ok) return;
+            const pts = (await r.json())
+                .filter(p => p.lat != null && p.lon != null)
+                .map(p => [p.lat, p.lon]);
+            if (pts.length < 2) { flash("Rota noktası yok."); return; }
+            routeLayer = L.polyline(pts, { color: "#378add", weight: 4, opacity: .85 }).addTo(live);
+            live.fitBounds(routeLayer.getBounds().pad(0.2));
+            flash(`Son trip: ${trips[0].distanceKm ?? "?"} km · ${pts.length} nokta`);
+        } catch (_) { /* yoksay */ }
     }
 
     // ── Sürücü skorları ─────────────────────────────────────────────────────
