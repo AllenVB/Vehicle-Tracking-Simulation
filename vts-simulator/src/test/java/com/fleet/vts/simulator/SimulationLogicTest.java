@@ -2,6 +2,7 @@ package com.fleet.vts.simulator;
 
 import com.fleet.vts.simulator.model.BehaviorProfile;
 import com.fleet.vts.simulator.model.GeoPoint;
+import com.fleet.vts.simulator.model.Journey;
 import com.fleet.vts.simulator.model.Route;
 import com.fleet.vts.simulator.model.VehicleState;
 import com.fleet.vts.simulator.sim.GeoUtils;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure logic tests for geo helpers, route movement and anomaly shaping. */
@@ -65,6 +67,41 @@ class SimulationLogicTest {
             dipped = v.battery() < 20;
         }
         assertTrue(dipped, "low-battery vehicle should fall under 20%");
+    }
+
+    @Test
+    void openRouteDistanceIsTheRoadDistanceNotTheRoundTrip() {
+        // A journey route must NOT count a closing segment back to the start, otherwise
+        // "remaining km" is doubled and the vehicle never arrives.
+        List<GeoPoint> line = List.of(new GeoPoint(41.0, 29.0), new GeoPoint(41.0, 29.1));
+        double open = new Route(line, false).totalKm();
+        double closed = new Route(line, true).totalKm();
+        assertEquals(8.4, open, 0.3);
+        assertEquals(2 * open, closed, 0.1);
+    }
+
+    @Test
+    void journeyVehicleArrivesParksThenAsksForANewDestination() {
+        VehicleState v = new VehicleState("000000000000001", BehaviorProfile.NORMAL, 41.0, 29.0, 1L, 90);
+        assertTrue(v.needsJourney(), "a fresh vehicle wants a destination");
+
+        Route road = new Route(List.of(new GeoPoint(41.0, 29.0), new GeoPoint(41.0, 29.1)), false);
+        v.startJourney(new Journey("Testköy", 41.0, 29.1, road), 0.0);
+        assertFalse(v.needsJourney());
+        assertTrue(v.remainingKm() > 8, "remaining km comes from the real route");
+
+        for (int i = 0; i < 5000 && !v.isParked(); i++) {
+            v.tick(1.0);
+        }
+        assertTrue(v.isParked(), "vehicle arrives and parks");
+        assertEquals(0, v.speedKmh(), "parked vehicles report 0 km/h — this is what closes the trip");
+        assertEquals(0.0, v.remainingKm(), 0.01);
+
+        // The dwell must outlast the 5-minute trip-stop window, then a new leg is requested.
+        for (int i = 0; i < 2000 && !v.needsJourney(); i++) {
+            v.tick(1.0);
+        }
+        assertTrue(v.needsJourney(), "asks for a new destination once the dwell is over");
     }
 
     @Test

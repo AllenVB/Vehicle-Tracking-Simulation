@@ -17,6 +17,25 @@ public final class TurkeyProvinces {
     private TurkeyProvinces() {
     }
 
+    /**
+     * A destination for a vehicle standing at (lat, lon): one of the {@code candidates}
+     * nearest provinces, picked at random. Near rather than anywhere, so journeys are
+     * intercity but still finish in a demo-friendly time, and the fleet keeps its
+     * population-weighted spread instead of all drifting to one corner.
+     */
+    public static Province nearbyDestination(double lat, double lon, int candidates,
+                                             java.util.Random rnd) {
+        List<Province> sorted = new java.util.ArrayList<>(ALL);
+        sorted.sort(java.util.Comparator.comparingDouble(p -> sq(p.lat() - lat) + sq(p.lon() - lon)));
+        // index 0 is (essentially) where we already are -> skip it
+        int n = Math.min(candidates, sorted.size() - 1);
+        return sorted.get(1 + rnd.nextInt(Math.max(1, n)));
+    }
+
+    private static double sq(double v) {
+        return v * v;
+    }
+
     public static final List<Province> ALL = List.of(
             new Province("Adana", 37.00, 35.32, 2),
             new Province("Adıyaman", 37.76, 38.28, 1),

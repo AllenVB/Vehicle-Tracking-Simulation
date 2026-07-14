@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.annotation.EnableKafkaStreams;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Enables the Kafka Streams topology and provides a JSR-310-aware ObjectMapper
@@ -14,6 +15,7 @@ import org.springframework.kafka.annotation.EnableKafkaStreams;
  */
 @Configuration
 @EnableKafkaStreams
+@EnableScheduling   // SpeedLimitRegistry re-resolves thresholds periodically
 public class AnalyticsConfig {
 
     @Bean

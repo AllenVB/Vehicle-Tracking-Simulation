@@ -68,7 +68,8 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                 if (moving) {
                     if (st == null || !st.isOpen()) {
                         st = openTrip(e, ts);
-                        context.forward(new Record<>(record.key(), ongoing(st), record.timestamp()));
+                        context.forward(new Record<>(record.key(),
+                                ongoing(st, e.vehicleId()), record.timestamp()));
                     } else {
                         st.setDistanceKm(st.getDistanceKm()
                                 + GeoUtils.haversineKm(st.getLastLat(), st.getLastLon(), e.lat(), e.lon()));
@@ -82,7 +83,8 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                     store.put(record.key(), st);
                 } else if (st != null && st.isOpen()) {
                     if (ts - st.getLastMoveTs() >= STOP_MILLIS) {
-                        context.forward(new Record<>(record.key(), closed(st, ts), record.timestamp()));
+                        context.forward(new Record<>(record.key(),
+                                closed(st, ts, vehicleId(record.key())), record.timestamp()));
                         store.delete(record.key());
                     } else {
                         store.put(record.key(), st);
@@ -102,7 +104,7 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                     }
                 }
                 for (KeyValue<String, TripState> kv : toClose) {
-                    context.forward(new Record<>(kv.key, closed(kv.value, now), now));
+                    context.forward(new Record<>(kv.key, closed(kv.value, now, vehicleId(kv.key)), now));
                     store.delete(kv.key);
                 }
             }
@@ -120,9 +122,19 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                 return st;
             }
 
-            private TripEvent ongoing(TripState st) {
+            /** The stream is keyed by vehicleId; the punctuator has only the key to go on. */
+            private Long vehicleId(String key) {
+                try {
+                    return Long.valueOf(key);
+                } catch (NumberFormatException e) {
+                    return null;
+                }
+            }
+
+            private TripEvent ongoing(TripState st, Long vehicleId) {
                 return TripEvent.builder()
                         .tenantId(st.getTenantId())
+                        .vehicleId(vehicleId)
                         .status(TripStatus.ONGOING)
                         .startedAt(Instant.ofEpochMilli(st.getStartTs()))
                         .startLat(st.getStartLat())
@@ -130,10 +142,11 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                         .build();
             }
 
-            private TripEvent closed(TripState st, long endTs) {
+            private TripEvent closed(TripState st, long endTs, Long vehicleId) {
                 double avg = st.getSampleCount() == 0 ? 0 : st.getSpeedSum() / st.getSampleCount();
                 return TripEvent.builder()
                         .tenantId(st.getTenantId())
+                        .vehicleId(vehicleId)
                         .status(TripStatus.CLOSED)
                         .startedAt(Instant.ofEpochMilli(st.getStartTs()))
                         .endedAt(Instant.ofEpochMilli(endTs))

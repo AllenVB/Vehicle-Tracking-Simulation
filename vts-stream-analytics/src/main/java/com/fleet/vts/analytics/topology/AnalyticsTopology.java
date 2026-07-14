@@ -5,6 +5,7 @@ import com.fleet.vts.analytics.geofence.GeofenceRegistry;
 import com.fleet.vts.analytics.rules.GeofenceRule;
 import com.fleet.vts.analytics.rules.HarshBrakingRule;
 import com.fleet.vts.analytics.rules.IdlingRule;
+import com.fleet.vts.analytics.rules.SpeedLimitRegistry;
 import com.fleet.vts.analytics.rules.TripRule;
 import com.fleet.vts.analytics.state.GeofenceState;
 import com.fleet.vts.analytics.state.SpeedWindowAgg;
@@ -43,11 +44,11 @@ import static com.fleet.vts.analytics.config.Serdes.json;
 @Component
 public class AnalyticsTopology {
 
-    private static final double SPEED_LIMIT = 80.0;
     private static final int MIN_WINDOW_SAMPLES = 5;
     private static final double SUSTAINED_RATIO = 0.8;
 
     private final GeofenceRegistry geofenceRegistry;
+    private final SpeedLimitRegistry speedLimits;
     private final Serde<TelemetryEvent> telemetrySerde;
     private final Serde<ViolationEvent> violationSerde;
     private final Serde<GeofenceEvent> geofenceSerde;
@@ -56,8 +57,10 @@ public class AnalyticsTopology {
     private final Serde<GeofenceState> geofenceStateSerde;
     private final Serde<TripState> tripStateSerde;
 
-    public AnalyticsTopology(GeofenceRegistry geofenceRegistry, ObjectMapper mapper) {
+    public AnalyticsTopology(GeofenceRegistry geofenceRegistry, SpeedLimitRegistry speedLimits,
+                            ObjectMapper mapper) {
         this.geofenceRegistry = geofenceRegistry;
+        this.speedLimits = speedLimits;
         this.telemetrySerde = json(TelemetryEvent.class, mapper);
         this.violationSerde = json(ViolationEvent.class, mapper);
         this.geofenceSerde = json(GeofenceEvent.class, mapper);
@@ -94,7 +97,7 @@ public class AnalyticsTopology {
                 .groupByKey(Grouped.with(Serdes.String(), telemetrySerde))
                 .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(5), Duration.ZERO))
                 .aggregate(SpeedWindowAgg::empty,
-                        (k, e, agg) -> agg.add(e, SPEED_LIMIT),
+                        (k, e, agg) -> agg.add(e, speedLimits.forVehicle(k)),
                         Materialized.<String, SpeedWindowAgg, org.apache.kafka.streams.state.WindowStore<org.apache.kafka.common.utils.Bytes, byte[]>>
                                         as("sustained-speeding-store")
                                 .withKeySerde(Serdes.String())
@@ -109,6 +112,7 @@ public class AnalyticsTopology {
     }
 
     private ViolationEvent sustainedViolation(String vehicleId, SpeedWindowAgg agg, long windowEnd) {
+        double limit = speedLimits.forVehicle(vehicleId);   // per-type: car 110, motorcycle 90, truck 80
         return ViolationEvent.builder()
                 .tenantId(agg.tenantId())
                 .vehicleId(Long.valueOf(vehicleId))
@@ -117,7 +121,7 @@ public class AnalyticsTopology {
                 .severity(Severity.HIGH)
                 .occurredAt(Instant.ofEpochMilli(windowEnd))
                 .value(agg.ratioOver() * 100.0)
-                .threshold(SPEED_LIMIT)
+                .threshold(limit)
                 .lat(agg.lastLat())
                 .lon(agg.lastLon())
                 .build();

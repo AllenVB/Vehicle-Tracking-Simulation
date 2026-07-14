@@ -42,18 +42,30 @@ public class RoadRoutes {
         this.props = props;
     }
 
-    /** A road-following loop near (lat, lon), or {@code null} to use a local loop. */
+    /** A road-following CLOSED loop near (lat, lon), or {@code null} to use a local loop. */
     public Route loopNear(double lat, double lon) {
+        double r = 0.035; // ~3-4 km ring of waypoints around the centre
+        return route(new double[][] {
+                {lat + r, lon}, {lat, lon + r}, {lat - r, lon}, {lat, lon - r}, {lat + r, lon}
+        }, true);
+    }
+
+    /**
+     * The real driving route from A to B as an OPEN route, or {@code null} if routing is
+     * unavailable. Open matters: its {@code totalKm} is the true road distance, which is
+     * what the UI reports as "remaining km".
+     */
+    public Route routeBetween(double fromLat, double fromLon, double toLat, double toLon) {
+        return route(new double[][] { {fromLat, fromLon}, {toLat, toLon} }, false);
+    }
+
+    private Route route(double[][] waypoints, boolean closed) {
         if (!props.isRoadRouting() || failures.get() >= MAX_FAILURES) {
             return null;
         }
         try {
-            double r = 0.035; // ~3-4 km ring of waypoints around the centre
-            double[][] ring = {
-                    {lat + r, lon}, {lat, lon + r}, {lat - r, lon}, {lat, lon - r}, {lat + r, lon}
-            };
             StringBuilder coords = new StringBuilder();
-            for (double[] p : ring) {
+            for (double[] p : waypoints) {
                 if (coords.length() > 0) {
                     coords.append(';');
                 }
@@ -62,7 +74,7 @@ public class RoadRoutes {
             String url = props.getOsrmBaseUrl() + "/route/v1/driving/" + coords
                     + "?overview=full&geometries=geojson&continue_straight=false";
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(5)).GET().build();
+                    .timeout(Duration.ofSeconds(8)).GET().build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() != 200) {
                 return fail("HTTP " + res.statusCode());
@@ -80,7 +92,7 @@ public class RoadRoutes {
                 geo.add(new GeoPoint(c.get(1).asDouble(), c.get(0).asDouble()));
             }
             failures.set(0);
-            return new Route(geo);
+            return new Route(geo, closed);
         } catch (Exception e) {
             return fail(e.getMessage());
         }

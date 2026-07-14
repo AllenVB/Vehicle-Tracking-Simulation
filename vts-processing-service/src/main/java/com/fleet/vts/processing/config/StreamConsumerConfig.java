@@ -3,6 +3,7 @@ package com.fleet.vts.processing.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fleet.vts.common.event.GeofenceEvent;
 import com.fleet.vts.common.event.TripEvent;
+import com.fleet.vts.common.event.ViolationEvent;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
@@ -41,5 +42,12 @@ public class StreamConsumerConfig {
     public ConcurrentKafkaListenerContainerFactory<String, TripEvent> tripListenerFactory(
             KafkaProperties properties, ObjectMapper objectMapper) {
         return factory(properties, objectMapper, TripEvent.class);
+    }
+
+    /** For persisting the violations the stream topology produces (they never hit the DB otherwise). */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, ViolationEvent> streamViolationListenerFactory(
+            KafkaProperties properties, ObjectMapper objectMapper) {
+        return factory(properties, objectMapper, ViolationEvent.class);
     }
 }

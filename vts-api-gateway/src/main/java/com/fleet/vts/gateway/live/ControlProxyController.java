@@ -70,7 +70,11 @@ public class ControlProxyController {
     public record MoveRequest(double lat, double lon) {
     }
 
-    /** Which vehicles the operator currently holds in place, keyed by vehicleId. */
+    /**
+     * Dispatch state per vehicle: where it is heading, how much real road distance is
+     * left, and whether the operator is holding it in place. Keyed by {@code vehicleId},
+     * never by the simulator's index.
+     */
     @GetMapping("/state")
     public List<Map<String, Object>> state() {
         refreshMappingIfStale();
@@ -91,7 +95,10 @@ public class ControlProxyController {
             Map<String, Object> m = new HashMap<>();
             m.put("vehicleId", vehicleId);
             m.put("manual", p.get("manual"));
-            m.put("region", p.get("region"));
+            m.put("destination", p.get("destination"));
+            m.put("remainingKm", p.get("remainingKm"));
+            m.put("etaMinutes", p.get("etaMinutes"));
+            m.put("parked", p.get("parked"));
             out.add(m);
         }
         return out;

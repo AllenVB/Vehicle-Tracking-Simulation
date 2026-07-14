@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fleet.vts.analytics.config.Serdes;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
+import com.fleet.vts.analytics.rules.SpeedLimitRegistry;
 import com.fleet.vts.analytics.topology.AnalyticsTopology;
 import com.fleet.vts.common.enums.GeofenceEventType;
 import com.fleet.vts.common.enums.RuleType;
@@ -29,6 +30,7 @@ import org.locationtech.jts.geom.Polygon;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,7 +49,9 @@ class AnalyticsTopologyTest {
 
     private void start(GeofenceRegistry registry) {
         StreamsBuilder builder = new StreamsBuilder();
-        new AnalyticsTopology(registry, mapper).buildPipeline(builder);
+        // Test aracı 42: tır eşiği (80) — mevcut testlerin davranışı korunur.
+        new AnalyticsTopology(registry, new SpeedLimitRegistry(Map.of(42L, 80.0)), mapper)
+                .buildPipeline(builder);
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, "analytics-test");
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:9092");

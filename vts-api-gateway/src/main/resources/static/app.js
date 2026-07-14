@@ -20,6 +20,7 @@
     const vehicles = new Map();               // vehicleId -> {plate, plateNo, model}
     const byPlateNo = new Map();              // plakaNo -> vehicleId
     const manual = new Set();                 // elle sabitlenen vehicleId'ler
+    const journey = new Map();                // vehicleId -> {destination, remainingKm, etaMinutes, parked}
     let selected = null;                      // seçili vehicleId
     let alerts = 0, fitted = false;
 
@@ -60,8 +61,8 @@
         await loadVehicles();
         await loadSnapshot();
         connectWs();
-        refreshManual();
-        setInterval(refreshManual, 3000);   // sadece "elle kontrol" bayrakları (hafif)
+        refreshDispatch();
+        setInterval(refreshDispatch, 3000);   // sevkiyat bilgisi (hafif, yavaş değişir)
 
         document.getElementById("plateNo").addEventListener("input", e => {
             const n = parseInt(e.target.value, 10);
@@ -99,7 +100,7 @@
             const row = document.createElement("div");
             row.className = "row";
             row.dataset.vid = v.id;
-            row.innerHTML = `<b>${v.plate}</b><div class="meta">${vehicles.get(v.id).model}</div>`;
+            row.innerHTML = `<b>${v.plate}</b><div class="meta" data-model="${vehicles.get(v.id).model}">${vehicles.get(v.id).model}</div>`;
             row.addEventListener("click", () => {
                 document.getElementById("plateNo").value = no;
                 select(v.id);
@@ -205,7 +206,9 @@
 
     function popup(p) {
         const v = vehicles.get(p.vehicleId);
-        return `<b>${v ? v.plate : "#" + p.vehicleId}</b><br>Hız: ${p.speedKmh ?? "-"} km/s`;
+        const j = journey.get(p.vehicleId);
+        return `<b>${v ? v.plate : "#" + p.vehicleId}</b><br>Hız: ${p.speedKmh ?? "-"} km/s`
+            + (j && j.destination ? `<br>${journeyText(j)}` : "");
     }
 
     // ── Seçim ───────────────────────────────────────────────────────────────
@@ -224,8 +227,10 @@
         const v = selected != null ? vehicles.get(selected) : null;
         if (v) {
             const isManual = manual.has(selected);
+            const j = journey.get(selected);
             info.innerHTML = `<b>${v.plate}</b>` +
-                `<span class="pill ${isManual ? "manual" : "auto"}">${isManual ? "ELLE" : "OTOMATİK"}</span>`;
+                `<span class="pill ${isManual ? "manual" : "auto"}">${isManual ? "ELLE" : "OTOMATİK"}</span>` +
+                (j ? `<div class="meta" style="margin-top:4px">${journeyText(j)}</div>` : "");
             btn.disabled = !isManual;
             const p = pos.get(selected);
             if (p) { ctrl.panTo([p.lat, p.lon]); live.panTo([p.lat, p.lon]); }
@@ -265,22 +270,43 @@
         flash("Araç otomatiğe döndü.");
     }
 
-    // Sadece "elle kontrol" bayrakları — konumlar WebSocket'ten geliyor.
-    async function refreshManual() {
+    // Sevkiyat durumu: hedef, kalan km, ETA, park/elle bayrakları.
+    // Konumlar buradan GELMEZ — onlar WebSocket'ten push edilir; bu sadece yavaş
+    // değişen sevkiyat bilgisi olduğu için 3 sn'de bir çekilir.
+    async function refreshDispatch() {
         if (!token) return;
         try {
             const res = await fetch("/api/v1/control/state", { headers: auth() });
             if (!res.ok) return;
-            const before = new Set(manual);
             manual.clear();
-            (await res.json()).forEach(s => { if (s.manual) manual.add(s.vehicleId); });
-            let changed = before.size !== manual.size;
-            if (!changed) for (const id of manual) if (!before.has(id)) { changed = true; break; }
-            if (changed) {
-                ctrlMarkers.forEach((m, id) => m.setIcon(numIcon(id)));
-                if (selected != null) select(selected);
-            }
+            (await res.json()).forEach(s => {
+                if (s.manual) manual.add(s.vehicleId);
+                journey.set(s.vehicleId, {
+                    destination: s.destination, remainingKm: s.remainingKm,
+                    etaMinutes: s.etaMinutes, parked: s.parked
+                });
+            });
+            ctrlMarkers.forEach((m, id) => m.setIcon(numIcon(id)));
+            renderJourneyMeta();
+            if (selected != null) select(selected);
         } catch (_) { /* yoksay */ }
+    }
+
+    // Araç listesindeki "hedef · kalan km" satırını tazele.
+    function renderJourneyMeta() {
+        document.querySelectorAll("#vehicleList .row").forEach(row => {
+            const j = journey.get(Number(row.dataset.vid));
+            const meta = row.querySelector(".meta");
+            if (meta) meta.textContent = journeyText(j) || meta.dataset.model || "";
+        });
+    }
+
+    function journeyText(j) {
+        if (!j) return "";
+        if (j.parked) return "🅿 varışta · park";
+        if (j.destination == null) return "rota bekleniyor…";
+        return `→ ${j.destination} · ${j.remainingKm} km`
+            + (j.etaMinutes >= 0 ? ` · ~${j.etaMinutes} dk` : "");
     }
 
     // ── İhlaller ────────────────────────────────────────────────────────────
