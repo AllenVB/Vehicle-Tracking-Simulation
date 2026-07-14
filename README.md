@@ -13,34 +13,32 @@ TimescaleDB + PostGIS · Redis · Leaflet · çok modüllü Maven monorepo.**
 
 ---
 
-## Ekran görüntüleri
+## Ekran görüntüsü
 
-### Canlı Filo Haritası — `:8080`
-Gerçek OpenStreetMap üzerinde 100 aracın canlı takibi. Araçlar **gerçek yollarda**
-ilerler (OSRM rotaları), yönlerine göre döner; ihlaller anlık olarak sağ panele düşer
-ve ilgili araç kırmızıya boyanır.
+Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita · 5 operatör haritası**.
 
-![Canlı Filo Haritası](docs/screenshots/canli-harita.png)
+![VTS tek sayfa](docs/screenshots/vts-tek-sayfa.png)
 
-### Operatör Konsolu — `:8085`
-Ayrı sunucuda (simülatör servisi), **farklı harita** (CartoDB) ile çalışan kontrol
-paneli. Araç numarası girip haritaya **çift tıklayarak** aracı taşıyabilirsiniz —
-değişiklik gerçek telemetri hattından geçip **1 sn içinde ana haritaya yansır**.
+- **Sol (2/12) — Filo barı:** araç listesi (plakalar), canlı ihlaller, seçim ve kontrol kutusu.
+- **Orta (5/12) — Canlı harita** (OpenStreetMap): 100 araç **gerçek yollarda** (OSRM rotaları),
+  yönlerine göre dönen oklar; ihlalde araç kırmızıya boyanır.
+- **Sağ (5/12) — Operatör haritası** (CartoDB): aracı seç, yeni konuma **çift tıkla**.
+  Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
 
-![Operatör Konsolu](docs/screenshots/operator-konsolu.png)
+Her iki harita **tek bir WebSocket aboneliğinden** beslenir — polling yok.
 
 ---
 
 ## Mimari
 
-Veri, soldan sağa tek yönlü akar. **Operatör konsolu** ise geri besleme döngüsünü
-kapatır: simülatördeki konumu değiştirir, o da normal hattan tekrar haritaya ulaşır.
+Veri tek yönlü akar. **Operatör haritası** geri besleme döngüsünü kapatır: gateway
+üzerinden simülatördeki konumu ezer, o konum da normal hattan geçip haritaya döner.
+UI'ın tamamı tek serviste (gateway) barınır — ikinci bir frontend servisi yoktur.
 
 ```mermaid
 flowchart TB
     subgraph KAYNAK["1 - Kaynak"]
-        SIM["vts-simulator :8085<br/>100 araç · 81 il<br/>OSRM gerçek yol rotaları<br/>Virtual Threads"]
-        CON["Operatör Konsolu<br/>simülatörde barınır<br/>CartoDB harita · konum override"]
+        SIM["vts-simulator :8085<br/>100 araç · 81 il<br/>OSRM gerçek yol rotaları<br/>Virtual Threads<br/>(konumların TEK kaynağı)"]
     end
 
     subgraph GIRIS["2 - Giriş"]
@@ -62,12 +60,13 @@ flowchart TB
     NOT["vts-notification :8084<br/>Strategy sender · quiet hours"]
     SCH["vts-scheduler :8086<br/>ShedLock · outbox publisher"]
 
-    subgraph SUNUM["5 - Sunum"]
-        GW["vts-api-gateway :8080<br/>JWT · REST · STOMP WebSocket<br/>1 sn delta · viewport filtresi"]
-        MAP["Canlı Harita<br/>Leaflet + OpenStreetMap"]
+    subgraph SUNUM["5 - Sunum (tek sayfa, tek origin)"]
+        GW["vts-api-gateway :8080<br/>JWT · REST · STOMP WebSocket<br/>1 sn delta · viewport filtresi<br/>operatör kontrolünü simülatöre proxy'ler"]
+        UI["Tek sayfa UI<br/>2 filo barı · 5 canlı harita · 5 operatör haritası<br/>Leaflet (OSM + CartoDB)"]
     end
 
-    CON -.->|"araç konumunu ez"| SIM
+    UI -.->|"araç konumunu ez<br/>(vehicleId)"| GW
+    GW -.->|"proxy: /api/control<br/>(imei index'e çevirir)"| SIM
     SIM -->|"POST /telemetry/batch"| ING
     ING -->|"vehicle.telemetry.raw"| K
     K --> PROC
@@ -82,18 +81,27 @@ flowchart TB
     GW <--> TS
     SCH --> TS
     SCH --> K
-    GW -->|"STOMP /topic/fleet/live"| MAP
+    GW -->|"STOMP /topic/fleet/live<br/>(tek abonelik, iki harita)"| UI
 ```
 
 ### Kritik akış: operatörden haritaya
-Simülatör, filonun **tek konum kaynağıdır**. Bu yüzden konsoldan yapılan bir taşıma
-sahte bir "harita hilesi" değil, gerçek boru hattından geçen gerçek bir telemetridir:
+Simülatör, filonun **tek konum kaynağıdır**. Bu yüzden operatör haritasından yapılan
+bir taşıma sahte bir "harita hilesi" değil, gerçek boru hattından geçen gerçek bir
+telemetridir — ve override anında yayınlanır (bir sonraki tick beklenmez):
 
 ```
-Operatör çift tık  →  Simülatör (manuel override)  →  Ingestion  →  Kafka
-                                                                      ↓
-                    Ana Harita  ←  STOMP (1 sn)  ←  Gateway  ←  Processing
+Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında yayın)
+                                                        ↓
+                                                    Ingestion → Kafka
+                                                        ↓
+      Sol harita  ←  STOMP delta  ←  Gateway  ←  Processing        ~0.1 sn
 ```
+
+> **Kimlik tuzağı:** `vehicle.id` ile plaka numarası **aynı değildir** — araçlar, tipleri
+> serpiştirmek için hash sırasıyla seed edilir, identity id'leri plaka numarasına oturmaz.
+> Bu yüzden UI her yerde `vehicleId` konuşur; simülatörün cihaz index'ine çeviriyi gateway
+> **imei (doğal anahtar)** üzerinden yapar. Aksi halde operatör "7"yi taşıdığında haritada
+> bambaşka bir araç hareket eder.
 
 ---
 
@@ -102,12 +110,12 @@ Operatör çift tık  →  Simülatör (manuel override)  →  Ingestion  →  K
 | Modül | Port | Sorumluluk |
 |---|---|---|
 | `vts-common` | — | Event modelleri, topic sabitleri, enum'lar, TenantContext |
-| `vts-simulator` | 8085 | Filo simülatörü (Virtual Threads), OSRM yol rotaları **+ Operatör Konsolu UI** |
+| `vts-simulator` | 8085 | Filo simülatörü (Virtual Threads), OSRM yol rotaları, konum override API'si (UI sunmaz) |
 | `vts-ingestion-service` | 8081 | Stateless HTTP giriş; imei→vehicle lookup (Caffeine→Redis→DB), Kafka publish, DLQ |
 | `vts-processing-service` | 8082 | Batch consumer; JDBC batch insert, durumsuz kurallar **+ ihlal cooldown**, outbox |
 | `vts-stream-analytics` | 8083 | Kafka Streams; durumlu kurallar (sert fren, sürekli hız, rölanti, geofence, trip) |
 | `vts-notification-service` | 8084 | Strategy sender'lar, cooldown (Redis), quiet hours |
-| `vts-api-gateway` | 8080 | JWT güvenlik, REST, STOMP WebSocket, şema sahibi (Flyway) **+ Canlı Harita UI** |
+| `vts-api-gateway` | 8080 | JWT güvenlik, REST, STOMP WebSocket, şema sahibi (Flyway) **+ tek sayfa UI (iki harita)** + operatör kontrol proxy'si |
 | `vts-scheduler-service` | 8086 | ShedLock jobs: offline tespiti, skorlama, bakım, outbox publisher |
 
 ---
@@ -185,8 +193,7 @@ Ardından tarayıcıdan:
 
 | Arayüz | Adres | Giriş |
 |---|---|---|
-| **Canlı Filo Haritası** | http://localhost:8080 | `admin` / `password` |
-| **Operatör Konsolu** | http://localhost:8085 | — |
+| **VTS — tek sayfa (filo barı + iki harita)** | http://localhost:8080 | `admin` / `password` |
 | Swagger UI | http://localhost:8080/swagger-ui.html | JWT |
 | Kafka UI | http://localhost:8090 | — |
 | Prometheus | http://localhost:9090 | — |
@@ -222,14 +229,22 @@ Canlı harita WebSocket (STOMP): `ws://localhost:8080/ws` →
 `/topic/fleet/live`, `/topic/violations`, `/user/queue/notifications`;
 viewport için `/app/viewport`.
 
-### Operatör konsolu API (simülatör, :8085)
+### Operatör kontrol API (gateway proxy — `vehicleId` ile)
 
 ```bash
-curl localhost:8085/api/positions                       # tüm araçların anlık konumu
-curl -X POST localhost:8085/api/control/34/position \
-  -H 'Content-Type: application/json' -d '{"lat":39.92,"lon":32.85}'   # aracı taşı
-curl -X DELETE localhost:8085/api/control/34/position   # otomatiğe döndür
+# elle kontrol edilen araçların bayrakları
+curl localhost:8080/api/v1/control/state -H "Authorization: Bearer $TOKEN"
+
+# aracı taşı (vehicleId ile — plaka numarası DEĞİL)
+curl -X POST localhost:8080/api/v1/control/49/position -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"lat":39.92,"lon":32.85}'
+
+# otomatiğe döndür
+curl -X DELETE localhost:8080/api/v1/control/49/position -H "Authorization: Bearer $TOKEN"
 ```
+
+Gateway, `vehicleId`'yi imei üzerinden simülatörün cihaz index'ine çevirir; simülatörün
+`:8085/api/**` ucu iç ağda kalır, UI hiç oraya gitmez.
 
 ---
 

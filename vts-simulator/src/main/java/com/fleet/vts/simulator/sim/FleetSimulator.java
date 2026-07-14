@@ -173,6 +173,12 @@ public class FleetSimulator {
             return false;
         }
         v.setManual(lat, lon);
+        // Publish straight away instead of waiting for the next tick: otherwise the
+        // move takes up to a full tick to even enter the pipeline, which is most of
+        // the latency an operator perceives on the live map.
+        v.tick(0);
+        ingestionClient.sendBatch(List.of(toPayload(v)));
+        sent.increment();
         return true;
     }
 

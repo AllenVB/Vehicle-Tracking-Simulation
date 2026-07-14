@@ -143,13 +143,16 @@ services:
       postgres: {condition: service_healthy}
       kafka: {condition: service_healthy}
       redis: {condition: service_healthy}
-    environment: &db-kafka-redis
-      DB_URL: jdbc:postgresql://postgres:5432/vts
-      DB_USER: vts
-      DB_PASSWORD: vts
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
+    environment:
+      <<: &db-kafka-redis
+        DB_URL: jdbc:postgresql://postgres:5432/vts
+        DB_USER: vts
+        DB_PASSWORD: vts
+        KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+        REDIS_HOST: redis
+        REDIS_PORT: "6379"
+      # The gateway serves the whole UI and proxies operator control to the simulator.
+      SIMULATOR_BASE_URL: http://simulator:8085
     ports: ["8080:8080"]
     restart: unless-stopped
 

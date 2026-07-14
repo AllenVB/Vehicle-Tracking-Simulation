@@ -1,43 +1,46 @@
 /*
- * VTS canlı filo haritası istemcisi.
+ * VTS — tek sayfa, iki harita (2/5/5 grid), tek servis (gateway).
  *
- *  - REST /api/v1/auth/login  -> JWT (araç listesi ve rota çağrıları için).
- *  - REST /api/v1/live/positions -> harita açılışında ilk anlık görüntü.
- *  - STOMP /topic/fleet/live  -> saniyede 1 delta; sadece değişen araçlar.
- *  - STOMP /topic/violations  -> canlı ihlal akışı.
- *  - STOMP /app/viewport      -> haritanın görünen sınırlarını (bbox) gateway'e bildir.
+ *  - Sol harita  : canlı filo (OpenStreetMap)
+ *  - Sağ harita  : operatör (CartoDB) — araç seç, çift tıkla taşı
+ *  - TEK WebSocket (/topic/fleet/live) her iki haritayı da besler; eski konsolun
+ *    1.5 sn'lik polling'i kalktı, konumlar push ile gelir.
+ *  - Kontrol çağrıları gateway'in /api/v1/control/** proxy'sine gider; gateway
+ *    vehicleId -> simülatör index çevirisini imei üzerinden yapar (plaka numarası
+ *    ile veritabanı id'si AYNI DEĞİLDİR).
  */
 (function () {
     "use strict";
 
-    const API = "";                 // aynı origin (gateway 8080)
     let token = null;
-    let map = null;
-    let stomp = null;
-    const markers = new Map();      // vehicleId -> L.marker
-    const vehicles = new Map();     // vehicleId -> plate
-    let routeLayer = null;          // seçili aracın geçmiş rotası
-    let alertCount = 0;
-    let fittedOnce = false;
+    let live = null, ctrl = null;             // iki Leaflet haritası
+    const liveMarkers = new Map();            // vehicleId -> marker (sol)
+    const ctrlMarkers = new Map();            // vehicleId -> marker (sağ)
+    const pos = new Map();                    // vehicleId -> {lat,lon,speedKmh,heading}
+    const vehicles = new Map();               // vehicleId -> {plate, plateNo, model}
+    const byPlateNo = new Map();              // plakaNo -> vehicleId
+    const manual = new Set();                 // elle sabitlenen vehicleId'ler
+    let selected = null;                      // seçili vehicleId
+    let alerts = 0, fitted = false;
 
-    // ---- Giriş -------------------------------------------------------------
+    // ── Giriş ───────────────────────────────────────────────────────────────
     const loginBtn = document.getElementById("loginBtn");
     loginBtn.addEventListener("click", doLogin);
-    document.getElementById("password").addEventListener("keydown", e => {
-        if (e.key === "Enter") doLogin();
-    });
+    document.getElementById("password").addEventListener("keydown",
+        e => { if (e.key === "Enter") doLogin(); });
 
     async function doLogin() {
-        const username = document.getElementById("username").value.trim();
-        const password = document.getElementById("password").value;
         const err = document.getElementById("loginErr");
         err.textContent = "";
         loginBtn.disabled = true;
         try {
-            const res = await fetch(API + "/api/v1/auth/login", {
+            const res = await fetch("/api/v1/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({
+                    username: document.getElementById("username").value.trim(),
+                    password: document.getElementById("password").value
+                })
             });
             if (!res.ok) throw new Error("Kullanıcı adı veya parola hatalı.");
             token = (await res.json()).token;
@@ -49,197 +52,273 @@
         }
     }
 
-    function authHeaders() {
-        return { "Authorization": "Bearer " + token };
-    }
+    const auth = () => ({ "Authorization": "Bearer " + token });
 
-    // ---- Başlat ------------------------------------------------------------
-    function start() {
-        initMap();
-        loadVehicles();
-        loadSnapshot();
+    // ── Başlat ──────────────────────────────────────────────────────────────
+    async function start() {
+        initMaps();
+        await loadVehicles();
+        await loadSnapshot();
         connectWs();
+        refreshManual();
+        setInterval(refreshManual, 3000);   // sadece "elle kontrol" bayrakları (hafif)
+
+        document.getElementById("plateNo").addEventListener("input", e => {
+            const n = parseInt(e.target.value, 10);
+            select(byPlateNo.get(n) ?? null);
+        });
+        document.getElementById("releaseBtn").addEventListener("click", release);
     }
 
-    function initMap() {
-        map = L.map("map", { zoomControl: true, attributionControl: false }).setView([39.0, 35.0], 6); // Türkiye geneli
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19
-        }).addTo(map);
-        map.on("moveend", sendViewport);
+    function initMaps() {
+        live = L.map("mapLive", { zoomControl: true, attributionControl: false })
+            .setView([39.0, 35.0], 6);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(live);
+
+        ctrl = L.map("mapCtrl", { zoomControl: true, attributionControl: false })
+            .setView([39.0, 35.0], 6);
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            { maxZoom: 19, subdomains: "abcd" }).addTo(ctrl);
+
+        // Araç seçiliyken çift tık SADECE taşır (zoom kapalı); seçim yokken yakınlaştırır.
+        ctrl.on("dblclick", onCtrlDblClick);
     }
 
-    // ---- Araç listesi (kenar panel) ---------------------------------------
+    // ── Araç listesi ────────────────────────────────────────────────────────
     async function loadVehicles() {
-        try {
-            const res = await fetch(API + "/api/v1/vehicles", { headers: authHeaders() });
-            if (!res.ok) return;
-            const list = await res.json();
-            const el = document.getElementById("vehicleList");
-            el.innerHTML = "";
-            list.forEach(v => {
-                vehicles.set(v.id, v.plate);
-                const row = document.createElement("div");
-                row.className = "row";
-                row.innerHTML = `<span class="plate">${v.plate || ("#" + v.id)}</span>` +
-                    `<span class="meta">${[v.make, v.model].filter(Boolean).join(" ")}</span>`;
-                row.addEventListener("click", () => selectVehicle(v.id));
-                el.appendChild(row);
+        const res = await fetch("/api/v1/vehicles", { headers: auth() });
+        if (!res.ok) return;
+        const list = await res.json();
+        const el = document.getElementById("vehicleList");
+        el.innerHTML = "";
+        list.sort((a, b) => plateNo(a.plate) - plateNo(b.plate));
+        list.forEach(v => {
+            const no = plateNo(v.plate);
+            vehicles.set(v.id, { plate: v.plate, plateNo: no, model: [v.make, v.model].filter(Boolean).join(" ") });
+            byPlateNo.set(no, v.id);
+            const row = document.createElement("div");
+            row.className = "row";
+            row.dataset.vid = v.id;
+            row.innerHTML = `<b>${v.plate}</b><div class="meta">${vehicles.get(v.id).model}</div>`;
+            row.addEventListener("click", () => {
+                document.getElementById("plateNo").value = no;
+                select(v.id);
             });
-            document.getElementById("statTotal").textContent = list.length;
-        } catch (_) { /* yoksay */ }
+            el.appendChild(row);
+        });
+        document.getElementById("statTotal").textContent = list.length;
     }
 
-    // ---- İlk anlık görüntü -------------------------------------------------
+    const plateNo = p => { const m = /VTS-(\d+)/.exec(p || ""); return m ? parseInt(m[1], 10) : 0; };
+
+    // ── Konumlar ────────────────────────────────────────────────────────────
     async function loadSnapshot() {
-        try {
-            const res = await fetch(API + "/api/v1/live/positions", { headers: authHeaders() });
-            if (!res.ok) return;
-            applyPositions(await res.json());
-        } catch (_) { /* yoksay */ }
+        const res = await fetch("/api/v1/live/positions", { headers: auth() });
+        if (res.ok) apply(await res.json());
     }
 
-    // ---- WebSocket ---------------------------------------------------------
     function connectWs() {
-        stomp = new StompJs.Client({
-            webSocketFactory: () => new SockJS(API + "/ws"),
+        const stomp = new StompJs.Client({
+            webSocketFactory: () => new SockJS("/ws"),
             reconnectDelay: 3000
         });
         stomp.onConnect = () => {
             setStatus("Bağlı · canlı", true);
-            stomp.subscribe("/topic/fleet/live", msg => {
-                const body = JSON.parse(msg.body);
-                applyPositions(body.vehicles || []);
-            });
-            stomp.subscribe("/topic/violations", msg => onViolation(JSON.parse(msg.body)));
-            sendViewport();
+            // Tek abonelik, iki harita: aynı delta akışı ikisini de besler.
+            stomp.subscribe("/topic/fleet/live", m => apply(JSON.parse(m.body).vehicles || []));
+            stomp.subscribe("/topic/violations", m => onViolation(JSON.parse(m.body)));
         };
         stomp.onWebSocketClose = () => setStatus("Bağlantı koptu · yeniden deneniyor…", false);
         stomp.activate();
     }
 
-    function sendViewport() {
-        if (!stomp || !stomp.connected || !map) return;
-        const b = map.getBounds();
-        stomp.publish({
-            destination: "/app/viewport",
-            body: JSON.stringify({
-                minLat: b.getSouth(), minLon: b.getWest(),
-                maxLat: b.getNorth(), maxLon: b.getEast()
-            })
-        });
-    }
-
-    // ---- Konum güncelleme --------------------------------------------------
-    function applyPositions(positions) {
-        positions.forEach(p => {
+    function apply(list) {
+        list.forEach(p => {
             if (p.lat == null || p.lon == null) return;
-            const heading = p.heading || 0;
-            let m = markers.get(p.vehicleId);
-            if (!m) {
-                m = L.marker([p.lat, p.lon], { icon: arrowIcon(heading) }).addTo(map);
-                m.bindPopup(popupHtml(p));
-                markers.set(p.vehicleId, m);
-            } else {
-                m.setLatLng([p.lat, p.lon]);
-                m.setIcon(arrowIcon(heading));
-                m.setPopupContent(popupHtml(p));
-            }
-            m._pos = p;
+            pos.set(p.vehicleId, p);
+            drawLive(p);
+            drawCtrl(p);
         });
-        document.getElementById("statLive").textContent = markers.size;
-        if (!fittedOnce && markers.size > 0) {
-            fittedOnce = true;
-            fitToMarkers();
+        document.getElementById("statLive").textContent = pos.size;
+        if (!fitted && pos.size > 0) {
+            fitted = true;
+            const pts = [...pos.values()].map(p => [p.lat, p.lon]);
+            const b = L.latLngBounds(pts).pad(0.15);
+            live.fitBounds(b);
+            ctrl.fitBounds(b);
         }
     }
 
-    function fitToMarkers() {
-        const pts = [...markers.values()].map(m => m.getLatLng());
-        if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.2));
-    }
-
-    function arrowIcon(heading, alert) {
-        const cls = "veh-arrow" + (alert ? " alert" : "");
-        const html =
-            `<div class="veh-icon" style="transform:rotate(${heading}deg)">` +
-            `<svg class="${cls}" viewBox="0 0 24 24">` +
-            `<path d="M12 2 L19 21 L12 17 L5 21 Z" fill="${alert ? '#e24b4a' : '#1d9e75'}" ` +
-            `stroke="#0b1016" stroke-width="1"/></svg></div>`;
-        return L.divIcon({ html, className: "", iconSize: [26, 26], iconAnchor: [13, 13] });
-    }
-
-    function popupHtml(p) {
-        const plate = vehicles.get(p.vehicleId) || ("#" + p.vehicleId);
-        return `<b>${plate}</b><br>Hız: ${p.speedKmh ?? "-"} km/s<br>Yön: ${p.heading ?? "-"}°`;
-    }
-
-    // ---- İhlaller ----------------------------------------------------------
-    function onViolation(v) {
-        alertCount++;
-        document.getElementById("statAlerts").textContent = alertCount;
-
-        // İlgili marker'ı kısa süre kırmızıya boya.
-        const m = markers.get(v.vehicleId);
-        if (m && m._pos) {
-            m.setIcon(arrowIcon(m._pos.heading || 0, true));
-            setTimeout(() => m.setIcon(arrowIcon(m._pos.heading || 0, false)), 4000);
+    // Sol harita: yöne dönen ok
+    function drawLive(p) {
+        let m = liveMarkers.get(p.vehicleId);
+        const icon = arrowIcon(p.heading || 0, false);
+        if (!m) {
+            m = L.marker([p.lat, p.lon], { icon }).addTo(live);
+            m.on("click", () => select(p.vehicleId));
+            liveMarkers.set(p.vehicleId, m);
+        } else {
+            m.setLatLng([p.lat, p.lon]);
+            if (!m._alerting) m.setIcon(icon);
         }
-        // Konumda sönümlenen bir uyarı halkası.
-        if (v.lat != null && v.lon != null) {
-            const ring = L.circle([v.lat, v.lon], { radius: 220, color: "#e24b4a", weight: 2, fillOpacity: .15 }).addTo(map);
-            setTimeout(() => map.removeLayer(ring), 8000);
+        m.bindPopup(popup(p));
+    }
+
+    // Sağ harita: numaralı daire (plaka no)
+    function drawCtrl(p) {
+        let m = ctrlMarkers.get(p.vehicleId);
+        const icon = numIcon(p.vehicleId);
+        if (!m) {
+            m = L.marker([p.lat, p.lon], { icon }).addTo(ctrl);
+            m.on("click", () => {
+                const v = vehicles.get(p.vehicleId);
+                if (v) document.getElementById("plateNo").value = v.plateNo;
+                select(p.vehicleId);
+            });
+            ctrlMarkers.set(p.vehicleId, m);
+        } else {
+            m.setLatLng([p.lat, p.lon]);
+            m.setIcon(icon);
         }
-        // Kenar panele ekle.
-        const el = document.getElementById("alertList");
-        const plate = vehicles.get(v.vehicleId) || ("#" + v.vehicleId);
-        const row = document.createElement("div");
-        row.className = "row alertRow";
-        const time = v.occurredAt ? new Date(v.occurredAt).toLocaleTimeString("tr-TR") : "";
-        row.innerHTML = `<span><span class="code">${v.ruleCode || "İHLAL"}</span>` +
-            `<div class="meta">${plate} · ${time}</div></span>` +
-            `<span class="sev">${v.severity || ""}</span>`;
-        row.addEventListener("click", () => {
-            if (v.lat != null && v.lon != null) map.setView([v.lat, v.lon], 14);
+    }
+
+    function arrowIcon(heading, alerting) {
+        const color = alerting ? "#e24b4a" : "#1d9e75";
+        return L.divIcon({
+            html: `<div class="veh-icon" style="transform:rotate(${heading}deg)">
+                     <svg class="veh-arrow${alerting ? " alert" : ""}" width="24" height="24" viewBox="0 0 24 24">
+                       <path d="M12 2 L19 21 L12 17 L5 21 Z" fill="${color}" stroke="#0b1016" stroke-width="1"/>
+                     </svg></div>`,
+            className: "", iconSize: [24, 24], iconAnchor: [12, 12]
         });
-        el.prepend(row);
-        while (el.children.length > 50) el.removeChild(el.lastChild);
     }
 
-    // ---- Araç seçimi + geçmiş rota ----------------------------------------
-    async function selectVehicle(vehicleId) {
-        const m = markers.get(vehicleId);
-        if (m) map.setView(m.getLatLng(), Math.max(map.getZoom(), 13));
+    function numIcon(vehicleId) {
+        const v = vehicles.get(vehicleId);
+        const cls = "veh-num " + (manual.has(vehicleId) ? "manual" : "auto")
+            + (vehicleId === selected ? " selected" : "");
+        return L.divIcon({
+            html: `<div class="${cls}">${v ? v.plateNo : "?"}</div>`,
+            className: "", iconSize: [22, 22], iconAnchor: [11, 11]
+        });
+    }
 
+    function popup(p) {
+        const v = vehicles.get(p.vehicleId);
+        return `<b>${v ? v.plate : "#" + p.vehicleId}</b><br>Hız: ${p.speedKmh ?? "-"} km/s`;
+    }
+
+    // ── Seçim ───────────────────────────────────────────────────────────────
+    function select(vehicleId) {
+        selected = vehicleId;
+        // Seçim varken çift-tık zoom kapalı → çift tık sadece taşır.
+        if (selected != null) ctrl.doubleClickZoom.disable();
+        else ctrl.doubleClickZoom.enable();
+
+        document.querySelectorAll("#vehicleList .row").forEach(r =>
+            r.classList.toggle("sel", Number(r.dataset.vid) === selected));
+        ctrlMarkers.forEach((m, id) => m.setIcon(numIcon(id)));
+
+        const info = document.getElementById("selInfo");
+        const btn = document.getElementById("releaseBtn");
+        const v = selected != null ? vehicles.get(selected) : null;
+        if (v) {
+            const isManual = manual.has(selected);
+            info.innerHTML = `<b>${v.plate}</b>` +
+                `<span class="pill ${isManual ? "manual" : "auto"}">${isManual ? "ELLE" : "OTOMATİK"}</span>`;
+            btn.disabled = !isManual;
+            const p = pos.get(selected);
+            if (p) { ctrl.panTo([p.lat, p.lon]); live.panTo([p.lat, p.lon]); }
+            const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
+            if (row) row.scrollIntoView({ block: "nearest" });
+        } else {
+            info.textContent = "";
+            btn.disabled = true;
+        }
+    }
+
+    // ── Kontrol (gateway proxy) ─────────────────────────────────────────────
+    async function onCtrlDblClick(e) {
+        if (selected == null) return;   // seçim yok -> Leaflet zaten yakınlaştırdı
+        const lat = +e.latlng.lat.toFixed(6), lon = +e.latlng.lng.toFixed(6);
         try {
-            const tRes = await fetch(API + `/api/v1/vehicles/${vehicleId}/trips?limit=1`, { headers: authHeaders() });
-            if (!tRes.ok) return;
-            const trips = await tRes.json();
-            if (!trips.length) { flashStatus("Bu araç için kayıtlı rota yok."); return; }
+            const res = await fetch(`/api/v1/control/${selected}/position`, {
+                method: "POST",
+                headers: { ...auth(), "Content-Type": "application/json" },
+                body: JSON.stringify({ lat, lon })
+            });
+            if (!res.ok) { flash("Taşıma başarısız."); return; }
+            manual.add(selected);
+            const p = { ...(pos.get(selected) || {}), vehicleId: selected, lat, lon, speedKmh: 0 };
+            pos.set(selected, p);
+            drawLive(p); drawCtrl(p);       // iyimser: WS'i beklemeden çiz
+            select(selected);
+            flash(`${vehicles.get(selected).plate} taşındı → sol harita güncelleniyor.`);
+        } catch (_) { flash("Taşıma başarısız (bağlantı)."); }
+    }
 
-            const rRes = await fetch(API + `/api/v1/trips/${trips[0].id}/route`, { headers: authHeaders() });
-            if (!rRes.ok) return;
-            const pts = (await rRes.json())
-                .filter(pt => pt.lat != null && pt.lon != null)
-                .map(pt => [pt.lat, pt.lon]);
-            if (routeLayer) map.removeLayer(routeLayer);
-            if (pts.length) {
-                routeLayer = L.polyline(pts, { color: "#378add", weight: 4, opacity: .85 }).addTo(map);
-                map.fitBounds(routeLayer.getBounds().pad(0.2));
-            } else {
-                flashStatus("Rota noktası bulunamadı.");
+    async function release() {
+        if (selected == null) return;
+        await fetch(`/api/v1/control/${selected}/position`, { method: "DELETE", headers: auth() });
+        manual.delete(selected);
+        select(selected);
+        flash("Araç otomatiğe döndü.");
+    }
+
+    // Sadece "elle kontrol" bayrakları — konumlar WebSocket'ten geliyor.
+    async function refreshManual() {
+        if (!token) return;
+        try {
+            const res = await fetch("/api/v1/control/state", { headers: auth() });
+            if (!res.ok) return;
+            const before = new Set(manual);
+            manual.clear();
+            (await res.json()).forEach(s => { if (s.manual) manual.add(s.vehicleId); });
+            let changed = before.size !== manual.size;
+            if (!changed) for (const id of manual) if (!before.has(id)) { changed = true; break; }
+            if (changed) {
+                ctrlMarkers.forEach((m, id) => m.setIcon(numIcon(id)));
+                if (selected != null) select(selected);
             }
         } catch (_) { /* yoksay */ }
     }
 
-    // ---- Durum satırı ------------------------------------------------------
-    function setStatus(text, live) {
+    // ── İhlaller ────────────────────────────────────────────────────────────
+    function onViolation(v) {
+        alerts++;
+        document.getElementById("statAlerts").textContent = alerts;
+
+        const m = liveMarkers.get(v.vehicleId);
+        const p = pos.get(v.vehicleId);
+        if (m && p) {
+            m._alerting = true;
+            m.setIcon(arrowIcon(p.heading || 0, true));
+            setTimeout(() => { m._alerting = false; m.setIcon(arrowIcon((pos.get(v.vehicleId) || p).heading || 0, false)); }, 4000);
+        }
+        if (v.lat != null && v.lon != null) {
+            const ring = L.circle([v.lat, v.lon], { radius: 220, color: "#e24b4a", weight: 2, fillOpacity: .15 }).addTo(live);
+            setTimeout(() => live.removeLayer(ring), 8000);
+        }
+        const veh = vehicles.get(v.vehicleId);
+        const el = document.getElementById("alertList");
+        const row = document.createElement("div");
+        row.className = "row alertRow";
+        const time = v.occurredAt ? new Date(v.occurredAt).toLocaleTimeString("tr-TR") : "";
+        row.innerHTML = `<span class="code">${v.ruleCode || "İHLAL"}</span>` +
+            `<div class="meta">${veh ? veh.plate : "#" + v.vehicleId} · ${time}</div>`;
+        row.addEventListener("click", () => select(v.vehicleId));
+        el.prepend(row);
+        while (el.children.length > 40) el.removeChild(el.lastChild);
+    }
+
+    // ── Durum satırı ────────────────────────────────────────────────────────
+    function setStatus(text, ok) {
         const el = document.getElementById("statusLine");
         el.textContent = text;
-        el.style.color = live ? "#5dcaa5" : "#e24b4a";
+        el.style.color = ok ? "#5dcaa5" : "#e24b4a";
     }
     let flashTimer = null;
-    function flashStatus(text) {
+    function flash(text) {
         const el = document.getElementById("statusLine");
         const prev = el.textContent, prevColor = el.style.color;
         el.textContent = text; el.style.color = "#f0997b";
