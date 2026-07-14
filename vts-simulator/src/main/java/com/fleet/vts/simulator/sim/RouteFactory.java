@@ -32,6 +32,16 @@ public final class RouteFactory {
         return routes;
     }
 
+    /** The Istanbul restricted-zone loop for the geofence-anomaly vehicle. */
+    public static Route restrictedZoneLoop() {
+        return loop(41.010, 28.970, 0.006, 0.007);
+    }
+
+    /** A small local loop around a city centre, for province-scattered vehicles. */
+    public static Route localLoop(double centerLat, double centerLon) {
+        return loop(centerLat, centerLon, 0.020, 0.024);
+    }
+
     private static Route loop(double centerLat, double centerLon, double radiusLat, double radiusLon) {
         List<GeoPoint> pts = new ArrayList<>(WAYPOINTS);
         for (int j = 0; j < WAYPOINTS; j++) {

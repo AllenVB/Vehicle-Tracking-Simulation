@@ -34,7 +34,7 @@ class SimulationLogicTest {
 
     @Test
     void vehicleMovesAlongRouteAndAccumulatesOdometer() {
-        VehicleState v = new VehicleState("000000000000001", BehaviorProfile.NORMAL, squareRoute(), 1L);
+        VehicleState v = new VehicleState("000000000000001", BehaviorProfile.NORMAL, squareRoute(), 1L, 60);
         long startOdo = v.odometerKm();
         for (int i = 0; i < 40; i++) {
             v.tick(5.0);
@@ -47,11 +47,12 @@ class SimulationLogicTest {
     }
 
     @Test
-    void speederAlwaysExceedsLimit() {
-        VehicleState v = new VehicleState("000000000000010", BehaviorProfile.SPEEDER, squareRoute(), 10L);
+    void highBaseSpeedVehicleStaysFast() {
+        VehicleState v = new VehicleState("000000000000010", BehaviorProfile.NORMAL, squareRoute(), 10L, 105);
         for (int i = 0; i < 30; i++) {
             v.tick(5.0);
-            assertTrue(v.speedKmh() > 80, "speeder should exceed 80: " + v.speedKmh());
+            assertTrue(v.speedKmh() > 80, "high-base vehicle should exceed 80: " + v.speedKmh());
+            assertTrue(v.speedKmh() <= 120, "speed capped at 120: " + v.speedKmh());
         }
     }
 

@@ -15,7 +15,10 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -24,6 +27,10 @@ import java.util.concurrent.Future;
  * Holds the simulated fleet and advances it every tick. Vehicles are ticked in
  * parallel on Java 21 virtual threads (one per vehicle), then their readings are
  * posted to ingestion as a single batch.
+ *
+ * <p>The fleet is spread across the 81 Turkish provinces weighted by population
+ * ({@link TurkeyProvinces}); the operator console can pin any vehicle to a manual
+ * position, which then flows through the real pipeline to the live map.
  */
 @Component
 public class FleetSimulator {
@@ -32,35 +39,80 @@ public class FleetSimulator {
 
     private final SimulatorProperties properties;
     private final IngestionClient ingestionClient;
+    private final RoadRoutes roadRoutes;
     private final Counter sent;
 
     private List<VehicleState> fleet = List.of();
+    private volatile Map<Long, VehicleState> byId = Map.of();
     private double tickSeconds;
 
     public FleetSimulator(SimulatorProperties properties, IngestionClient ingestionClient,
-                          MeterRegistry registry) {
+                          RoadRoutes roadRoutes, MeterRegistry registry) {
         this.properties = properties;
         this.ingestionClient = ingestionClient;
+        this.roadRoutes = roadRoutes;
         this.sent = Counter.builder("simulator.telemetry.sent")
                 .description("Telemetry readings posted to ingestion").register(registry);
     }
 
     @PostConstruct
     void initFleet() {
-        List<Route> routes = RouteFactory.build();
         this.tickSeconds = properties.getTick().toMillis() / 1000.0;
-        List<VehicleState> vehicles = new ArrayList<>(properties.getVehicleCount());
-        for (int i = 1; i <= properties.getVehicleCount(); i++) {
-            BehaviorProfile profile = BehaviorProfile.forIndex(i);
-            // Restricted-zone loop (index 0) for geofence anomalies; scattered loops otherwise.
-            Route route = profile == BehaviorProfile.GEOFENCE
-                    ? routes.get(0)
-                    : routes.get(1 + (i - 1) % (RouteFactory.ROUTE_COUNT - 1));
-            String imei = String.format("%015d", i);
-            vehicles.add(new VehicleState(imei, profile, route, i));
+
+        // One slot per vehicle in the default 100-vehicle, population-weighted layout.
+        List<TurkeyProvinces.Province> slots = new ArrayList<>();
+        for (TurkeyProvinces.Province p : TurkeyProvinces.ALL) {
+            for (int c = 0; c < p.vehicles(); c++) {
+                slots.add(p);
+            }
         }
+
+        int target = properties.getVehicleCount();
+        List<VehicleState> vehicles = new ArrayList<>(target);
+        Map<Long, VehicleState> index = new LinkedHashMap<>(target * 2);
+        boolean geofenceAssigned = false;
+        Map<String, Route> routeCache = new HashMap<>();  // one road route per province, shared
+        int[] roadProvinces = {0};
+
+        for (int i = 1; i <= target; i++) {
+            // Within the weighted layout use its slots; beyond it, round-robin the
+            // provinces so a larger fleet (load profile) still spreads over Turkey.
+            TurkeyProvinces.Province p = i <= slots.size()
+                    ? slots.get(i - 1)
+                    : TurkeyProvinces.ALL.get((i - 1) % TurkeyProvinces.ALL.size());
+
+            BehaviorProfile profile = BehaviorProfile.forIndex(i);
+            Route route;
+            if (!geofenceAssigned && p.name().equals("İstanbul")) {
+                // Keep one Istanbul vehicle looping inside the seeded restricted
+                // geofence so geofence enter/exit events still fire.
+                profile = BehaviorProfile.GEOFENCE;
+                route = RouteFactory.restrictedZoneLoop();
+                geofenceAssigned = true;
+            } else {
+                if (profile == BehaviorProfile.GEOFENCE) {
+                    profile = BehaviorProfile.NORMAL; // geofence is only meaningful in Istanbul
+                }
+                TurkeyProvinces.Province prov = p;
+                route = routeCache.computeIfAbsent(prov.name(), k -> {
+                    Route road = roadRoutes.loopNear(prov.lat(), prov.lon());
+                    if (road != null) {
+                        roadProvinces[0]++;
+                    }
+                    return road != null ? road : RouteFactory.localLoop(prov.lat(), prov.lon());
+                });
+            }
+
+            VehicleState v = new VehicleState(String.format("%015d", i), profile, route, i);
+            v.setRegion(p.name());
+            vehicles.add(v);
+            index.put((long) i, v);
+        }
+
         this.fleet = vehicles;
-        log.info("Fleet initialised: {} vehicles, tick {}s", vehicles.size(), tickSeconds);
+        this.byId = index;
+        log.info("Fleet initialised: {} vehicles across {} provinces ({} on road routes), tick {}s",
+                vehicles.size(), TurkeyProvinces.ALL.size(), roadProvinces[0], tickSeconds);
     }
 
     /** One simulation cycle: advance every vehicle in parallel, then batch-send. */
@@ -93,5 +145,44 @@ public class FleetSimulator {
         return new TelemetryPayload(v.imei(), Instant.now(), v.lat(), v.lon(),
                 v.speedKmh(), v.heading(), v.battery(), v.fuelPct(),
                 v.engineOn(), v.ignition(), v.odometerKm(), null);
+    }
+
+    // ── Operator-console control API ───────────────────────────────────────
+
+    /** Current position of every simulated vehicle, for the operator console map. */
+    public List<Map<String, Object>> positions() {
+        List<Map<String, Object>> out = new ArrayList<>(byId.size());
+        byId.forEach((id, v) -> {
+            Map<String, Object> m = new HashMap<>();
+            m.put("id", id);
+            m.put("lat", v.lat());
+            m.put("lon", v.lon());
+            m.put("speedKmh", v.speedKmh());
+            m.put("heading", v.heading());
+            m.put("manual", v.isManual());
+            m.put("region", v.region());
+            out.add(m);
+        });
+        return out;
+    }
+
+    /** Pin a vehicle to a manual position (operator override). False if unknown id. */
+    public boolean setManualPosition(long id, double lat, double lon) {
+        VehicleState v = byId.get(id);
+        if (v == null) {
+            return false;
+        }
+        v.setManual(lat, lon);
+        return true;
+    }
+
+    /** Release a vehicle back to automatic simulation. False if unknown id. */
+    public boolean releaseVehicle(long id) {
+        VehicleState v = byId.get(id);
+        if (v == null) {
+            return false;
+        }
+        v.clearManual();
+        return true;
     }
 }

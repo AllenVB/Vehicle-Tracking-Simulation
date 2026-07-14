@@ -30,7 +30,7 @@ WHERE u.username = 'admin' AND r.code = 'ADMIN';
 INSERT INTO vehicle_group (tenant_id, name)
 SELECT t.id, g.name
 FROM tenant t
-CROSS JOIN (VALUES ('Kamyonlar'), ('Otomobiller')) AS g(name)
+CROSS JOIN (VALUES ('Kamyonlar'), ('Otomobiller'), ('Motosikletler')) AS g(name)
 WHERE t.slug = 'demo';
 
 -- ── 200 drivers ───────────────────────────────────────────────────────────
@@ -46,38 +46,49 @@ SELECT t.id,
 FROM tenant t, generate_series(1, 200) AS n
 WHERE t.slug = 'demo';
 
--- ── 1000 vehicles (every 3rd is a TRUCK, others CAR) ──────────────────────
+-- ── 100 vehicles: 30 TRUCK, 50 CAR, 20 MOTORCYCLE (scattered) ─────────────
+-- Plate carries the type in Turkish: VTS-001-Otomobil / VTS-002-Motor / -Tır.
 INSERT INTO vehicle (tenant_id, group_id, plate, vin, make, model, year, type, fuel_type, status, odometer_km)
 SELECT t.id,
        g.id,
-       'VTS-' || lpad(n::text, 4, '0'),
-       'VIN' || lpad(n::text, 8, '0'),
-       CASE WHEN v.type = 'TRUCK' THEN 'Ford' ELSE 'Renault' END,
-       CASE WHEN v.type = 'TRUCK' THEN 'Cargo' ELSE 'Megane' END,
-       2018 + (n % 7),
-       v.type,
-       CASE WHEN v.type = 'TRUCK' THEN 'DIESEL' ELSE 'GASOLINE' END,
+       'VTS-' || lpad(ty.n::text, 3, '0') || '-' ||
+           CASE ty.type WHEN 'TRUCK' THEN 'Tır' WHEN 'MOTORCYCLE' THEN 'Motor' ELSE 'Otomobil' END,
+       'VIN' || lpad(ty.n::text, 8, '0'),
+       CASE ty.type WHEN 'TRUCK' THEN 'Ford' WHEN 'MOTORCYCLE' THEN 'Yamaha' ELSE 'Renault' END,
+       CASE ty.type WHEN 'TRUCK' THEN 'Cargo' WHEN 'MOTORCYCLE' THEN 'MT-07' ELSE 'Megane' END,
+       2018 + (ty.n % 7),
+       ty.type,
+       CASE ty.type WHEN 'TRUCK' THEN 'DIESEL' ELSE 'GASOLINE' END,
        'ACTIVE',
-       (n * 137) % 300000
+       (ty.n * 137) % 300000
 FROM tenant t
-CROSS JOIN generate_series(1, 1000) AS n
-CROSS JOIN LATERAL (SELECT CASE WHEN n % 3 = 0 THEN 'TRUCK' ELSE 'CAR' END AS type) AS v
+CROSS JOIN (
+    -- Deterministic but scattered split by a hash order over 1..100.
+    SELECT n,
+           CASE WHEN rnk <= 30 THEN 'TRUCK'
+                WHEN rnk <= 80 THEN 'CAR'
+                ELSE 'MOTORCYCLE' END AS type
+    FROM (SELECT n, row_number() OVER (ORDER BY md5(n::text)) AS rnk
+          FROM generate_series(1, 100) AS n) s
+) AS ty
 JOIN vehicle_group g
      ON g.tenant_id = t.id
-    AND g.name = CASE WHEN v.type = 'TRUCK' THEN 'Kamyonlar' ELSE 'Otomobiller' END
+    AND g.name = CASE ty.type WHEN 'TRUCK' THEN 'Kamyonlar'
+                              WHEN 'MOTORCYCLE' THEN 'Motosikletler'
+                              ELSE 'Otomobiller' END
 WHERE t.slug = 'demo';
 
--- Round-robin assign each vehicle N to driver ((N-1) mod 200) + 1.
+-- Round-robin assign each vehicle N (from its VIN, not the plate) to a driver.
 UPDATE vehicle v
 SET current_driver_id = d.id
 FROM driver d
 WHERE d.tenant_id = v.tenant_id
-  AND d.license_no = 'DRV-' || lpad(((( (right(v.plate, 4))::int - 1) % 200) + 1)::text, 4, '0');
+  AND d.license_no = 'DRV-' || lpad((((substring(v.vin FROM 4)::int - 1) % 200) + 1)::text, 4, '0');
 
 -- ── 1000 devices + SIM cards (one per vehicle) ────────────────────────────
 INSERT INTO device (tenant_id, vehicle_id, imei, model, firmware, status, last_seen_at)
 SELECT v.tenant_id, v.id,
-       lpad((right(v.plate, 4))::text, 15, '0'),
+       lpad(substring(v.vin FROM 4)::int::text, 15, '0'),
        'Teltonika FMB920', '1.2.3', 'ACTIVE', now()
 FROM vehicle v
 JOIN tenant t ON t.id = v.tenant_id AND t.slug = 'demo';
@@ -117,13 +128,13 @@ SELECT r.tenant_id, r.id, 'TENANT', NULL, NULL
 FROM rule r
 JOIN tenant t ON t.id = r.tenant_id AND t.slug = 'demo';
 
--- Scoped speed overrides: cars may go up to 110, trucks stay at 80.
+-- Scoped speed overrides by vehicle type: cars 110, motorcycles 90, trucks 80.
 INSERT INTO rule_assignment (tenant_id, rule_id, scope_type, scope_id, threshold_override)
 SELECT g.tenant_id, r.id, 'GROUP', g.id,
-       CASE WHEN g.name = 'Otomobiller' THEN 110 ELSE 80 END
+       CASE g.name WHEN 'Otomobiller' THEN 110 WHEN 'Motosikletler' THEN 90 ELSE 80 END
 FROM rule r
 JOIN tenant t ON t.id = r.tenant_id AND t.slug = 'demo'
-JOIN vehicle_group g ON g.tenant_id = t.id AND g.name IN ('Otomobiller', 'Kamyonlar')
+JOIN vehicle_group g ON g.tenant_id = t.id AND g.name IN ('Otomobiller', 'Kamyonlar', 'Motosikletler')
 WHERE r.code = 'SPEED_LIMIT';
 
 -- ── 5 geofences (Istanbul area, WGS84 lon lat) ────────────────────────────

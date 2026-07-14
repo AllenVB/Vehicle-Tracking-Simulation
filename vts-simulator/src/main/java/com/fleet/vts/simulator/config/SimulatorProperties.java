@@ -23,4 +23,10 @@ public class SimulatorProperties {
 
     /** Base URL of the ingestion service. */
     private String ingestionBaseUrl = "http://localhost:8081";
+
+    /** When true, vehicle routes follow real roads via OSRM (fallback: local loops). */
+    private boolean roadRouting = true;
+
+    /** OSRM routing service base URL (public demo server by default). */
+    private String osrmBaseUrl = "https://router.project-osrm.org";
 }
