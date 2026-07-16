@@ -21,11 +21,15 @@ Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita 
 
 - **Sol (2/12) — Filo barı:** araç listesi, sürücü skorları, canlı ihlaller, seçim ve kontrol kutusu.
 - **Orta (5/12) — Canlı harita** (OpenStreetMap): 105 araç **gerçek yollarda** (OSRM rotaları).
-  Her araç **tipine göre logo** ile gösterilir (otomobil · tır · motor · helikopter), gittiği
-  yöne döner; ihlalde kırmızıya boyanır. Bir araç seçilince **gideceği rota** çizilir.
+  Her araç **tipine göre renkli logo** ile gösterilir — otomobil (mavi) · tır (sarı) · motor
+  (beyaz) · helikopter (mor) — gittiği yöne döner; ihlalde kırmızıya boyanır. Haritada
+  **benzin istasyonları** (⛽) da işaretlidir. Bir araç seçilince **gideceği rota** akan
+  kesikli çizgiyle çizilir ve **en yakın benzin istasyonu mesafesi** gösterilir.
 - **Sağ (5/12) — Operatör haritası** (CartoDB): aracı seç, yeni konuma **çift tıkla**.
   Kara araçları **en yakın yola** oturtulur (yol dışına tıklamada uyarı); helikopterler her
   yere konabilir. Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
+- **İhlaller** Türkçe adı ve **TL cinsinden cezasıyla** listelenir; toplam ceza barın üstünde
+  görünür. Araçların çoğu limitlere uyduğu için akış seyrektir (saniyeler içinde sel değil).
 
 Her iki harita **tek bir WebSocket aboneliğinden** beslenir — polling yok.
 

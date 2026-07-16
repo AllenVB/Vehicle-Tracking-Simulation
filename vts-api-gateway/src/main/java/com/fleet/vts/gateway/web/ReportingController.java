@@ -96,6 +96,25 @@ public class ReportingController {
                 CurrentUser.tenantId(jwt));
     }
 
+    /** Fuel stations (for the map and the nearest-station distance shown on select). */
+    @GetMapping("/fuel-stations")
+    public List<Map<String, Object>> fuelStations(@AuthenticationPrincipal Jwt jwt) {
+        return jdbc.query("""
+                SELECT name, brand,
+                       ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
+                FROM fuel_station WHERE tenant_id = ?
+                """,
+                (rs, n) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("name", rs.getString("name"));
+                    m.put("brand", rs.getString("brand"));
+                    m.put("lat", rs.getDouble("lat"));
+                    m.put("lon", rs.getDouble("lon"));
+                    return m;
+                },
+                CurrentUser.tenantId(jwt));
+    }
+
     /** Driver scoreboard: best drivers over the window, by average daily score. */
     @GetMapping("/drivers/scores")
     public List<Map<String, Object>> driverScores(@AuthenticationPrincipal Jwt jwt,

@@ -98,7 +98,10 @@ public class VehicleState {
             this.baseSpeedKmh = 180 + rnd.nextInt(80);   // 180..259 km/h
             this.maxSpeedKmh = 300;
         } else {
-            this.baseSpeedKmh = baseSpeedKmh >= 0 ? Math.min(baseSpeedKmh, 120) : rnd.nextInt(121);
+            // Cruise speeds cluster in 35..105 so cars (limit 110) essentially never speed
+            // while a moderate share of trucks (80) and motorcycles (90) do — enough to keep
+            // the violation feed visible but far from the earlier per-second flood.
+            this.baseSpeedKmh = baseSpeedKmh >= 0 ? Math.min(baseSpeedKmh, 120) : 35 + rnd.nextInt(71);
             this.maxSpeedKmh = 120;
         }
         this.battery = profile == BehaviorProfile.LOW_BATTERY
@@ -210,8 +213,8 @@ public class VehicleState {
             double noise = (rnd.nextDouble() - 0.5) * 16;
             return clamp(baseSpeedKmh + noise, 0, maxSpeedKmh);
         }
-        // Harsh-braking vehicles still inject sudden decelerations.
-        if (profile == BehaviorProfile.HARSH_BRAKING && rnd.nextDouble() < 0.15) {
+        // Harsh-braking vehicles still inject the occasional sudden deceleration.
+        if (profile == BehaviorProfile.HARSH_BRAKING && rnd.nextDouble() < 0.06) {
             return clamp(speedKmh - (45 + rnd.nextDouble() * 10), 0, maxSpeedKmh);
         }
         // Every road vehicle cruises around its own random base speed (0..120 km/h);

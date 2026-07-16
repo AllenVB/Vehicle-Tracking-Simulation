@@ -118,9 +118,9 @@ class AnalyticsTopologyTest {
                 .filter(v -> v.ruleType() == RuleType.HARSH_BRAKING).count();
         assertEquals(1, during, "three hard brakes inside the cooldown must yield one violation");
 
-        // Past the 120s window the next hard brake fires again.
-        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t.plusSeconds(130)), t.plusSeconds(130));
-        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(131)), t.plusSeconds(131));
+        // Past the 300s window the next hard brake fires again.
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t.plusSeconds(310)), t.plusSeconds(310));
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(311)), t.plusSeconds(311));
 
         long after = violations().readValuesToList().stream()
                 .filter(v -> v.ruleType() == RuleType.HARSH_BRAKING).count();

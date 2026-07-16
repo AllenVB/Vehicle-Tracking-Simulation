@@ -46,7 +46,10 @@
         .row.sel { background: #24405a; border-left: 3px solid var(--accent); }
         .row .meta { color: var(--muted); font-size: 10px; margin-top: 2px; }
         .alertRow { border-left: 3px solid var(--alert); }
-        .alertRow .code { color: #ffb3b3; font-weight: 600; }
+        .ar-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+        .alertRow .code { color: #ffcaca; font-weight: 600; }
+        .alertRow .fine { color: #f5c518; font-weight: 700; font-size: 11px; white-space: nowrap; }
+        #fineTotal { color: #f5c518; font-weight: 700; text-transform: none; }
 
         /* ── Kontrol kutusu (barın altı) ── */
         #ctrl { border-top: 1px solid var(--line); padding: 10px 14px; background: var(--panel-2); }
@@ -75,16 +78,28 @@
                     padding: 5px 10px; border-radius: 6px; letter-spacing: .3px; }
 
         /* Marker'lar — tipe göre logo, yöne dönük */
-        .veh-mk { position: relative; width: 30px; height: 30px; }
+        .veh-mk { position: relative; width: 32px; height: 32px; }
         .veh-ico { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-                   transition: transform .9s linear; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+                   transition: transform .9s linear; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
         .veh-ico.alert { animation: pulse .6s ease-in-out 6 alternate; }
-        @keyframes pulse { to { filter: drop-shadow(0 0 7px var(--alert)); } }
-        .veh-badge { position: absolute; right: -3px; bottom: -3px; min-width: 15px; height: 15px; padding: 0 3px;
+        @keyframes pulse { to { filter: drop-shadow(0 0 8px var(--alert)); } }
+        .veh-badge { position: absolute; right: -3px; bottom: -1px; min-width: 15px; height: 15px; padding: 0 3px;
                      border-radius: 8px; background: #16212e; color: #fff; border: 1px solid #fff;
                      font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; }
-        .veh-mk.selected::before { content: ""; position: absolute; inset: -4px; border-radius: 50%;
-                     border: 2px solid #ffd27f; box-shadow: 0 0 6px #ffd27f; }
+        .veh-mk.selected::before { content: ""; position: absolute; inset: -5px; border-radius: 50%;
+                     border: 2px solid #ffd27f; box-shadow: 0 0 8px #ffd27f; }
+
+        /* Benzin istasyonu ikonu (soluk, araçların altında) */
+        .fuel-mk { opacity: .8; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+        .fuel-mk:hover { opacity: 1; }
+
+        /* Gideceği rota: akan kesikli çizgi + hedef bayrağı */
+        .route-flow { animation: dashmove .9s linear infinite; }
+        @keyframes dashmove { to { stroke-dashoffset: -20; } }
+        .dest-pin { width: 16px; height: 16px; border-radius: 50%; background: var(--c);
+                    border: 2px solid #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 40%, transparent), 0 1px 3px rgba(0,0,0,.5);
+                    animation: destpulse 1.4s ease-in-out infinite; }
+        @keyframes destpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.25); } }
 
         /* Giriş */
         #login { position: fixed; inset: 0; background: rgba(9,14,20,.93); display: flex;
@@ -121,7 +136,7 @@
     <div class="sect">Sürücü skorları <span style="text-transform:none;color:var(--muted)">(30 gün)</span></div>
     <div id="scoreList"></div>
 
-    <div class="sect">Canlı ihlaller</div>
+    <div class="sect">Canlı ihlaller · toplam ceza <span id="fineTotal">0 ₺</span></div>
     <div id="alertList"></div>
 
     <div id="ctrl">

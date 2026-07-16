@@ -1,31 +1,42 @@
 /*
  * VTS — tek sayfa, iki harita (2/5/5 grid), tek servis (gateway).
- *
- *  - Sol harita  : canlı filo (OpenStreetMap)   — tipe göre logo, yöne dönük
- *  - Sağ harita  : operatör (CartoDB)            — logo + plaka no, çift tıkla taşı
- *  - Marker'lar araç tipine göre: otomobil / tır / motor / helikopter logosu.
- *  - Kara araçları taşınırken yol dışına tıklanırsa en yakın yola oturtulur ve uyarı
- *    verilir; helikopterler uçtuğu için istenen her yere (deniz, bina üstü) konulabilir.
- *  - TEK WebSocket (/topic/fleet/live) her iki haritayı da besler.
+ *  - Sol harita  : canlı filo (OpenStreetMap) — tipe göre logo, yöne dönük + benzin istasyonları
+ *  - Sağ harita  : operatör (CartoDB)          — logo + plaka no, çift tıkla taşı
+ *  - Kara araçları taşınırken yol dışına tıklanırsa en yakın yola oturtulur (uyarı);
+ *    helikopterler her yere konabilir.
  */
 (function () {
     "use strict";
 
     let token = null;
-    let live = null, ctrl = null;             // iki Leaflet haritası
-    const liveMarkers = new Map();            // vehicleId -> marker (sol)
-    const ctrlMarkers = new Map();            // vehicleId -> marker (sağ)
-    const pos = new Map();                    // vehicleId -> {lat,lon,speedKmh,heading}
+    let live = null, ctrl = null;
+    const liveMarkers = new Map();
+    const ctrlMarkers = new Map();
+    const pos = new Map();
     const vehicles = new Map();               // vehicleId -> {plate, plateNo, type, model}
-    const byPlateNo = new Map();              // plakaNo -> vehicleId
-    const manual = new Set();                 // elle sabitlenen vehicleId'ler
-    const journey = new Map();                // vehicleId -> {destination, remainingKm, etaMinutes, parked, flying}
-    let selected = null;                      // seçili vehicleId
-    let routeLayer = null;                    // seçili aracın gideceği rota
-    let alerts = 0, fitted = false;
+    const byPlateNo = new Map();
+    const manual = new Set();
+    const journey = new Map();
+    let fuelStations = [];
+    let selected = null;
+    let routeLayer = null;
+    let alerts = 0, fineTotal = 0, fitted = false;
 
-    // Tip -> renk (logolar bu renkte çizilir)
-    const TYPE_COLOR = { CAR: "#378add", TRUCK: "#e0912a", MOTORCYCLE: "#1d9e75", HELICOPTER: "#a855f7" };
+    // Tip -> renk: otomobil mavi, tır sarı, motor beyaz, helikopter mor
+    const TYPE_COLOR = { CAR: "#2b7fff", TRUCK: "#f5b301", MOTORCYCLE: "#f8fafc", HELICOPTER: "#a855f7" };
+
+    // İhlal kodları: Türkçe ad + TL ceza
+    const RULES = {
+        SPEED_LIMIT:        { tr: "Hız Limiti",          fine: 1500 },
+        SUSTAINED_SPEEDING: { tr: "Sürekli Hız Aşımı",   fine: 2500 },
+        HARSH_BRAKING:      { tr: "Sert Fren",           fine: 1000 },
+        GEOFENCE_ENTER:     { tr: "Yasak Bölge Girişi",  fine: 5000 },
+        GEOFENCE_EXIT:      { tr: "Bölge Çıkışı",        fine: 1000 },
+        IDLING:             { tr: "Rölanti",             fine: 500 },
+        LOW_BATTERY:        { tr: "Düşük Batarya",       fine: 750 },
+        LOW_FUEL:           { tr: "Düşük Yakıt",         fine: 750 }
+    };
+    const tl = n => n.toLocaleString("tr-TR") + " ₺";
 
     // ── Giriş ───────────────────────────────────────────────────────────────
     const loginBtn = document.getElementById("loginBtn");
@@ -39,8 +50,7 @@
         loginBtn.disabled = true;
         try {
             const res = await fetch("/api/v1/auth/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
+                method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     username: document.getElementById("username").value.trim(),
                     password: document.getElementById("password").value
@@ -69,6 +79,7 @@
         loadScores();
         setInterval(loadScores, 60000);
         loadGeofences();
+        loadFuelStations();
 
         document.getElementById("plateNo").addEventListener("input", e => {
             const n = parseInt(e.target.value, 10);
@@ -78,15 +89,11 @@
     }
 
     function initMaps() {
-        live = L.map("mapLive", { zoomControl: true, attributionControl: false })
-            .setView([39.0, 35.0], 6);
+        live = L.map("mapLive", { zoomControl: true, attributionControl: false }).setView([39.0, 35.0], 6);
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(live);
-
-        ctrl = L.map("mapCtrl", { zoomControl: true, attributionControl: false })
-            .setView([39.0, 35.0], 6);
+        ctrl = L.map("mapCtrl", { zoomControl: true, attributionControl: false }).setView([39.0, 35.0], 6);
         L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
             { maxZoom: 19, subdomains: "abcd" }).addTo(ctrl);
-
         ctrl.on("dblclick", onCtrlDblClick);
     }
 
@@ -100,19 +107,13 @@
         list.sort((a, b) => plateNo(a.plate) - plateNo(b.plate));
         list.forEach(v => {
             const no = plateNo(v.plate);
-            vehicles.set(v.id, {
-                plate: v.plate, plateNo: no, type: v.type,
-                model: [v.make, v.model].filter(Boolean).join(" ")
-            });
+            vehicles.set(v.id, { plate: v.plate, plateNo: no, type: v.type, model: [v.make, v.model].filter(Boolean).join(" ") });
             byPlateNo.set(no, v.id);
             const row = document.createElement("div");
             row.className = "row";
             row.dataset.vid = v.id;
             row.innerHTML = `<b>${v.plate}</b><div class="meta" data-model="${vehicles.get(v.id).model}">${vehicles.get(v.id).model}</div>`;
-            row.addEventListener("click", () => {
-                document.getElementById("plateNo").value = no;
-                select(v.id);
-            });
+            row.addEventListener("click", () => { document.getElementById("plateNo").value = no; select(v.id); });
             el.appendChild(row);
         });
         document.getElementById("statTotal").textContent = list.length;
@@ -151,19 +152,16 @@
         document.getElementById("statLive").textContent = pos.size;
         if (!fitted && pos.size > 0) {
             fitted = true;
-            const pts = [...pos.values()].map(p => [p.lat, p.lon]);
-            const b = L.latLngBounds(pts).pad(0.15);
-            live.fitBounds(b);
-            ctrl.fitBounds(b);
+            const b = L.latLngBounds([...pos.values()].map(p => [p.lat, p.lon])).pad(0.15);
+            live.fitBounds(b); ctrl.fitBounds(b);
         }
     }
 
-    // Sol harita: tipe göre logo, yöne dönük (badge yok)
     function drawLive(p) {
         let m = liveMarkers.get(p.vehicleId);
         const icon = typeIcon(p.vehicleId, p.heading || 0, false, false);
         if (!m) {
-            m = L.marker([p.lat, p.lon], { icon }).addTo(live);
+            m = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1000 }).addTo(live);
             m.on("click", () => select(p.vehicleId));
             liveMarkers.set(p.vehicleId, m);
         } else {
@@ -173,7 +171,6 @@
         m.bindPopup(popup(p));
     }
 
-    // Sağ harita: tipe göre logo + plaka no badge'i
     function drawCtrl(p) {
         let m = ctrlMarkers.get(p.vehicleId);
         const icon = typeIcon(p.vehicleId, p.heading || 0, false, true);
@@ -193,38 +190,44 @@
 
     // Tipe göre yukarı (kuzey) bakan silüet; heading ile döndürülür.
     function vehSvg(type, color) {
-        const dark = "#0b1016";
+        const d = "#0b1016";
         switch (type) {
             case "TRUCK":
-                return `<svg viewBox="0 0 24 24" width="26" height="26">
-                    <rect x="6" y="8" width="12" height="14" rx="1.5" fill="${color}" stroke="${dark}" stroke-width="1"/>
-                    <rect x="7.5" y="2" width="9" height="6.5" rx="1.5" fill="${color}" stroke="${dark}" stroke-width="1"/>
-                    <rect x="9" y="3.5" width="6" height="2.6" rx=".6" fill="#dbeafe"/></svg>`;
+                return `<svg viewBox="0 0 32 32" width="30" height="30">
+                    <rect x="9" y="11" width="14" height="19" rx="1.6" fill="${color}" stroke="${d}" stroke-width="1.2"/>
+                    <rect x="10" y="2.5" width="12" height="8" rx="1.8" fill="${color}" stroke="${d}" stroke-width="1.2"/>
+                    <rect x="12" y="4.2" width="8" height="3.1" rx=".8" fill="#333b44"/>
+                    <line x1="9.5" y1="20" x2="22.5" y2="20" stroke="${d}" stroke-width="1"/></svg>`;
             case "MOTORCYCLE":
-                return `<svg viewBox="0 0 24 24" width="24" height="24">
-                    <circle cx="12" cy="6" r="2.6" fill="${dark}"/>
-                    <circle cx="12" cy="18" r="2.6" fill="${dark}"/>
-                    <rect x="10.3" y="6" width="3.4" height="12" rx="1.7" fill="${color}" stroke="${dark}" stroke-width=".7"/>
-                    <rect x="7.5" y="4" width="9" height="1.8" rx=".9" fill="${color}"/></svg>`;
+                return `<svg viewBox="0 0 32 32" width="26" height="26">
+                    <ellipse cx="16" cy="7" rx="3.1" ry="3.3" fill="#22303f" stroke="${d}" stroke-width="1"/>
+                    <ellipse cx="16" cy="25" rx="3.1" ry="3.3" fill="#22303f" stroke="${d}" stroke-width="1"/>
+                    <rect x="13.7" y="7" width="4.6" height="18" rx="2.3" fill="${color}" stroke="${d}" stroke-width="1.1"/>
+                    <rect x="10" y="5" width="12" height="2.4" rx="1.2" fill="${color}" stroke="${d}" stroke-width=".8"/>
+                    <circle cx="16" cy="15" r="2" fill="#9db4c9"/></svg>`;
             case "HELICOPTER":
-                return `<svg viewBox="0 0 24 24" width="28" height="28">
-                    <line x1="2.5" y1="8" x2="21.5" y2="8" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
-                    <rect x="11" y="14" width="2" height="7.5" fill="${color}"/>
-                    <line x1="9.5" y1="21" x2="14.5" y2="21" stroke="${color}" stroke-width="1.7" stroke-linecap="round"/>
-                    <ellipse cx="12" cy="11" rx="3.6" ry="6" fill="${color}" stroke="${dark}" stroke-width="1"/>
-                    <circle cx="12" cy="8" r="1.1" fill="#fff"/></svg>`;
+                return `<svg viewBox="0 0 32 32" width="32" height="32">
+                    <line x1="3" y1="10" x2="29" y2="10" stroke="${color}" stroke-width="2.4" stroke-linecap="round"/>
+                    <line x1="8" y1="6" x2="24" y2="14" stroke="${color}" stroke-width="1.3" stroke-linecap="round" opacity=".45"/>
+                    <rect x="14.5" y="18" width="3" height="10" rx="1" fill="${color}"/>
+                    <line x1="12.5" y1="27.5" x2="19.5" y2="27.5" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+                    <ellipse cx="16" cy="14" rx="4.6" ry="7.4" fill="${color}" stroke="${d}" stroke-width="1.2"/>
+                    <ellipse cx="16" cy="10.5" rx="2.5" ry="2.7" fill="#eaf2ff"/>
+                    <circle cx="16" cy="10" r="1.3" fill="#fff" stroke="${d}" stroke-width=".5"/></svg>`;
             default: // CAR
-                return `<svg viewBox="0 0 24 24" width="24" height="24">
-                    <path d="M12 2.5c-3 0-4.5 2-4.5 5v11c0 2 1.8 3 4.5 3s4.5-1 4.5-3v-11c0-3-1.5-5-4.5-5z"
-                          fill="${color}" stroke="${dark}" stroke-width="1"/>
-                    <rect x="8.5" y="5" width="7" height="3.4" rx="1" fill="#dbeafe"/></svg>`;
+                return `<svg viewBox="0 0 32 32" width="28" height="28">
+                    <path d="M16 2.6c-3.6 0-5.6 2.2-5.9 6.4l-.4 12c-.1 3.2 2 5 6.3 5s6.4-1.8 6.3-5l-.4-12C21.6 4.8 19.6 2.6 16 2.6z" fill="${color}" stroke="${d}" stroke-width="1.2"/>
+                    <rect x="11.6" y="6.6" width="8.8" height="4" rx="1.2" fill="#eaf2ff"/>
+                    <rect x="12" y="18.4" width="8" height="3.4" rx="1.2" fill="#cfe0f5"/>
+                    <rect x="8.6" y="11" width="1.7" height="3" rx=".6" fill="${color}" stroke="${d}" stroke-width=".5"/>
+                    <rect x="21.7" y="11" width="1.7" height="3" rx=".6" fill="${color}" stroke="${d}" stroke-width=".5"/></svg>`;
         }
     }
 
     function typeIcon(vehicleId, heading, alerting, showBadge) {
         const v = vehicles.get(vehicleId) || {};
         const type = v.type || "CAR";
-        const color = alerting ? "#e24b4a" : (TYPE_COLOR[type] || "#378add");
+        const color = alerting ? "#e24b4a" : (TYPE_COLOR[type] || "#2b7fff");
         const sel = vehicleId === selected ? " selected" : "";
         const badge = showBadge ? `<span class="veh-badge">${v.plateNo != null ? v.plateNo : "?"}</span>` : "";
         return L.divIcon({
@@ -232,11 +235,10 @@
                      <div class="veh-ico${alerting ? " alert" : ""}" style="transform:rotate(${heading}deg)">${vehSvg(type, color)}</div>
                      ${badge}
                    </div>`,
-            className: "", iconSize: [30, 30], iconAnchor: [15, 15]
+            className: "", iconSize: [32, 32], iconAnchor: [16, 16]
         });
     }
 
-    /** Marker ikonlarını (seçim/logo) her iki haritada tazele. */
     function refreshMarkers() {
         liveMarkers.forEach((m, id) => {
             if (m._alerting) return;
@@ -252,20 +254,57 @@
     function popup(p) {
         const v = vehicles.get(p.vehicleId);
         const j = journey.get(p.vehicleId);
-        return `<b>${v ? v.plate : "#" + p.vehicleId}</b><br>Hız: ${p.speedKmh ?? "-"} km/s`
-            + (j && j.destination ? `<br>${journeyText(j)}` : "");
+        return `<b>${v ? v.plate : "#" + p.vehicleId}</b>` +
+            `<br><small>${v ? v.model : ""}</small><br>Hız: ${p.speedKmh ?? "-"} km/s` +
+            (j && j.destination ? `<br>${journeyText(j)}` : "");
+    }
+
+    // ── Benzin istasyonları ─────────────────────────────────────────────────
+    async function loadFuelStations() {
+        try {
+            const res = await fetch("/api/v1/fuel-stations", { headers: auth() });
+            if (!res.ok) return;
+            fuelStations = await res.json();
+            fuelStations.forEach(f => {
+                L.marker([f.lat, f.lon], { icon: fuelIcon(), zIndexOffset: 0, interactive: true })
+                    .bindTooltip(`⛽ ${f.name}`).addTo(live);
+            });
+        } catch (_) { /* yoksay */ }
+    }
+
+    function fuelIcon() {
+        return L.divIcon({
+            html: `<div class="fuel-mk"><svg viewBox="0 0 24 24" width="16" height="16">
+                     <rect x="5" y="3" width="9" height="18" rx="1.6" fill="#0f9d58" stroke="#06331d" stroke-width="1"/>
+                     <rect x="6.6" y="5" width="5.8" height="4.4" rx=".8" fill="#eafaf0"/>
+                     <path d="M14 8h2.2a1.6 1.6 0 0 1 1.6 1.6V15a1.4 1.4 0 0 0 1.4 1.4" fill="none" stroke="#06331d" stroke-width="1.3"/>
+                   </svg></div>`,
+            className: "", iconSize: [16, 16], iconAnchor: [9, 18]
+        });
+    }
+
+    function haversineKm(aLat, aLon, bLat, bLon) {
+        const R = 6371, rad = x => x * Math.PI / 180;
+        const dLat = rad(bLat - aLat), dLon = rad(bLon - aLon);
+        const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLon / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(s));
+    }
+
+    function nearestFuel(lat, lon) {
+        let best = null, bd = Infinity;
+        for (const f of fuelStations) {
+            const dkm = haversineKm(lat, lon, f.lat, f.lon);
+            if (dkm < bd) { bd = dkm; best = f; }
+        }
+        return best ? { f: best, km: bd } : null;
     }
 
     // ── Seçim ───────────────────────────────────────────────────────────────
     function select(vehicleId) {
         const changedSelection = vehicleId !== selected;
         selected = vehicleId;
-        if (changedSelection && vehicleId == null && routeLayer) {
-            live.removeLayer(routeLayer);
-            routeLayer = null;
-        }
-        if (selected != null) ctrl.doubleClickZoom.disable();
-        else ctrl.doubleClickZoom.enable();
+        if (changedSelection && vehicleId == null && routeLayer) { live.removeLayer(routeLayer); routeLayer = null; }
+        if (selected != null) ctrl.doubleClickZoom.disable(); else ctrl.doubleClickZoom.enable();
 
         document.querySelectorAll("#vehicleList .row").forEach(r =>
             r.classList.toggle("sel", Number(r.dataset.vid) === selected));
@@ -278,13 +317,18 @@
             const isManual = manual.has(selected);
             const j = journey.get(selected);
             const p = pos.get(selected);
-            const speed = p ? `${p.speedKmh} km/s` : "-";
             const heli = j && j.flying ? '<span class="pill heli">HELİKOPTER</span>' : "";
+            let fuelLine = "";
+            if (p && v.type !== "HELICOPTER") {
+                const nf = nearestFuel(p.lat, p.lon);
+                if (nf) fuelLine = `<div class="meta">⛽ En yakın benzin: ${nf.km.toFixed(1)} km · ${nf.f.brand}</div>`;
+            }
             info.innerHTML = `<b>${v.plate}</b>${heli}` +
                 `<span class="pill ${isManual ? "manual" : "auto"}">${isManual ? "ELLE" : "OTOMATİK"}</span>` +
-                `<div class="meta" style="margin-top:4px">Hız: ${speed}${j ? " · " + journeyText(j) : ""}</div>`;
+                `<div class="meta" style="margin-top:4px">${v.model} · ${p ? p.speedKmh + " km/s" : "-"}${j ? " · " + journeyText(j) : ""}</div>` +
+                fuelLine;
             btn.disabled = !isManual;
-            if (p) { ctrl.panTo([p.lat, p.lon]); }
+            if (p) ctrl.panTo([p.lat, p.lon]);
             if (changedSelection) showPlannedRoute(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
             if (row) row.scrollIntoView({ block: "nearest" });
@@ -294,7 +338,7 @@
         }
     }
 
-    // Seçili aracın GİDECEĞİ rota (mevcut konum -> hedef). Helikopterde düz uçuş hattı.
+    // Seçili aracın GİDECEĞİ rota: akan kesikli çizgi + parıltı + hedef bayrağı.
     async function showPlannedRoute(vehicleId) {
         if (routeLayer) { live.removeLayer(routeLayer); routeLayer = null; }
         try {
@@ -303,41 +347,44 @@
             const pts = await res.json();
             if (!Array.isArray(pts) || pts.length < 2) return;
             const j = journey.get(vehicleId);
-            const color = j && j.flying ? "#a855f7" : "#378add";
-            routeLayer = L.polyline(pts, { color, weight: 3, opacity: .85, dashArray: "6 6" }).addTo(live);
-            live.fitBounds(routeLayer.getBounds().pad(0.25));
+            const color = j && j.flying ? "#a855f7" : "#2b7fff";
+            routeLayer = L.layerGroup().addTo(live);
+            L.polyline(pts, { color, weight: 8, opacity: .22 }).addTo(routeLayer);                 // parıltı
+            L.polyline(pts, { color, weight: 3, opacity: .95, dashArray: "1 9",
+                              lineCap: "round", className: "route-flow" }).addTo(routeLayer);       // akan hat
+            L.marker(pts[pts.length - 1], { icon: destIcon(color), zIndexOffset: 1500 })
+                .bindTooltip(j && j.destination ? "🏁 " + j.destination : "🏁 Hedef").addTo(routeLayer);
+            live.fitBounds(L.polyline(pts).getBounds().pad(0.25));
         } catch (_) { /* yoksay */ }
+    }
+
+    function destIcon(color) {
+        return L.divIcon({
+            html: `<div class="dest-pin" style="--c:${color}"></div>`,
+            className: "", iconSize: [16, 16], iconAnchor: [8, 8]
+        });
     }
 
     // ── Kontrol (gateway proxy) ─────────────────────────────────────────────
     async function onCtrlDblClick(e) {
-        if (selected == null) return;   // seçim yok -> Leaflet zaten yakınlaştırdı
+        if (selected == null) return;
         const lat = +e.latlng.lat.toFixed(6), lon = +e.latlng.lng.toFixed(6);
         const plate = (vehicles.get(selected) || {}).plate || ("#" + selected);
         try {
             const res = await fetch(`/api/v1/control/${selected}/position`, {
-                method: "POST",
-                headers: { ...auth(), "Content-Type": "application/json" },
+                method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
                 body: JSON.stringify({ lat, lon })
             });
             if (!res.ok) { flash("Taşıma başarısız."); return; }
             const r = await res.json().catch(() => ({}));
-            const plat = r.lat != null ? r.lat : lat;
-            const plon = r.lon != null ? r.lon : lon;
-
+            const plat = r.lat != null ? r.lat : lat, plon = r.lon != null ? r.lon : lon;
             manual.add(selected);
             const p = { ...(pos.get(selected) || {}), vehicleId: selected, lat: plat, lon: plon, speedKmh: 0 };
             pos.set(selected, p);
-            drawLive(p); drawCtrl(p);
-            select(selected);
-
-            if (r.snapped) {
-                flash(`⚠ Yol dışına tıklandı — ${plate} en yakın yola oturtuldu (${r.offRoadMeters} m).`);
-            } else if (r.flying) {
-                flash(`🚁 ${plate} taşındı (helikopter, her yere konabilir).`);
-            } else {
-                flash(`${plate} taşındı → sol harita güncelleniyor.`);
-            }
+            drawLive(p); drawCtrl(p); select(selected);
+            if (r.snapped) flash(`⚠ Yol dışına tıklandı — ${plate} en yakın yola oturtuldu (${r.offRoadMeters} m).`);
+            else if (r.flying) flash(`🚁 ${plate} taşındı (helikopter, her yere konabilir).`);
+            else flash(`${plate} taşındı → sol harita güncelleniyor.`);
         } catch (_) { flash("Taşıma başarısız (bağlantı)."); }
     }
 
@@ -349,7 +396,6 @@
         flash("Araç otomatiğe döndü.");
     }
 
-    // Sevkiyat durumu: hedef, kalan km, ETA, park/elle/uçuş bayrakları.
     async function refreshDispatch() {
         if (!token) return;
         try {
@@ -381,23 +427,19 @@
         if (!j) return "";
         if (j.parked) return (j.flying ? "🚁 " : "🅿 ") + "varışta · durdu";
         if (j.destination == null) return "rota bekleniyor…";
-        return `→ ${j.destination} · ${j.remainingKm} km`
-            + (j.etaMinutes >= 0 ? ` · ~${j.etaMinutes} dk` : "");
+        return `→ ${j.destination} · ${j.remainingKm} km` + (j.etaMinutes >= 0 ? ` · ~${j.etaMinutes} dk` : "");
     }
 
-    // ── Geofence bölgeleri ──────────────────────────────────────────────────
+    // ── Geofence ────────────────────────────────────────────────────────────
     async function loadGeofences() {
         try {
             const res = await fetch("/api/v1/geofences", { headers: auth() });
             if (!res.ok) return;
             (await res.json()).forEach(g => {
-                const exclusion = g.kind === "EXCLUSION";
+                const ex = g.kind === "EXCLUSION";
                 L.geoJSON(JSON.parse(g.geojson), {
-                    style: {
-                        color: exclusion ? "#e24b4a" : "#5dcaa5",
-                        weight: 2, fillOpacity: 0.12, dashArray: exclusion ? null : "4"
-                    }
-                }).bindTooltip(`${g.name} (${exclusion ? "yasak" : "izinli"})`).addTo(live);
+                    style: { color: ex ? "#e24b4a" : "#5dcaa5", weight: 2, fillOpacity: 0.12, dashArray: ex ? null : "4" }
+                }).bindTooltip(`${g.name} (${ex ? "yasak" : "izinli"})`).addTo(live);
             });
         } catch (_) { /* yoksay */ }
     }
@@ -424,8 +466,12 @@
 
     // ── İhlaller ────────────────────────────────────────────────────────────
     function onViolation(v) {
+        const rule = RULES[v.ruleCode] || { tr: "", fine: 0 };
         alerts++;
+        fineTotal += rule.fine;
         document.getElementById("statAlerts").textContent = alerts;
+        const ft = document.getElementById("fineTotal");
+        if (ft) ft.textContent = tl(fineTotal);
 
         const m = liveMarkers.get(v.vehicleId);
         const p = pos.get(v.vehicleId);
@@ -447,8 +493,9 @@
         const row = document.createElement("div");
         row.className = "row alertRow";
         const time = v.occurredAt ? new Date(v.occurredAt).toLocaleTimeString("tr-TR") : "";
-        row.innerHTML = `<span class="code">${v.ruleCode || "İHLAL"}</span>` +
-            `<div class="meta">${veh ? veh.plate : "#" + v.vehicleId} · ${time}</div>`;
+        row.innerHTML =
+            `<div class="ar-top"><span class="code">${rule.tr || v.ruleCode}</span><span class="fine">${tl(rule.fine)}</span></div>` +
+            `<div class="meta">${v.ruleCode} · ${veh ? veh.plate : "#" + v.vehicleId} · ${time}</div>`;
         row.addEventListener("click", () => select(v.vehicleId));
         el.prepend(row);
         while (el.children.length > 40) el.removeChild(el.lastChild);
@@ -457,8 +504,7 @@
     // ── Durum satırı ────────────────────────────────────────────────────────
     function setStatus(text, ok) {
         const el = document.getElementById("statusLine");
-        el.textContent = text;
-        el.style.color = ok ? "#5dcaa5" : "#e24b4a";
+        el.textContent = text; el.style.color = ok ? "#5dcaa5" : "#e24b4a";
     }
     let flashTimer = null;
     function flash(text) {

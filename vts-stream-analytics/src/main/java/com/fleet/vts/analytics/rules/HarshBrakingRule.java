@@ -31,7 +31,7 @@ public class HarshBrakingRule implements ProcessorSupplier<String, TelemetryEven
     public static final String STORE = "harsh-braking-prev-speed";
     public static final String COOLDOWN_STORE = "harsh-braking-cooldown";
     private static final int DROP_THRESHOLD = -40;
-    private static final long COOLDOWN_MILLIS = Duration.ofSeconds(120).toMillis();
+    private static final long COOLDOWN_MILLIS = Duration.ofSeconds(300).toMillis();
 
     @Override
     public Processor<String, TelemetryEvent, String, ViolationEvent> get() {
