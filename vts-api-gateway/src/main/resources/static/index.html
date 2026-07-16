@@ -66,6 +66,42 @@
         .pill.auto { background: rgba(55,138,221,.22); color: var(--auto); }
         .pill.heli { background: rgba(168,85,247,.22); color: #c4a5f7; }
 
+        /* Araca uyarı mesajı kutusu */
+        #msgBox { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+        .msg-title { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 6px; }
+        #msgCat, #provinceSelect { width: 100%; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line);
+                     background: var(--panel); color: var(--text); font-size: 12.5px; }
+        #msgText { margin-top: 6px; }
+        .btn-send { width: 100%; margin-top: 6px; padding: 7px; border: 0; border-radius: 6px; background: var(--accent);
+                     color: #201607; font-weight: 700; font-size: 12px; cursor: pointer; }
+        .btn-send:hover { filter: brightness(1.08); }
+        .btn-ghost { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent;
+                     color: var(--text); font-size: 12px; cursor: pointer; }
+        #msgList { margin-top: 8px; max-height: 120px; overflow-y: auto; }
+        .msg-item { font-size: 11px; padding: 6px 8px; border-radius: 6px; background: var(--panel);
+                     border-left: 3px solid var(--accent); margin-bottom: 5px; }
+        .msg-item .mc { font-weight: 700; color: #ffd27f; }
+        .msg-item .mt { color: var(--muted); font-size: 9.5px; margin-top: 2px; }
+
+        /* Operatör harita: Rota Oluştur butonu + il seçici */
+        .map-fab { position: absolute; right: 12px; bottom: 14px; z-index: 600; padding: 9px 15px; border: 0;
+                   border-radius: 22px; background: var(--accent); color: #201607; font-weight: 700; font-size: 13px;
+                   cursor: pointer; box-shadow: 0 3px 10px rgba(0,0,0,.45); }
+        .map-fab:hover { filter: brightness(1.08); }
+        #routePicker { position: absolute; right: 12px; bottom: 14px; z-index: 601; width: 232px; padding: 12px;
+                   border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.55); }
+        .rp-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+        .rp-actions { display: flex; gap: 6px; margin-top: 10px; }
+        .rp-actions .btn-send { margin-top: 0; }
+
+        /* Bildirim toast'ı */
+        #toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%) translateY(-160%);
+                 z-index: 3000; max-width: 520px; padding: 12px 18px; border-radius: 10px; background: #241c14;
+                 border: 1px solid var(--manual); color: var(--text); font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.55);
+                 transition: transform .35s ease; }
+        #toast.show { transform: translateX(-50%) translateY(0); }
+        #toast .tt { font-weight: 700; color: #ffd27f; }
+
         /* ── Haritalar (5 + 5) ── */
         .mapWrap { position: relative; min-width: 0; }
         .mapWrap + .mapWrap { border-left: 1px solid var(--line); }
@@ -148,6 +184,20 @@
         <input id="plateNo" type="number" min="1" max="105" placeholder="Plaka no 1–105 (101–105 helikopter)"/>
         <div id="selInfo"></div>
         <button id="releaseBtn" disabled>Otomatiğe döndür</button>
+
+        <div id="msgBox" style="display:none">
+            <div class="msg-title">Araca uyarı gönder</div>
+            <select id="msgCat">
+                <option value="Yanıcı madde">🔥 Yanıcı madde</option>
+                <option value="Kırılacak eşya">📦 Kırılacak eşya</option>
+                <option value="Soğuk zincir">❄️ Soğuk zincir</option>
+                <option value="Hıza dikkat">⚠️ Hıza dikkat</option>
+                <option value="Genel">💬 Genel uyarı</option>
+            </select>
+            <input id="msgText" maxlength="500" placeholder="ör. Yanıcı madde taşıyorsun, hızına dikkat et"/>
+            <button id="msgSend" class="btn-send">Uyarı Gönder</button>
+            <div id="msgList"></div>
+        </div>
     </div>
 </aside>
 
@@ -159,7 +209,18 @@
 <div class="mapWrap">
     <div class="maplabel">OPERATÖR · konum değiştir (çift tık)</div>
     <div id="mapCtrl" class="map"></div>
+    <button id="routeBtn" class="map-fab" style="display:none">🗺️ Rota Oluştur</button>
+    <div id="routePicker" style="display:none">
+        <div class="rp-title">Hedef il seç</div>
+        <select id="provinceSelect"></select>
+        <div class="rp-actions">
+            <button id="routeGo" class="btn-send">Rotayı Oluştur</button>
+            <button id="routeCancel" class="btn-ghost">İptal</button>
+        </div>
+    </div>
 </div>
+
+<div id="toast"></div>
 
 <div id="login">
     <div class="card">

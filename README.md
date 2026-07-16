@@ -31,6 +31,17 @@ Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita 
 - **İhlaller** Türkçe adı ve **TL cinsinden cezasıyla** listelenir; toplam ceza barın üstünde
   görünür. Araçların çoğu limitlere uyduğu için akış seyrektir (saniyeler içinde sel değil).
 
+### Operatör: rota oluşturma ve araç uyarıları
+
+![Rota oluşturma ve araç uyarısı](docs/screenshots/vts-mesaj-rota.png)
+
+- **Rota Oluştur:** Araç seçilince operatör haritasının sağ altında bir buton çıkar; **hedef
+  il** seçilir ve araç oraya doğru yeni bir rotaya (kara aracı OSRM yolu, helikopter düz uçuş)
+  yönlendirilir — değişiklik anında sol haritaya yansır.
+- **Araç uyarıları:** Operatör bir araca **metin uyarısı** gönderebilir (🔥 yanıcı madde,
+  📦 kırılacak eşya, ❄️ soğuk zincir, ⚠️ hıza dikkat…). Uyarı kalıcıdır (araca tıklanınca
+  görünür) ve tüm operatörlere **anlık bildirim** (toast) olarak WebSocket'ten gider.
+
 Her iki harita **tek bir WebSocket aboneliğinden** beslenir — polling yok.
 
 ---

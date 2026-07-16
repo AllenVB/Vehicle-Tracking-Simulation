@@ -321,4 +321,40 @@ public class FleetSimulator {
         v.clearManual();
         return true;
     }
+
+    /** All province names (for the operator's "create route" destination picker). */
+    public List<String> provinceNames() {
+        return TurkeyProvinces.ALL.stream()
+                .map(TurkeyProvinces.Province::name)
+                .sorted()
+                .toList();
+    }
+
+    /**
+     * Operator-chosen destination: dispatch the vehicle on a fresh journey to the named
+     * province from its current position (road route for vehicles, straight line for
+     * helicopters). Releases any manual pin so it starts moving. False if id/province unknown.
+     */
+    public boolean dispatchTo(long id, String provinceName) {
+        VehicleState v = byId.get(id);
+        if (v == null) {
+            return false;
+        }
+        TurkeyProvinces.Province dest = TurkeyProvinces.byName(provinceName);
+        if (dest == null) {
+            return false;
+        }
+        v.clearManual();
+        Route route = null;
+        if (!v.isFlying()) {
+            route = roadRoutes.routeBetween(v.lat(), v.lon(), dest.lat(), dest.lon());
+        }
+        if (route == null) {
+            route = new Route(List.of(new GeoPoint(v.lat(), v.lon()),
+                    new GeoPoint(dest.lat(), dest.lon())), false);
+        }
+        v.startJourney(new Journey(dest.name(), dest.lat(), dest.lon(), route), 0.0);
+        v.setRegion(dest.name());
+        return true;
+    }
 }

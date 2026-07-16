@@ -70,6 +70,28 @@ public class ControlProxyController {
     public record MoveRequest(double lat, double lon) {
     }
 
+    public record DestRequest(String province) {
+    }
+
+    /** Province names for the operator's "create route" destination picker. */
+    @GetMapping("/provinces")
+    public ResponseEntity<Object> provinces() {
+        Object list = simulator.get().uri("/api/control/provinces").retrieve().body(Object.class);
+        return ResponseEntity.ok(list);
+    }
+
+    /** Dispatch a vehicle on a fresh route to the operator-chosen province. */
+    @PostMapping("/{vehicleId}/destination")
+    public ResponseEntity<Void> destination(@PathVariable Long vehicleId, @RequestBody DestRequest request) {
+        Integer index = simIndex(vehicleId);
+        if (index == null) {
+            return ResponseEntity.notFound().build();
+        }
+        simulator.post().uri("/api/control/{i}/destination", index)
+                .body(request).retrieve().toBodilessEntity();
+        return ResponseEntity.ok().build();
+    }
+
     /**
      * Dispatch state per vehicle: where it is heading, how much real road distance is
      * left, and whether the operator is holding it in place. Keyed by {@code vehicleId},

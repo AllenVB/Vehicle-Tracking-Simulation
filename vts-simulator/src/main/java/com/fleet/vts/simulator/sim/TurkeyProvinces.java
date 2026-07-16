@@ -23,6 +23,19 @@ public final class TurkeyProvinces {
      * intercity but still finish in a demo-friendly time, and the fleet keeps its
      * population-weighted spread instead of all drifting to one corner.
      */
+    /** The province with this name (case-insensitive), or {@code null} if unknown. */
+    public static Province byName(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (Province p : ALL) {
+            if (p.name().equalsIgnoreCase(name.trim())) {
+                return p;
+            }
+        }
+        return null;
+    }
+
     public static Province nearbyDestination(double lat, double lon, int candidates,
                                              java.util.Random rnd) {
         List<Province> sorted = new java.util.ArrayList<>(ALL);

@@ -32,9 +32,26 @@ public class ControlController {
     public record MoveRequest(double lat, double lon) {
     }
 
+    public record DestRequest(String province) {
+    }
+
     @GetMapping("/positions")
     public List<Map<String, Object>> positions() {
         return simulator.positions();
+    }
+
+    /** Province names for the operator's destination picker. */
+    @GetMapping("/control/provinces")
+    public List<String> provinces() {
+        return simulator.provinceNames();
+    }
+
+    /** Dispatch a vehicle on a fresh route to the chosen province. */
+    @PostMapping("/control/{id}/destination")
+    public ResponseEntity<Void> destination(@PathVariable long id, @RequestBody DestRequest request) {
+        return simulator.dispatchTo(id, request.province())
+                ? ResponseEntity.ok().build()
+                : ResponseEntity.notFound().build();
     }
 
     /** The route a vehicle will take (current position -> destination), as [[lat, lon], ...]. */

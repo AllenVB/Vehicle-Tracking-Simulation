@@ -18,6 +18,7 @@
     const manual = new Set();
     const journey = new Map();
     let fuelStations = [];
+    const messages = new Map();               // vehicleId -> [{category, body, at}]
     let selected = null;
     let routeLayer = null;
     let alerts = 0, fineTotal = 0, fitted = false;
@@ -86,6 +87,14 @@
             select(byPlateNo.get(n) ?? null);
         });
         document.getElementById("releaseBtn").addEventListener("click", release);
+
+        loadProvinces();
+        document.getElementById("routeBtn").addEventListener("click", openRoutePicker);
+        document.getElementById("routeCancel").addEventListener("click", closeRoutePicker);
+        document.getElementById("routeGo").addEventListener("click", createRoute);
+        document.getElementById("msgSend").addEventListener("click", sendMessage);
+        document.getElementById("msgText").addEventListener("keydown",
+            e => { if (e.key === "Enter") sendMessage(); });
     }
 
     function initMaps() {
@@ -137,6 +146,7 @@
             setStatus("Bağlı · canlı", true);
             stomp.subscribe("/topic/fleet/live", m => apply(JSON.parse(m.body).vehicles || []));
             stomp.subscribe("/topic/violations", m => onViolation(JSON.parse(m.body)));
+            stomp.subscribe("/topic/vehicle-messages", m => onIncomingMessage(JSON.parse(m.body)));
         };
         stomp.onWebSocketClose = () => setStatus("Bağlantı koptu · yeniden deneniyor…", false);
         stomp.activate();
@@ -254,9 +264,12 @@
     function popup(p) {
         const v = vehicles.get(p.vehicleId);
         const j = journey.get(p.vehicleId);
+        const msgs = messages.get(p.vehicleId);
+        const lastMsg = msgs && msgs.length
+            ? `<br><span style="color:#ffd27f">⚠ ${msgs[0].category}:</span> ${msgs[0].body}` : "";
         return `<b>${v ? v.plate : "#" + p.vehicleId}</b>` +
             `<br><small>${v ? v.model : ""}</small><br>Hız: ${p.speedKmh ?? "-"} km/s` +
-            (j && j.destination ? `<br>${journeyText(j)}` : "");
+            (j && j.destination ? `<br>${journeyText(j)}` : "") + lastMsg;
     }
 
     // ── Benzin istasyonları ─────────────────────────────────────────────────
@@ -313,11 +326,17 @@
         const info = document.getElementById("selInfo");
         const btn = document.getElementById("releaseBtn");
         const v = selected != null ? vehicles.get(selected) : null;
+        // Rota Oluştur butonu ve uyarı kutusu yalnızca bir araç seçiliyken.
+        document.getElementById("routeBtn").style.display = v ? "block" : "none";
+        document.getElementById("msgBox").style.display = v ? "block" : "none";
+        if (changedSelection) closeRoutePicker();
         if (v) {
             const isManual = manual.has(selected);
             const j = journey.get(selected);
             const p = pos.get(selected);
             const heli = j && j.flying ? '<span class="pill heli">HELİKOPTER</span>' : "";
+            if (changedSelection) loadMessages(selected);
+            else renderMessages(selected);
             let fuelLine = "";
             if (p && v.type !== "HELICOPTER") {
                 const nf = nearestFuel(p.lat, p.lon);
@@ -394,6 +413,114 @@
         manual.delete(selected);
         select(selected);
         flash("Araç otomatiğe döndü.");
+    }
+
+    // ── Rota Oluştur (hedef il seç) ─────────────────────────────────────────
+    async function loadProvinces() {
+        try {
+            const res = await fetch("/api/v1/control/provinces", { headers: auth() });
+            if (!res.ok) return;
+            const sel = document.getElementById("provinceSelect");
+            sel.innerHTML = "";
+            (await res.json()).forEach(name => {
+                const o = document.createElement("option");
+                o.value = name; o.textContent = name;
+                sel.appendChild(o);
+            });
+        } catch (_) { /* yoksay */ }
+    }
+
+    function openRoutePicker() {
+        if (selected == null) return;
+        document.getElementById("routeBtn").style.display = "none";
+        document.getElementById("routePicker").style.display = "block";
+    }
+    function closeRoutePicker() {
+        document.getElementById("routePicker").style.display = "none";
+        document.getElementById("routeBtn").style.display = selected != null ? "block" : "none";
+    }
+
+    async function createRoute() {
+        if (selected == null) return;
+        const province = document.getElementById("provinceSelect").value;
+        const plate = (vehicles.get(selected) || {}).plate || ("#" + selected);
+        const go = document.getElementById("routeGo");
+        go.disabled = true; go.textContent = "Oluşturuluyor…";
+        try {
+            const res = await fetch(`/api/v1/control/${selected}/destination`, {
+                method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
+                body: JSON.stringify({ province })
+            });
+            if (!res.ok) { flash("Rota oluşturulamadı."); return; }
+            manual.delete(selected);
+            setTimeout(() => showPlannedRoute(selected), 400);   // yeni rotayı çiz
+            flash(`🗺️ ${plate} → ${province} rotasına yönlendirildi.`);
+            closeRoutePicker();
+        } catch (_) { flash("Rota oluşturulamadı (bağlantı)."); }
+        finally { go.disabled = false; go.textContent = "Rotayı Oluştur"; }
+    }
+
+    // ── Araca uyarı mesajı ──────────────────────────────────────────────────
+    async function sendMessage() {
+        if (selected == null) return;
+        const category = document.getElementById("msgCat").value;
+        const input = document.getElementById("msgText");
+        const body = input.value.trim();
+        if (!body) { flash("Önce bir uyarı mesajı yaz."); return; }
+        try {
+            const res = await fetch(`/api/v1/vehicles/${selected}/messages`, {
+                method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
+                body: JSON.stringify({ category, body })
+            });
+            if (!res.ok) { flash("Uyarı gönderilemedi."); return; }
+            input.value = "";   // WebSocket yayını toast + listeyi günceller
+        } catch (_) { flash("Uyarı gönderilemedi (bağlantı)."); }
+    }
+
+    async function loadMessages(vehicleId) {
+        try {
+            const res = await fetch(`/api/v1/vehicles/${vehicleId}/messages`, { headers: auth() });
+            if (!res.ok) return;
+            messages.set(vehicleId, await res.json());
+            renderMessages(vehicleId);
+        } catch (_) { /* yoksay */ }
+    }
+
+    function renderMessages(vehicleId) {
+        const el = document.getElementById("msgList");
+        if (!el || vehicleId !== selected) return;
+        const list = messages.get(vehicleId) || [];
+        el.innerHTML = "";
+        if (!list.length) {
+            el.innerHTML = `<div class="msg-item" style="border-color:var(--line);color:var(--muted)">Bu araca henüz uyarı yok.</div>`;
+            return;
+        }
+        list.forEach(m => {
+            const div = document.createElement("div");
+            div.className = "msg-item";
+            const t = m.at ? new Date(m.at).toLocaleTimeString("tr-TR") : "";
+            div.innerHTML = `<span class="mc">${m.category}</span> — ${m.body}<div class="mt">${t}</div>`;
+            el.appendChild(div);
+        });
+    }
+
+    function onIncomingMessage(msg) {
+        const arr = messages.get(msg.vehicleId) || [];
+        arr.unshift({ category: msg.category, body: msg.body, at: msg.at });
+        messages.set(msg.vehicleId, arr);
+        if (msg.vehicleId === selected) renderMessages(msg.vehicleId);
+        const m = liveMarkers.get(msg.vehicleId);
+        if (m) m.setPopupContent(popup(pos.get(msg.vehicleId) || { vehicleId: msg.vehicleId }));
+        showToast(`<span class="tt">⚠ ${msg.plate} · ${msg.category}</span><br>${msg.body}`);
+    }
+
+    let toastTimer = null;
+    function showToast(html) {
+        const el = document.getElementById("toast");
+        el.innerHTML = html;
+        el.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.remove("show"), 6000);
     }
 
     async function refreshDispatch() {
