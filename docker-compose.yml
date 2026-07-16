@@ -59,6 +59,15 @@ services:
         create vehicle.trip
         create vehicle.notification
         create vehicle.rule.cache-invalidation 1
+        # Dead-letter topic per consumed topic, named by Topics.dlqFor(). Same partition
+        # count: a dead letter keeps its original partition, so per-vehicle ordering
+        # survives a replay. vehicle.telemetry.raw is the exception -- its dead letters
+        # go to vehicle.telemetry.dlq, created above.
+        create vehicle.telemetry.processed.dlq
+        create vehicle.violation.dlq
+        create vehicle.geofence.event.dlq
+        create vehicle.trip.dlq
+        create vehicle.notification.dlq
         echo "topics ready:"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --list
 

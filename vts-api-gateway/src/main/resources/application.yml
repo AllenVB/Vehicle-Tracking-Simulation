@@ -44,6 +44,9 @@ vts:
   simulator:
     # Operator control is proxied here so the whole UI lives on one origin.
     base-url: ${SIMULATOR_BASE_URL:http://localhost:8085}
+    # Short: this proxies an interactive operator click, so failing fast beats hanging.
+    connect-timeout: 2s
+    read-timeout: 5s
 
 management:
   endpoints:

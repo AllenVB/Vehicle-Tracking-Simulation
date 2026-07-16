@@ -31,6 +31,23 @@
             <artifactId>jakarta.validation-api</artifactId>
         </dependency>
 
+        <!--
+          Optional: only the Kafka consumer support in com.fleet.vts.common.kafka needs
+          these. Kept optional so a module that depends on vts-common purely for the event
+          model does not inherit spring-kafka; the auto-configuration backs off via
+          @ConditionalOnClass when they are absent.
+        -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

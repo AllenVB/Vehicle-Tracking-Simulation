@@ -24,6 +24,16 @@ public class SimulatorProperties {
     /** Base URL of the ingestion service. */
     private String ingestionBaseUrl = "http://localhost:8081";
 
+    /** How long to wait for a TCP connection to ingestion before failing the tick. */
+    private Duration ingestionConnectTimeout = Duration.ofSeconds(2);
+
+    /**
+     * How long to wait for ingestion's response. Bounded so a stalled ingestion cannot
+     * pin the simulator's tick thread indefinitely — a dropped batch is recoverable,
+     * a wedged simulator is not.
+     */
+    private Duration ingestionReadTimeout = Duration.ofSeconds(10);
+
     /** When true, vehicle routes follow real roads via OSRM (fallback: local loops). */
     private boolean roadRouting = true;
 

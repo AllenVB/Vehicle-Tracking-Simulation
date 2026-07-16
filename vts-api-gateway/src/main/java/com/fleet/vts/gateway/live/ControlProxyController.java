@@ -1,6 +1,5 @@
 package com.fleet.vts.gateway.live;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -43,10 +42,9 @@ public class ControlProxyController {
     private volatile Map<Integer, Long> toVehicleId = Map.of();
     private volatile long loadedAt;
 
-    public ControlProxyController(JdbcTemplate jdbc,
-                                  @Value("${vts.simulator.base-url}") String simulatorBaseUrl) {
+    public ControlProxyController(JdbcTemplate jdbc, RestClient simulatorRestClient) {
         this.jdbc = jdbc;
-        this.simulator = RestClient.create(simulatorBaseUrl);
+        this.simulator = simulatorRestClient;
     }
 
     private synchronized void refreshMappingIfStale() {

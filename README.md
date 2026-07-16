@@ -126,7 +126,7 @@ Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında
 
 | Modül | Port | Sorumluluk |
 |---|---|---|
-| `vts-common` | — | Event modelleri, topic sabitleri, enum'lar, TenantContext |
+| `vts-common` | — | Event modelleri, topic sabitleri, enum'lar, TenantContext, ortak Kafka tüketici desteği (deserialization + retry/DLQ politikası) |
 | `vts-simulator` | 8085 | Filo simülatörü (Virtual Threads), OSRM yol rotaları, konum override API'si (UI sunmaz) |
 | `vts-ingestion-service` | 8081 | Stateless HTTP giriş; imei→vehicle lookup (Caffeine→Redis→DB), Kafka publish, DLQ |
 | `vts-processing-service` | 8082 | Batch consumer; JDBC batch insert, durumsuz kurallar **+ ihlal cooldown**, outbox |

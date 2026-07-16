@@ -43,4 +43,20 @@ public final class Topics {
 
     /** Broadcast to invalidate rule/threshold caches when a rule changes. */
     public static final String RULE_CACHE_INVALIDATION = "vehicle.rule.cache-invalidation";
+
+    /**
+     * The dead-letter topic a record is routed to once its retries are exhausted.
+     *
+     * <p>The convention is {@code <topic>.dlq}. {@link #TELEMETRY_RAW} is the one
+     * exception: its dead letters have always gone to {@link #TELEMETRY_DLQ}
+     * (not {@code vehicle.telemetry.raw.dlq}), so that mapping is preserved here
+     * rather than in a consumer, keeping a single shared error handler correct for
+     * every service.
+     *
+     * <p>Every topic this can return must exist — see the {@code kafka-init}
+     * container in docker-compose.yml.
+     */
+    public static String dlqFor(String topic) {
+        return TELEMETRY_RAW.equals(topic) ? TELEMETRY_DLQ : topic + ".dlq";
+    }
 }
