@@ -2,6 +2,7 @@ package com.fleet.vts.simulator.model;
 
 import com.fleet.vts.simulator.sim.GeoUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -70,6 +71,26 @@ public class Route {
     /** Heading on an A-to-B journey (clamped, see {@link #positionAtClamped}). */
     public double headingAtClamped(double distanceKm) {
         return headingRaw(clamp(distanceKm));
+    }
+
+    /**
+     * The path still ahead on an A-to-B journey: the current interpolated position
+     * followed by every not-yet-passed vertex (the last of which is the destination).
+     * This is what the UI draws as "the route it will take".
+     */
+    public List<GeoPoint> remainingFrom(double distanceKm) {
+        double d = clamp(distanceKm);
+        List<GeoPoint> out = new ArrayList<>();
+        out.add(positionRaw(d));
+        for (int i = 0; i < points.size(); i++) {
+            if (cumulative[i] > d) {
+                out.add(points.get(i));
+            }
+        }
+        if (out.size() == 1) {   // essentially arrived — still give a 2-point line
+            out.add(points.get(points.size() - 1));
+        }
+        return out;
     }
 
     private GeoPoint positionRaw(double d) {

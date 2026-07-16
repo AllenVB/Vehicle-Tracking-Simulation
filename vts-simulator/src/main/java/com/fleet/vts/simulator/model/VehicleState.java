@@ -1,19 +1,23 @@
 package com.fleet.vts.simulator.model;
 
+import java.util.List;
 import java.util.Random;
 
 /**
  * Mutable per-vehicle simulation state.
  *
- * <p>Two movement modes:
+ * <p>Movement modes:
  * <ul>
- *   <li><b>Journey</b> (the norm): the vehicle drives a real OSRM road route toward a
- *       named destination, parks on arrival for a dwell, then asks for a new journey.
- *       The dwell is longer than the trip-detection stop window, so every arrival
- *       actually closes a trip — which is what fills {@code trip} / {@code trip_point}
- *       and gives driver scoring something to score.</li>
- *   <li><b>Loop</b>: a closed polyline the vehicle circles forever. Used only for the
- *       geofence-anomaly vehicle, which must stay inside the restricted zone.</li>
+ *   <li><b>Journey</b> (the norm): drives a real OSRM road route toward a named
+ *       destination, parks on arrival long enough to close the trip, then asks for a
+ *       new journey. This is what fills {@code trip}/{@code trip_point} and gives driver
+ *       scoring something to score.</li>
+ *   <li><b>Flying journey</b> (helicopters, index 101..105): the same journey lifecycle
+ *       but with a straight-line route (crow flies) and a much higher cruise speed. A
+ *       helicopter can be placed anywhere — sea, buildings — and is exempt from the
+ *       road-based rules (enforced by vehicle type in the backend).</li>
+ *   <li><b>Loop</b>: a closed polyline circled forever. Used only for the geofence
+ *       vehicle, which must stay inside the restricted zone.</li>
  * </ul>
  *
  * <p>Not thread-safe by design: each vehicle is ticked by exactly one virtual thread
@@ -28,7 +32,9 @@ public class VehicleState {
     private final String imei;
     private final BehaviorProfile profile;
     private final Random rnd;
-    private final int baseSpeedKmh;   // her aracın rastgele seyir hızı, 0..120 km/s
+    private final boolean flying;     // helicopter
+    private final int baseSpeedKmh;   // cruise speed; road vehicles 0..120, helicopters 180..259
+    private final int maxSpeedKmh;    // clamp ceiling (higher for helicopters)
 
     /** Set for the geofence vehicle: circles this loop forever, no destination. */
     private final Route loop;
@@ -58,14 +64,43 @@ public class VehicleState {
 
     /** Loop vehicle (geofence). */
     public VehicleState(String imei, BehaviorProfile profile, Route loop, long seed) {
-        this(imei, profile, loop, seed, -1);
+        this(imei, profile, loop, null, seed, -1, false);
     }
 
+    /** Loop vehicle with a fixed base speed (used by tests). */
     public VehicleState(String imei, BehaviorProfile profile, Route loop, long seed, int baseSpeedKmh) {
+        this(imei, profile, loop, null, seed, baseSpeedKmh, false);
+    }
+
+    /** Journey vehicle (road): starts parked at {@code (lat, lon)}, asks for a destination. */
+    public VehicleState(String imei, BehaviorProfile profile, double lat, double lon, long seed) {
+        this(imei, profile, lat, lon, seed, -1);
+    }
+
+    public VehicleState(String imei, BehaviorProfile profile, double lat, double lon,
+                        long seed, int baseSpeedKmh) {
+        this(imei, profile, null, new double[]{lat, lon}, seed, baseSpeedKmh, false);
+    }
+
+    /** A helicopter: flying journeys from {@code (lat, lon)}, high speed, no road snap. */
+    public static VehicleState helicopter(String imei, double lat, double lon, long seed) {
+        return new VehicleState(imei, BehaviorProfile.NORMAL, null, new double[]{lat, lon},
+                seed, -1, true);
+    }
+
+    private VehicleState(String imei, BehaviorProfile profile, Route loop, double[] start,
+                         long seed, int baseSpeedKmh, boolean flying) {
         this.imei = imei;
         this.profile = profile;
         this.rnd = new Random(seed);
-        this.baseSpeedKmh = baseSpeedKmh >= 0 ? Math.min(baseSpeedKmh, 120) : rnd.nextInt(121);
+        this.flying = flying;
+        if (flying) {
+            this.baseSpeedKmh = 180 + rnd.nextInt(80);   // 180..259 km/h
+            this.maxSpeedKmh = 300;
+        } else {
+            this.baseSpeedKmh = baseSpeedKmh >= 0 ? Math.min(baseSpeedKmh, 120) : rnd.nextInt(121);
+            this.maxSpeedKmh = 120;
+        }
         this.battery = profile == BehaviorProfile.LOW_BATTERY
                 ? 22 + rnd.nextDouble() * 6 : 80 + rnd.nextDouble() * 20;
         this.fuelPct = 30 + rnd.nextDouble() * 70;
@@ -76,20 +111,11 @@ public class VehicleState {
             GeoPoint p = loop.positionAt(distanceAlongKm);
             this.lat = p.lat();
             this.lon = p.lon();
+        } else if (start != null) {
+            this.lat = start[0];
+            this.lon = start[1];
+            this.needsJourney = true;
         }
-    }
-
-    /** Journey vehicle: starts parked at {@code (lat, lon)} and asks for a destination. */
-    public VehicleState(String imei, BehaviorProfile profile, double lat, double lon, long seed) {
-        this(imei, profile, lat, lon, seed, -1);
-    }
-
-    public VehicleState(String imei, BehaviorProfile profile, double lat, double lon,
-                        long seed, int baseSpeedKmh) {
-        this(imei, profile, (Route) null, seed, baseSpeedKmh);
-        this.lat = lat;
-        this.lon = lon;
-        this.needsJourney = true;
     }
 
     /**
@@ -136,8 +162,6 @@ public class VehicleState {
     }
 
     private void tickJourney(double dtSeconds) {
-        // Parked at the destination: engine on, speed 0 -> the trip closes and, if the
-        // dwell runs long, the idling rule fires. Then we ask for the next destination.
         if (parked) {
             speedKmh = 0;
             parkedSeconds += dtSeconds;
@@ -182,14 +206,18 @@ public class VehicleState {
     }
 
     private double nextSpeed() {
+        if (flying) {
+            double noise = (rnd.nextDouble() - 0.5) * 16;
+            return clamp(baseSpeedKmh + noise, 0, maxSpeedKmh);
+        }
         // Harsh-braking vehicles still inject sudden decelerations.
         if (profile == BehaviorProfile.HARSH_BRAKING && rnd.nextDouble() < 0.15) {
-            return clamp(speedKmh - (45 + rnd.nextDouble() * 10), 0, 120);
+            return clamp(speedKmh - (45 + rnd.nextDouble() * 10), 0, maxSpeedKmh);
         }
-        // Every vehicle cruises around its own random base speed (0..120 km/h);
+        // Every road vehicle cruises around its own random base speed (0..120 km/h);
         // whether that breaches the limit is decided per vehicle type in the rules.
         double noise = (rnd.nextDouble() - 0.5) * 8;
-        return clamp(baseSpeedKmh + noise, 0, 120);
+        return clamp(baseSpeedKmh + noise, 0, maxSpeedKmh);
     }
 
     private static double clamp(double v, double lo, double hi) {
@@ -205,6 +233,10 @@ public class VehicleState {
         return parked;
     }
 
+    public boolean isFlying() {
+        return flying;
+    }
+
     public Journey journey() {
         return journey;
     }
@@ -214,7 +246,17 @@ public class VehicleState {
         return j == null ? null : j.destination();
     }
 
-    /** Real remaining road distance to the destination, in km. */
+    public Double destLat() {
+        Journey j = journey;
+        return j == null ? null : j.destLat();
+    }
+
+    public Double destLon() {
+        Journey j = journey;
+        return j == null ? null : j.destLon();
+    }
+
+    /** Real remaining road (or flight) distance to the destination, in km. */
     public double remainingKm() {
         Journey j = journey;
         if (j == null) {
@@ -229,6 +271,15 @@ public class VehicleState {
             return -1;
         }
         return (int) Math.round(remainingKm() / speedKmh * 60);
+    }
+
+    /** The path still ahead (current position -> destination) for the UI to draw. */
+    public List<GeoPoint> remainingRoute() {
+        Journey j = journey;
+        if (j == null) {
+            return List.of();
+        }
+        return j.route().remainingFrom(distanceAlongKm);
     }
 
     public boolean isLoopVehicle() {

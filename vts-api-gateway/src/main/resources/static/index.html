@@ -61,6 +61,7 @@
         .pill { font-size: 9px; padding: 1px 6px; border-radius: 9px; margin-left: 5px; }
         .pill.manual { background: rgba(224,138,29,.22); color: var(--manual); }
         .pill.auto { background: rgba(55,138,221,.22); color: var(--auto); }
+        .pill.heli { background: rgba(168,85,247,.22); color: #c4a5f7; }
 
         /* ── Haritalar (5 + 5) ── */
         .mapWrap { position: relative; min-width: 0; }
@@ -73,16 +74,17 @@
                     background: rgba(15,23,32,.82); color: #fff; font-size: 11px; font-weight: 600;
                     padding: 5px 10px; border-radius: 6px; letter-spacing: .3px; }
 
-        /* Marker'lar */
-        .veh-icon { transition: transform .9s linear; }
-        .veh-arrow.alert { animation: pulse .6s ease-in-out 6 alternate; }
-        @keyframes pulse { to { filter: drop-shadow(0 0 6px var(--alert)); } }
-        .veh-num { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-                   border-radius: 50%; font-size: 10px; font-weight: 700; color: #fff;
-                   border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
-        .veh-num.auto { background: var(--auto); }
-        .veh-num.manual { background: var(--manual); }
-        .veh-num.selected { outline: 3px solid #ffd27f; }
+        /* Marker'lar — tipe göre logo, yöne dönük */
+        .veh-mk { position: relative; width: 30px; height: 30px; }
+        .veh-ico { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                   transition: transform .9s linear; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+        .veh-ico.alert { animation: pulse .6s ease-in-out 6 alternate; }
+        @keyframes pulse { to { filter: drop-shadow(0 0 7px var(--alert)); } }
+        .veh-badge { position: absolute; right: -3px; bottom: -3px; min-width: 15px; height: 15px; padding: 0 3px;
+                     border-radius: 8px; background: #16212e; color: #fff; border: 1px solid #fff;
+                     font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; }
+        .veh-mk.selected::before { content: ""; position: absolute; inset: -4px; border-radius: 50%;
+                     border: 2px solid #ffd27f; box-shadow: 0 0 6px #ffd27f; }
 
         /* Giriş */
         #login { position: fixed; inset: 0; background: rgba(9,14,20,.93); display: flex;
@@ -124,10 +126,11 @@
 
     <div id="ctrl">
         <div class="hint">
-            Araç seç, sağdaki haritada yeni konuma <b>çift tıkla</b>.
-            Sol harita ~1 sn içinde güncellenir.
+            Araç seç, sağdaki haritada yeni konuma <b>çift tıkla</b>. Kara araçları
+            <b>en yakın yola</b> oturtulur (yol dışı tıklamada uyarı). Helikopterler
+            (101–105) her yere konabilir. Seçilince gideceği rota çizilir.
         </div>
-        <input id="plateNo" type="number" min="1" max="100" placeholder="Plaka no (örn. 7 → VTS-007)"/>
+        <input id="plateNo" type="number" min="1" max="105" placeholder="Plaka no 1–105 (101–105 helikopter)"/>
         <div id="selInfo"></div>
         <button id="releaseBtn" disabled>Otomatiğe döndür</button>
     </div>

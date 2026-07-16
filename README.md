@@ -19,11 +19,13 @@ Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita 
 
 ![VTS tek sayfa](docs/screenshots/vts-tek-sayfa.png)
 
-- **Sol (2/12) — Filo barı:** araç listesi (plakalar), canlı ihlaller, seçim ve kontrol kutusu.
-- **Orta (5/12) — Canlı harita** (OpenStreetMap): 100 araç **gerçek yollarda** (OSRM rotaları),
-  yönlerine göre dönen oklar; ihlalde araç kırmızıya boyanır.
+- **Sol (2/12) — Filo barı:** araç listesi, sürücü skorları, canlı ihlaller, seçim ve kontrol kutusu.
+- **Orta (5/12) — Canlı harita** (OpenStreetMap): 105 araç **gerçek yollarda** (OSRM rotaları).
+  Her araç **tipine göre logo** ile gösterilir (otomobil · tır · motor · helikopter), gittiği
+  yöne döner; ihlalde kırmızıya boyanır. Bir araç seçilince **gideceği rota** çizilir.
 - **Sağ (5/12) — Operatör haritası** (CartoDB): aracı seç, yeni konuma **çift tıkla**.
-  Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
+  Kara araçları **en yakın yola** oturtulur (yol dışına tıklamada uyarı); helikopterler her
+  yere konabilir. Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
 
 Her iki harita **tek bir WebSocket aboneliğinden** beslenir — polling yok.
 
@@ -123,7 +125,7 @@ Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında
 ## Filo modeli
 
 ### Türkiye geneli dağılım
-100 araç, **81 ilin tamamına** nüfusa göre ağırlıklandırılarak dağıtılır:
+100 kara aracı, **81 ilin tamamına** nüfusa göre ağırlıklandırılarak dağıtılır (+ 5 helikopter = 105):
 
 | İl grubu | Araç | Örnek |
 |---|---|---|
@@ -139,9 +141,20 @@ Plaka, tipi de taşır: `VTS-001-Otomobil`, `VTS-027-Tır`, `VTS-063-Motor`.
 | Otomobil | 50 | **110** km/s | `rule_assignment` GROUP override |
 | Motor | 20 | **90** km/s | `rule_assignment` GROUP override |
 | Tır | 30 | **80** km/s | temel `SPEED_LIMIT` eşiği |
+| Helikopter | 5 | — | **kural yok** (uçar, muaf) |
 
-Her araca açılışta **rastgele 0–120 km/s** taban seyir hızı atanır; sınırı aşan araç
+Kara araçlarına açılışta **rastgele 0–120 km/s** taban seyir hızı atanır; sınırı aşan araç
 ihlal üretir (aşağıdaki cooldown'a tabi).
+
+### Helikopterler (plaka 101–105)
+5 helikopter, uçtukları için kara araçlarından farklı davranır:
+- **Düz uçuş, yüksek hız** (180–260 km/s); rotaları OSRM değil, kuş uçuşu hattı.
+- **Yol-tabanlı kurallardan muaf** — hız limiti, sürekli hız aşımı, sert fren, geofence
+  onlara işlemez (evlerin, denizin, yolların üstünden geçebilirler). Bu muafiyet
+  processing ve stream-analytics'te **araç tipine göre** uygulanır; trip ve rölanti hâlâ
+  geçerli (bir uçuş da bir trip'tir).
+- Operatör bir helikopteri **istediği yere** (deniz, bina üstü) koyabilir; kara araçları
+  ise en yakın yola oturtulur.
 
 ### Yolculuklar: hedef, gerçek yol, kalan km
 Araçlar amaçsız dönmez; **gerçek yolculuk** yapar:

@@ -59,6 +59,53 @@ public class RoadRoutes {
         return route(new double[][] { {fromLat, fromLon}, {toLat, toLon} }, false);
     }
 
+    /** A point snapped onto the road network, and how far (metres) the input was from it. */
+    public record NearestRoad(double lat, double lon, double distanceMeters) {
+    }
+
+    /**
+     * Snap (lat, lon) to the nearest drivable road via OSRM's nearest service, so an
+     * operator move never drops a road vehicle inside a building or the sea. Returns
+     * {@code null} if routing is unavailable — the caller then places the vehicle at the
+     * clicked point unchanged.
+     */
+    public NearestRoad nearestRoad(double lat, double lon) {
+        if (!props.isRoadRouting() || failures.get() >= MAX_FAILURES) {
+            return null;
+        }
+        try {
+            String url = props.getOsrmBaseUrl() + "/nearest/v1/driving/" + lon + "," + lat + "?number=1";
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(6)).GET().build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() != 200) {
+                return failNearest("HTTP " + res.statusCode());
+            }
+            JsonNode root = mapper.readTree(res.body());
+            if (!"Ok".equals(root.path("code").asText())) {
+                return failNearest("code=" + root.path("code").asText());
+            }
+            JsonNode wp = root.path("waypoints").path(0);
+            JsonNode loc = wp.path("location");   // [lon, lat]
+            if (!loc.isArray() || loc.size() < 2) {
+                return failNearest("no waypoint");
+            }
+            failures.set(0);
+            return new NearestRoad(loc.get(1).asDouble(), loc.get(0).asDouble(),
+                    wp.path("distance").asDouble(0));
+        } catch (Exception e) {
+            return failNearest(e.getMessage());
+        }
+    }
+
+    private NearestRoad failNearest(String why) {
+        int n = failures.incrementAndGet();
+        if (n == 1 || n == MAX_FAILURES) {
+            log.warn("OSRM nearest failed ({}); placing at click without snapping.", why);
+        }
+        return null;
+    }
+
     private Route route(double[][] waypoints, boolean closed) {
         if (!props.isRoadRouting() || failures.get() >= MAX_FAILURES) {
             return null;

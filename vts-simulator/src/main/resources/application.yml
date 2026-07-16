@@ -34,7 +34,8 @@ spring:
       on-profile: dev
 vts:
   simulator:
-    vehicle-count: 100
+    # 100 kara aracı + 5 helikopter (index 101..105) = 105 kapasite.
+    vehicle-count: 105
     tick: 1s
 
 ---

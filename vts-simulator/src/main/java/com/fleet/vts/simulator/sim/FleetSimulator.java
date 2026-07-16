@@ -50,6 +50,11 @@ public class FleetSimulator {
     private static final int DESTINATION_CANDIDATES = 8;
     /** How many routes we ask OSRM for per assigner cycle (be a polite client). */
     private static final int ASSIGN_BATCH = 6;
+    /** Vehicle indices 101..105 are helicopters (they fly). */
+    private static final int HELI_FIRST = 101;
+    private static final int HELI_LAST = 105;
+    /** An operator move further than this from a road is treated as an off-road click. */
+    private static final double OFF_ROAD_METERS = 20.0;
 
     private final SimulatorProperties properties;
     private final IngestionClient ingestionClient;
@@ -93,19 +98,22 @@ public class FleetSimulator {
                     ? slots.get(i - 1)
                     : TurkeyProvinces.ALL.get((i - 1) % TurkeyProvinces.ALL.size());
 
-            BehaviorProfile profile = BehaviorProfile.forIndex(i);
+            String imei = String.format("%015d", i);
             VehicleState v;
-            if (!geofenceAssigned && p.name().equals("İstanbul")) {
+            if (i >= HELI_FIRST && i <= HELI_LAST) {
+                // Helicopters (101..105): flying journeys, high speed, exempt from road rules.
+                v = VehicleState.helicopter(imei, p.lat(), p.lon(), i);
+            } else if (!geofenceAssigned && p.name().equals("İstanbul")) {
                 // One Istanbul vehicle circles inside the seeded restricted geofence, so
                 // geofence enter/exit events keep firing. It takes no destination.
-                v = new VehicleState(String.format("%015d", i), BehaviorProfile.GEOFENCE,
-                        RouteFactory.restrictedZoneLoop(), i);
+                v = new VehicleState(imei, BehaviorProfile.GEOFENCE, RouteFactory.restrictedZoneLoop(), i);
                 geofenceAssigned = true;
             } else {
+                BehaviorProfile profile = BehaviorProfile.forIndex(i);
                 if (profile == BehaviorProfile.GEOFENCE) {
                     profile = BehaviorProfile.NORMAL; // geofence is only meaningful in Istanbul
                 }
-                v = new VehicleState(String.format("%015d", i), profile, p.lat(), p.lon(), i);
+                v = new VehicleState(imei, profile, p.lat(), p.lon(), i);
             }
             v.setRegion(p.name());
             vehicles.add(v);
@@ -181,10 +189,13 @@ public class FleetSimulator {
         TurkeyProvinces.Province dest = TurkeyProvinces.nearbyDestination(
                 v.lat(), v.lon(), DESTINATION_CANDIDATES, rnd);
 
-        Route route = roadRoutes.routeBetween(v.lat(), v.lon(), dest.lat(), dest.lon());
+        Route route = null;
+        if (!v.isFlying()) {
+            route = roadRoutes.routeBetween(v.lat(), v.lon(), dest.lat(), dest.lon());
+        }
         if (route == null) {
-            // OSRM unavailable: fall back to a straight line so the vehicle still travels,
-            // still arrives, and still closes trips — just not on real roads.
+            // Helicopters always fly straight; road vehicles fall back to a straight line
+            // only when OSRM is unavailable (they still travel, arrive and close trips).
             route = new Route(List.of(new GeoPoint(v.lat(), v.lon()),
                     new GeoPoint(dest.lat(), dest.lon())), false);
         }
@@ -239,28 +250,66 @@ public class FleetSimulator {
             m.put("manual", v.isManual());
             m.put("region", v.region());
             m.put("destination", v.destination());
+            m.put("destLat", v.destLat());
+            m.put("destLon", v.destLon());
             m.put("remainingKm", Math.round(v.remainingKm() * 10) / 10.0);
             m.put("etaMinutes", v.etaMinutes());
             m.put("parked", v.isParked());
+            m.put("flying", v.isFlying());
             out.add(m);
         });
         return out;
     }
 
-    /** Pin a vehicle to a manual position (operator override). False if unknown id. */
-    public boolean setManualPosition(long id, double lat, double lon) {
+    /** The route still ahead for a vehicle, as [[lat, lon], ...] (for the UI to draw). */
+    public List<double[]> routeGeometry(long id) {
         VehicleState v = byId.get(id);
         if (v == null) {
-            return false;
+            return List.of();
         }
-        v.setManual(lat, lon);
-        // Publish straight away instead of waiting for the next tick: otherwise the
-        // move takes up to a full tick to even enter the pipeline, which is most of
-        // the latency an operator perceives on the live map.
+        List<double[]> out = new ArrayList<>();
+        v.remainingRoute().forEach(p -> out.add(new double[]{p.lat(), p.lon()}));
+        return out;
+    }
+
+    /**
+     * Pin a vehicle to a manual position (operator override). Road vehicles are snapped to
+     * the nearest road (they cannot drive through buildings); helicopters are placed exactly
+     * where clicked (they fly). Returns the outcome, or {@code null} if the id is unknown.
+     */
+    public Map<String, Object> setManualPosition(long id, double lat, double lon) {
+        VehicleState v = byId.get(id);
+        if (v == null) {
+            return null;
+        }
+        double placeLat = lat;
+        double placeLon = lon;
+        double offRoadMeters = 0;
+        boolean snapped = false;
+        if (!v.isFlying()) {
+            RoadRoutes.NearestRoad nr = roadRoutes.nearestRoad(lat, lon);
+            if (nr != null) {
+                placeLat = nr.lat();
+                placeLon = nr.lon();
+                offRoadMeters = nr.distanceMeters();
+                snapped = offRoadMeters > OFF_ROAD_METERS;
+            }
+        }
+        v.setManual(placeLat, placeLon);
+        // Publish straight away instead of waiting for the next tick: otherwise the move
+        // takes up to a full tick to enter the pipeline — most of the perceived latency.
         v.tick(0);
         ingestionClient.sendBatch(List.of(toPayload(v)));
         sent.increment();
-        return true;
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("found", true);
+        result.put("flying", v.isFlying());
+        result.put("snapped", snapped);
+        result.put("lat", placeLat);
+        result.put("lon", placeLon);
+        result.put("offRoadMeters", Math.round(offRoadMeters));
+        return result;
     }
 
     /** Release a vehicle back to automatic simulation. False if unknown id. */

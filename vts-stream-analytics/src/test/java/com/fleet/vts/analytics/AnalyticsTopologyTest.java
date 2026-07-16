@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fleet.vts.analytics.config.Serdes;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
+import com.fleet.vts.analytics.rules.HelicopterRegistry;
 import com.fleet.vts.analytics.rules.SpeedLimitRegistry;
 import com.fleet.vts.analytics.topology.AnalyticsTopology;
 import com.fleet.vts.common.enums.GeofenceEventType;
@@ -49,8 +50,9 @@ class AnalyticsTopologyTest {
 
     private void start(GeofenceRegistry registry) {
         StreamsBuilder builder = new StreamsBuilder();
-        // Test aracı 42: tır eşiği (80) — mevcut testlerin davranışı korunur.
-        new AnalyticsTopology(registry, new SpeedLimitRegistry(Map.of(42L, 80.0)), mapper)
+        // Test aracı 42: tır eşiği (80), helikopter değil — mevcut testlerin davranışı korunur.
+        new AnalyticsTopology(registry, new SpeedLimitRegistry(Map.of(42L, 80.0)),
+                new HelicopterRegistry(java.util.Set.of()), mapper)
                 .buildPipeline(builder);
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, "analytics-test");

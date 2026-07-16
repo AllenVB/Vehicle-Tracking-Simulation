@@ -96,23 +96,42 @@ public class ControlProxyController {
             m.put("vehicleId", vehicleId);
             m.put("manual", p.get("manual"));
             m.put("destination", p.get("destination"));
+            m.put("destLat", p.get("destLat"));
+            m.put("destLon", p.get("destLon"));
             m.put("remainingKm", p.get("remainingKm"));
             m.put("etaMinutes", p.get("etaMinutes"));
             m.put("parked", p.get("parked"));
+            m.put("flying", p.get("flying"));
             out.add(m);
         }
         return out;
     }
 
     @PostMapping("/{vehicleId}/position")
-    public ResponseEntity<Void> move(@PathVariable Long vehicleId, @RequestBody MoveRequest request) {
+    public ResponseEntity<Map<String, Object>> move(@PathVariable Long vehicleId,
+                                                    @RequestBody MoveRequest request) {
         Integer index = simIndex(vehicleId);
         if (index == null) {
             return ResponseEntity.notFound().build();
         }
-        simulator.post().uri("/api/control/{i}/position", index)
-                .body(request).retrieve().toBodilessEntity();
-        return ResponseEntity.ok().build();
+        // Carry the simulator's outcome back (snapped-to-road? off-road distance? flying?)
+        // so the UI can warn and place the marker where the vehicle actually landed.
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = simulator.post().uri("/api/control/{i}/position", index)
+                .body(request).retrieve().body(Map.class);
+        return ResponseEntity.ok(result);
+    }
+
+    /** The route a vehicle will take (current position -> destination), for the UI to draw. */
+    @GetMapping("/{vehicleId}/route")
+    public ResponseEntity<Object> route(@PathVariable Long vehicleId) {
+        Integer index = simIndex(vehicleId);
+        if (index == null) {
+            return ResponseEntity.notFound().build();
+        }
+        Object geometry = simulator.get().uri("/api/control/{i}/route", index)
+                .retrieve().body(Object.class);
+        return ResponseEntity.ok(geometry);
     }
 
     @DeleteMapping("/{vehicleId}/position")

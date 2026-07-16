@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Resolves the effective rules for a vehicle. Thresholds are never hard-coded:
@@ -27,11 +28,15 @@ public class RuleConfigService {
                            double thresholdDefault, boolean enabled, int cooldownSeconds) {
     }
 
+    /** Road-based rules that do not apply to aircraft (helicopters fly over everything). */
+    private static final Set<String> ROAD_RULES = Set.of("SPEED_LIMIT");
+
     private final JdbcTemplate jdbc;
 
     private final Cache<Long, Map<String, RuleDef>> rulesByTenant = build();
     private final Cache<Long, Map<String, Map<Long, Double>>> groupOverridesByTenant = build();
     private final Cache<Long, Optional<Long>> vehicleGroup = build();
+    private final Cache<Long, Boolean> helicopter = build();
 
     public RuleConfigService(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
@@ -50,9 +55,13 @@ public class RuleConfigService {
         Map<String, Map<Long, Double>> overrides =
                 groupOverridesByTenant.get(tenantId, this::loadGroupOverrides);
         Long groupId = vehicleGroup.get(vehicleId, this::loadVehicleGroup).orElse(null);
+        boolean isHelicopter = helicopter.get(vehicleId, this::loadIsHelicopter);
 
         Map<String, RuleView> result = new LinkedHashMap<>();
         for (RuleDef def : defs.values()) {
+            if (isHelicopter && ROAD_RULES.contains(def.code())) {
+                continue;   // helicopters are exempt from road rules
+            }
             double threshold = def.thresholdDefault();
             if (groupId != null) {
                 Double override = overrides.getOrDefault(def.code(), Map.of()).get(groupId);
@@ -71,6 +80,14 @@ public class RuleConfigService {
         rulesByTenant.invalidateAll();
         groupOverridesByTenant.invalidateAll();
         vehicleGroup.invalidateAll();
+        helicopter.invalidateAll();
+    }
+
+    private Boolean loadIsHelicopter(Long vehicleId) {
+        Boolean heli = jdbc.query("SELECT type = 'HELICOPTER' FROM vehicle WHERE id = ?",
+                (ResultSetExtractor<Boolean>) rs -> rs.next() && rs.getBoolean(1),
+                vehicleId);
+        return Boolean.TRUE.equals(heli);
     }
 
     private Map<String, RuleDef> loadRules(Long tenantId) {

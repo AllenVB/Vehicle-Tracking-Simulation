@@ -1,13 +1,12 @@
 /*
  * VTS — tek sayfa, iki harita (2/5/5 grid), tek servis (gateway).
  *
- *  - Sol harita  : canlı filo (OpenStreetMap)
- *  - Sağ harita  : operatör (CartoDB) — araç seç, çift tıkla taşı
- *  - TEK WebSocket (/topic/fleet/live) her iki haritayı da besler; eski konsolun
- *    1.5 sn'lik polling'i kalktı, konumlar push ile gelir.
- *  - Kontrol çağrıları gateway'in /api/v1/control/** proxy'sine gider; gateway
- *    vehicleId -> simülatör index çevirisini imei üzerinden yapar (plaka numarası
- *    ile veritabanı id'si AYNI DEĞİLDİR).
+ *  - Sol harita  : canlı filo (OpenStreetMap)   — tipe göre logo, yöne dönük
+ *  - Sağ harita  : operatör (CartoDB)            — logo + plaka no, çift tıkla taşı
+ *  - Marker'lar araç tipine göre: otomobil / tır / motor / helikopter logosu.
+ *  - Kara araçları taşınırken yol dışına tıklanırsa en yakın yola oturtulur ve uyarı
+ *    verilir; helikopterler uçtuğu için istenen her yere (deniz, bina üstü) konulabilir.
+ *  - TEK WebSocket (/topic/fleet/live) her iki haritayı da besler.
  */
 (function () {
     "use strict";
@@ -17,13 +16,16 @@
     const liveMarkers = new Map();            // vehicleId -> marker (sol)
     const ctrlMarkers = new Map();            // vehicleId -> marker (sağ)
     const pos = new Map();                    // vehicleId -> {lat,lon,speedKmh,heading}
-    const vehicles = new Map();               // vehicleId -> {plate, plateNo, model}
+    const vehicles = new Map();               // vehicleId -> {plate, plateNo, type, model}
     const byPlateNo = new Map();              // plakaNo -> vehicleId
     const manual = new Set();                 // elle sabitlenen vehicleId'ler
-    const journey = new Map();                // vehicleId -> {destination, remainingKm, etaMinutes, parked}
+    const journey = new Map();                // vehicleId -> {destination, remainingKm, etaMinutes, parked, flying}
     let selected = null;                      // seçili vehicleId
-    let routeLayer = null;                    // seçili aracın son trip rotası
+    let routeLayer = null;                    // seçili aracın gideceği rota
     let alerts = 0, fitted = false;
+
+    // Tip -> renk (logolar bu renkte çizilir)
+    const TYPE_COLOR = { CAR: "#378add", TRUCK: "#e0912a", MOTORCYCLE: "#1d9e75", HELICOPTER: "#a855f7" };
 
     // ── Giriş ───────────────────────────────────────────────────────────────
     const loginBtn = document.getElementById("loginBtn");
@@ -63,9 +65,9 @@
         await loadSnapshot();
         connectWs();
         refreshDispatch();
-        setInterval(refreshDispatch, 3000);   // sevkiyat bilgisi (hafif, yavaş değişir)
+        setInterval(refreshDispatch, 3000);
         loadScores();
-        setInterval(loadScores, 60000);       // skorlar günlük hesaplanır, sık çekmeye gerek yok
+        setInterval(loadScores, 60000);
         loadGeofences();
 
         document.getElementById("plateNo").addEventListener("input", e => {
@@ -85,7 +87,6 @@
         L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
             { maxZoom: 19, subdomains: "abcd" }).addTo(ctrl);
 
-        // Araç seçiliyken çift tık SADECE taşır (zoom kapalı); seçim yokken yakınlaştırır.
         ctrl.on("dblclick", onCtrlDblClick);
     }
 
@@ -99,7 +100,10 @@
         list.sort((a, b) => plateNo(a.plate) - plateNo(b.plate));
         list.forEach(v => {
             const no = plateNo(v.plate);
-            vehicles.set(v.id, { plate: v.plate, plateNo: no, model: [v.make, v.model].filter(Boolean).join(" ") });
+            vehicles.set(v.id, {
+                plate: v.plate, plateNo: no, type: v.type,
+                model: [v.make, v.model].filter(Boolean).join(" ")
+            });
             byPlateNo.set(no, v.id);
             const row = document.createElement("div");
             row.className = "row";
@@ -125,14 +129,11 @@
     function connectWs() {
         const stomp = new StompJs.Client({
             webSocketFactory: () => new SockJS("/ws"),
-            // SockJS el sıkışmasına Authorization başlığı konulamaz; token CONNECT
-            // frame'inde gider ve sunucuda doğrulanır.
             connectHeaders: { Authorization: "Bearer " + token },
             reconnectDelay: 3000
         });
         stomp.onConnect = () => {
             setStatus("Bağlı · canlı", true);
-            // Tek abonelik, iki harita: aynı delta akışı ikisini de besler.
             stomp.subscribe("/topic/fleet/live", m => apply(JSON.parse(m.body).vehicles || []));
             stomp.subscribe("/topic/violations", m => onViolation(JSON.parse(m.body)));
         };
@@ -157,10 +158,10 @@
         }
     }
 
-    // Sol harita: yöne dönen ok
+    // Sol harita: tipe göre logo, yöne dönük (badge yok)
     function drawLive(p) {
         let m = liveMarkers.get(p.vehicleId);
-        const icon = arrowIcon(p.heading || 0, false);
+        const icon = typeIcon(p.vehicleId, p.heading || 0, false, false);
         if (!m) {
             m = L.marker([p.lat, p.lon], { icon }).addTo(live);
             m.on("click", () => select(p.vehicleId));
@@ -172,10 +173,10 @@
         m.bindPopup(popup(p));
     }
 
-    // Sağ harita: numaralı daire (plaka no)
+    // Sağ harita: tipe göre logo + plaka no badge'i
     function drawCtrl(p) {
         let m = ctrlMarkers.get(p.vehicleId);
-        const icon = numIcon(p.vehicleId);
+        const icon = typeIcon(p.vehicleId, p.heading || 0, false, true);
         if (!m) {
             m = L.marker([p.lat, p.lon], { icon }).addTo(ctrl);
             m.on("click", () => {
@@ -190,24 +191,61 @@
         }
     }
 
-    function arrowIcon(heading, alerting) {
-        const color = alerting ? "#e24b4a" : "#1d9e75";
+    // Tipe göre yukarı (kuzey) bakan silüet; heading ile döndürülür.
+    function vehSvg(type, color) {
+        const dark = "#0b1016";
+        switch (type) {
+            case "TRUCK":
+                return `<svg viewBox="0 0 24 24" width="26" height="26">
+                    <rect x="6" y="8" width="12" height="14" rx="1.5" fill="${color}" stroke="${dark}" stroke-width="1"/>
+                    <rect x="7.5" y="2" width="9" height="6.5" rx="1.5" fill="${color}" stroke="${dark}" stroke-width="1"/>
+                    <rect x="9" y="3.5" width="6" height="2.6" rx=".6" fill="#dbeafe"/></svg>`;
+            case "MOTORCYCLE":
+                return `<svg viewBox="0 0 24 24" width="24" height="24">
+                    <circle cx="12" cy="6" r="2.6" fill="${dark}"/>
+                    <circle cx="12" cy="18" r="2.6" fill="${dark}"/>
+                    <rect x="10.3" y="6" width="3.4" height="12" rx="1.7" fill="${color}" stroke="${dark}" stroke-width=".7"/>
+                    <rect x="7.5" y="4" width="9" height="1.8" rx=".9" fill="${color}"/></svg>`;
+            case "HELICOPTER":
+                return `<svg viewBox="0 0 24 24" width="28" height="28">
+                    <line x1="2.5" y1="8" x2="21.5" y2="8" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+                    <rect x="11" y="14" width="2" height="7.5" fill="${color}"/>
+                    <line x1="9.5" y1="21" x2="14.5" y2="21" stroke="${color}" stroke-width="1.7" stroke-linecap="round"/>
+                    <ellipse cx="12" cy="11" rx="3.6" ry="6" fill="${color}" stroke="${dark}" stroke-width="1"/>
+                    <circle cx="12" cy="8" r="1.1" fill="#fff"/></svg>`;
+            default: // CAR
+                return `<svg viewBox="0 0 24 24" width="24" height="24">
+                    <path d="M12 2.5c-3 0-4.5 2-4.5 5v11c0 2 1.8 3 4.5 3s4.5-1 4.5-3v-11c0-3-1.5-5-4.5-5z"
+                          fill="${color}" stroke="${dark}" stroke-width="1"/>
+                    <rect x="8.5" y="5" width="7" height="3.4" rx="1" fill="#dbeafe"/></svg>`;
+        }
+    }
+
+    function typeIcon(vehicleId, heading, alerting, showBadge) {
+        const v = vehicles.get(vehicleId) || {};
+        const type = v.type || "CAR";
+        const color = alerting ? "#e24b4a" : (TYPE_COLOR[type] || "#378add");
+        const sel = vehicleId === selected ? " selected" : "";
+        const badge = showBadge ? `<span class="veh-badge">${v.plateNo != null ? v.plateNo : "?"}</span>` : "";
         return L.divIcon({
-            html: `<div class="veh-icon" style="transform:rotate(${heading}deg)">
-                     <svg class="veh-arrow${alerting ? " alert" : ""}" width="24" height="24" viewBox="0 0 24 24">
-                       <path d="M12 2 L19 21 L12 17 L5 21 Z" fill="${color}" stroke="#0b1016" stroke-width="1"/>
-                     </svg></div>`,
-            className: "", iconSize: [24, 24], iconAnchor: [12, 12]
+            html: `<div class="veh-mk${sel}">
+                     <div class="veh-ico${alerting ? " alert" : ""}" style="transform:rotate(${heading}deg)">${vehSvg(type, color)}</div>
+                     ${badge}
+                   </div>`,
+            className: "", iconSize: [30, 30], iconAnchor: [15, 15]
         });
     }
 
-    function numIcon(vehicleId) {
-        const v = vehicles.get(vehicleId);
-        const cls = "veh-num " + (manual.has(vehicleId) ? "manual" : "auto")
-            + (vehicleId === selected ? " selected" : "");
-        return L.divIcon({
-            html: `<div class="${cls}">${v ? v.plateNo : "?"}</div>`,
-            className: "", iconSize: [22, 22], iconAnchor: [11, 11]
+    /** Marker ikonlarını (seçim/logo) her iki haritada tazele. */
+    function refreshMarkers() {
+        liveMarkers.forEach((m, id) => {
+            if (m._alerting) return;
+            const p = pos.get(id);
+            m.setIcon(typeIcon(id, p ? p.heading || 0 : 0, false, false));
+        });
+        ctrlMarkers.forEach((m, id) => {
+            const p = pos.get(id);
+            m.setIcon(typeIcon(id, p ? p.heading || 0 : 0, false, true));
         });
     }
 
@@ -226,13 +264,12 @@
             live.removeLayer(routeLayer);
             routeLayer = null;
         }
-        // Seçim varken çift-tık zoom kapalı → çift tık sadece taşır.
         if (selected != null) ctrl.doubleClickZoom.disable();
         else ctrl.doubleClickZoom.enable();
 
         document.querySelectorAll("#vehicleList .row").forEach(r =>
             r.classList.toggle("sel", Number(r.dataset.vid) === selected));
-        ctrlMarkers.forEach((m, id) => m.setIcon(numIcon(id)));
+        refreshMarkers();
 
         const info = document.getElementById("selInfo");
         const btn = document.getElementById("releaseBtn");
@@ -240,13 +277,15 @@
         if (v) {
             const isManual = manual.has(selected);
             const j = journey.get(selected);
-            info.innerHTML = `<b>${v.plate}</b>` +
-                `<span class="pill ${isManual ? "manual" : "auto"}">${isManual ? "ELLE" : "OTOMATİK"}</span>` +
-                (j ? `<div class="meta" style="margin-top:4px">${journeyText(j)}</div>` : "");
-            btn.disabled = !isManual;
             const p = pos.get(selected);
-            if (p) { ctrl.panTo([p.lat, p.lon]); live.panTo([p.lat, p.lon]); }
-            if (changedSelection) showLastTrip(selected);
+            const speed = p ? `${p.speedKmh} km/s` : "-";
+            const heli = j && j.flying ? '<span class="pill heli">HELİKOPTER</span>' : "";
+            info.innerHTML = `<b>${v.plate}</b>${heli}` +
+                `<span class="pill ${isManual ? "manual" : "auto"}">${isManual ? "ELLE" : "OTOMATİK"}</span>` +
+                `<div class="meta" style="margin-top:4px">Hız: ${speed}${j ? " · " + journeyText(j) : ""}</div>`;
+            btn.disabled = !isManual;
+            if (p) { ctrl.panTo([p.lat, p.lon]); }
+            if (changedSelection) showPlannedRoute(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
             if (row) row.scrollIntoView({ block: "nearest" });
         } else {
@@ -255,10 +294,26 @@
         }
     }
 
+    // Seçili aracın GİDECEĞİ rota (mevcut konum -> hedef). Helikopterde düz uçuş hattı.
+    async function showPlannedRoute(vehicleId) {
+        if (routeLayer) { live.removeLayer(routeLayer); routeLayer = null; }
+        try {
+            const res = await fetch(`/api/v1/control/${vehicleId}/route`, { headers: auth() });
+            if (!res.ok) return;
+            const pts = await res.json();
+            if (!Array.isArray(pts) || pts.length < 2) return;
+            const j = journey.get(vehicleId);
+            const color = j && j.flying ? "#a855f7" : "#378add";
+            routeLayer = L.polyline(pts, { color, weight: 3, opacity: .85, dashArray: "6 6" }).addTo(live);
+            live.fitBounds(routeLayer.getBounds().pad(0.25));
+        } catch (_) { /* yoksay */ }
+    }
+
     // ── Kontrol (gateway proxy) ─────────────────────────────────────────────
     async function onCtrlDblClick(e) {
         if (selected == null) return;   // seçim yok -> Leaflet zaten yakınlaştırdı
         const lat = +e.latlng.lat.toFixed(6), lon = +e.latlng.lng.toFixed(6);
+        const plate = (vehicles.get(selected) || {}).plate || ("#" + selected);
         try {
             const res = await fetch(`/api/v1/control/${selected}/position`, {
                 method: "POST",
@@ -266,12 +321,23 @@
                 body: JSON.stringify({ lat, lon })
             });
             if (!res.ok) { flash("Taşıma başarısız."); return; }
+            const r = await res.json().catch(() => ({}));
+            const plat = r.lat != null ? r.lat : lat;
+            const plon = r.lon != null ? r.lon : lon;
+
             manual.add(selected);
-            const p = { ...(pos.get(selected) || {}), vehicleId: selected, lat, lon, speedKmh: 0 };
+            const p = { ...(pos.get(selected) || {}), vehicleId: selected, lat: plat, lon: plon, speedKmh: 0 };
             pos.set(selected, p);
-            drawLive(p); drawCtrl(p);       // iyimser: WS'i beklemeden çiz
+            drawLive(p); drawCtrl(p);
             select(selected);
-            flash(`${vehicles.get(selected).plate} taşındı → sol harita güncelleniyor.`);
+
+            if (r.snapped) {
+                flash(`⚠ Yol dışına tıklandı — ${plate} en yakın yola oturtuldu (${r.offRoadMeters} m).`);
+            } else if (r.flying) {
+                flash(`🚁 ${plate} taşındı (helikopter, her yere konabilir).`);
+            } else {
+                flash(`${plate} taşındı → sol harita güncelleniyor.`);
+            }
         } catch (_) { flash("Taşıma başarısız (bağlantı)."); }
     }
 
@@ -283,9 +349,7 @@
         flash("Araç otomatiğe döndü.");
     }
 
-    // Sevkiyat durumu: hedef, kalan km, ETA, park/elle bayrakları.
-    // Konumlar buradan GELMEZ — onlar WebSocket'ten push edilir; bu sadece yavaş
-    // değişen sevkiyat bilgisi olduğu için 3 sn'de bir çekilir.
+    // Sevkiyat durumu: hedef, kalan km, ETA, park/elle/uçuş bayrakları.
     async function refreshDispatch() {
         if (!token) return;
         try {
@@ -296,16 +360,15 @@
                 if (s.manual) manual.add(s.vehicleId);
                 journey.set(s.vehicleId, {
                     destination: s.destination, remainingKm: s.remainingKm,
-                    etaMinutes: s.etaMinutes, parked: s.parked
+                    etaMinutes: s.etaMinutes, parked: s.parked, flying: s.flying
                 });
             });
-            ctrlMarkers.forEach((m, id) => m.setIcon(numIcon(id)));
+            refreshMarkers();
             renderJourneyMeta();
             if (selected != null) select(selected);
         } catch (_) { /* yoksay */ }
     }
 
-    // Araç listesindeki "hedef · kalan km" satırını tazele.
     function renderJourneyMeta() {
         document.querySelectorAll("#vehicleList .row").forEach(row => {
             const j = journey.get(Number(row.dataset.vid));
@@ -316,7 +379,7 @@
 
     function journeyText(j) {
         if (!j) return "";
-        if (j.parked) return "🅿 varışta · park";
+        if (j.parked) return (j.flying ? "🚁 " : "🅿 ") + "varışta · durdu";
         if (j.destination == null) return "rota bekleniyor…";
         return `→ ${j.destination} · ${j.remainingKm} km`
             + (j.etaMinutes >= 0 ? ` · ~${j.etaMinutes} dk` : "");
@@ -336,27 +399,6 @@
                     }
                 }).bindTooltip(`${g.name} (${exclusion ? "yasak" : "izinli"})`).addTo(live);
             });
-        } catch (_) { /* yoksay */ }
-    }
-
-    // ── Geçmiş rota (son kapanan trip) ──────────────────────────────────────
-    async function showLastTrip(vehicleId) {
-        if (routeLayer) { live.removeLayer(routeLayer); routeLayer = null; }
-        try {
-            const t = await fetch(`/api/v1/vehicles/${vehicleId}/trips?limit=1`, { headers: auth() });
-            if (!t.ok) return;
-            const trips = await t.json();
-            if (!trips.length) { flash("Bu araç için kapanmış trip yok."); return; }
-
-            const r = await fetch(`/api/v1/trips/${trips[0].id}/route`, { headers: auth() });
-            if (!r.ok) return;
-            const pts = (await r.json())
-                .filter(p => p.lat != null && p.lon != null)
-                .map(p => [p.lat, p.lon]);
-            if (pts.length < 2) { flash("Rota noktası yok."); return; }
-            routeLayer = L.polyline(pts, { color: "#378add", weight: 4, opacity: .85 }).addTo(live);
-            live.fitBounds(routeLayer.getBounds().pad(0.2));
-            flash(`Son trip: ${trips[0].distanceKm ?? "?"} km · ${pts.length} nokta`);
         } catch (_) { /* yoksay */ }
     }
 
@@ -389,8 +431,12 @@
         const p = pos.get(v.vehicleId);
         if (m && p) {
             m._alerting = true;
-            m.setIcon(arrowIcon(p.heading || 0, true));
-            setTimeout(() => { m._alerting = false; m.setIcon(arrowIcon((pos.get(v.vehicleId) || p).heading || 0, false)); }, 4000);
+            m.setIcon(typeIcon(v.vehicleId, p.heading || 0, true, false));
+            setTimeout(() => {
+                m._alerting = false;
+                const cur = pos.get(v.vehicleId) || p;
+                m.setIcon(typeIcon(v.vehicleId, cur.heading || 0, false, false));
+            }, 4000);
         }
         if (v.lat != null && v.lon != null) {
             const ring = L.circle([v.lat, v.lon], { radius: 220, color: "#e24b4a", weight: 2, fillOpacity: .15 }).addTo(live);
@@ -420,6 +466,6 @@
         const prev = el.textContent, prevColor = el.style.color;
         el.textContent = text; el.style.color = "#f0997b";
         clearTimeout(flashTimer);
-        flashTimer = setTimeout(() => { el.textContent = prev; el.style.color = prevColor; }, 2500);
+        flashTimer = setTimeout(() => { el.textContent = prev; el.style.color = prevColor; }, 3500);
     }
 })();

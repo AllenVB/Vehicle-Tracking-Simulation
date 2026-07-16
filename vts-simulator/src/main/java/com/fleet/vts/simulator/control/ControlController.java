@@ -37,11 +37,16 @@ public class ControlController {
         return simulator.positions();
     }
 
+    /** The route a vehicle will take (current position -> destination), as [[lat, lon], ...]. */
+    @GetMapping("/control/{id}/route")
+    public List<double[]> route(@PathVariable long id) {
+        return simulator.routeGeometry(id);
+    }
+
     @PostMapping("/control/{id}/position")
-    public ResponseEntity<Void> move(@PathVariable long id, @RequestBody MoveRequest request) {
-        return simulator.setManualPosition(id, request.lat(), request.lon())
-                ? ResponseEntity.ok().build()
-                : ResponseEntity.notFound().build();
+    public ResponseEntity<Map<String, Object>> move(@PathVariable long id, @RequestBody MoveRequest request) {
+        Map<String, Object> result = simulator.setManualPosition(id, request.lat(), request.lon());
+        return result == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(result);
     }
 
     @DeleteMapping("/control/{id}/position")

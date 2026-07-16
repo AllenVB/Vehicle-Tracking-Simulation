@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
 import com.fleet.vts.analytics.rules.GeofenceRule;
 import com.fleet.vts.analytics.rules.HarshBrakingRule;
+import com.fleet.vts.analytics.rules.HelicopterRegistry;
 import com.fleet.vts.analytics.rules.IdlingRule;
 import com.fleet.vts.analytics.rules.SpeedLimitRegistry;
 import com.fleet.vts.analytics.rules.TripRule;
@@ -49,6 +50,7 @@ public class AnalyticsTopology {
 
     private final GeofenceRegistry geofenceRegistry;
     private final SpeedLimitRegistry speedLimits;
+    private final HelicopterRegistry helicopters;
     private final Serde<TelemetryEvent> telemetrySerde;
     private final Serde<ViolationEvent> violationSerde;
     private final Serde<GeofenceEvent> geofenceSerde;
@@ -58,9 +60,10 @@ public class AnalyticsTopology {
     private final Serde<TripState> tripStateSerde;
 
     public AnalyticsTopology(GeofenceRegistry geofenceRegistry, SpeedLimitRegistry speedLimits,
-                            ObjectMapper mapper) {
+                            HelicopterRegistry helicopters, ObjectMapper mapper) {
         this.geofenceRegistry = geofenceRegistry;
         this.speedLimits = speedLimits;
+        this.helicopters = helicopters;
         this.telemetrySerde = json(TelemetryEvent.class, mapper);
         this.violationSerde = json(ViolationEvent.class, mapper);
         this.geofenceSerde = json(GeofenceEvent.class, mapper);
@@ -75,12 +78,16 @@ public class AnalyticsTopology {
         KStream<String, TelemetryEvent> raw = builder.stream(Topics.TELEMETRY_RAW,
                 Consumed.with(Serdes.String(), telemetrySerde));
 
+        // Helicopters fly, so the road-based rules below skip them. Trip detection and
+        // idling run on the full stream (a flight is a trip; a landed helicopter can idle).
+        KStream<String, TelemetryEvent> road = raw.filter((k, e) -> !helicopters.isHelicopter(k));
+
         Produced<String, ViolationEvent> toViolation = Produced.with(Serdes.String(), violationSerde);
 
         // Stateful rules (Processor API + RocksDB state stores)
-        raw.process(new HarshBrakingRule()).to(Topics.VIOLATION, toViolation);
+        road.process(new HarshBrakingRule()).to(Topics.VIOLATION, toViolation);
         raw.process(new IdlingRule()).to(Topics.VIOLATION, toViolation);
-        raw.process(new GeofenceRule(geofenceRegistry, geofenceStateSerde))
+        road.process(new GeofenceRule(geofenceRegistry, geofenceStateSerde))
                 .to(Topics.GEOFENCE_EVENT, Produced.with(Serdes.String(), geofenceSerde));
         raw.process(new TripRule(tripStateSerde))
                 .to(Topics.TRIP, Produced.with(Serdes.String(), tripSerde));
@@ -93,7 +100,7 @@ public class AnalyticsTopology {
         // third of the fleet permanently speeding that alone was ~33 events/min and
         // dominated the violation stream. A tumbling window emits at most once per
         // 5 minutes per vehicle, matching the rule's cooldown_seconds (300).
-        raw.filter((k, e) -> e != null && e.speedKmh() != null)
+        road.filter((k, e) -> e != null && e.speedKmh() != null)
                 .groupByKey(Grouped.with(Serdes.String(), telemetrySerde))
                 .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(5), Duration.ZERO))
                 .aggregate(SpeedWindowAgg::empty,
