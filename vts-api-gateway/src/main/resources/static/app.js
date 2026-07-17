@@ -198,39 +198,63 @@
         }
     }
 
-    // Tipe göre yukarı (kuzey) bakan silüet; heading ile döndürülür.
+    // Tipe göre yukarı (kuzey) bakan detaylı silüet; heading ile döndürülür.
+    // Gölge + gövde + parlama + cam/tekerlek/detay ile derinlik.
     function vehSvg(type, color) {
-        const d = "#0b1016";
+        const d = "#0b1016", g = "#141a20";
         switch (type) {
             case "TRUCK":
-                return `<svg viewBox="0 0 32 32" width="30" height="30">
-                    <rect x="9" y="11" width="14" height="19" rx="1.6" fill="${color}" stroke="${d}" stroke-width="1.2"/>
-                    <rect x="10" y="2.5" width="12" height="8" rx="1.8" fill="${color}" stroke="${d}" stroke-width="1.2"/>
-                    <rect x="12" y="4.2" width="8" height="3.1" rx=".8" fill="#333b44"/>
-                    <line x1="9.5" y1="20" x2="22.5" y2="20" stroke="${d}" stroke-width="1"/></svg>`;
+                return `<svg viewBox="0 0 34 42" width="29" height="36">
+                    <rect x="4.6" y="24" width="2.6" height="6" rx="1.2" fill="${g}"/>
+                    <rect x="26.8" y="24" width="2.6" height="6" rx="1.2" fill="${g}"/>
+                    <rect x="4.6" y="32" width="2.6" height="6" rx="1.2" fill="${g}"/>
+                    <rect x="26.8" y="32" width="2.6" height="6" rx="1.2" fill="${g}"/>
+                    <rect x="6.8" y="13" width="20.4" height="27" rx="2.2" fill="${color}" stroke="${d}" stroke-width="1.4"/>
+                    <rect x="9" y="15" width="16" height="23" rx="1" fill="#ffffff" opacity=".12"/>
+                    <line x1="6.8" y1="26.5" x2="27.2" y2="26.5" stroke="${d}" stroke-width=".8" opacity=".5"/>
+                    <rect x="6.2" y="6.5" width="2.2" height="5" rx="1" fill="${g}"/>
+                    <rect x="25.6" y="6.5" width="2.2" height="5" rx="1" fill="${g}"/>
+                    <rect x="7.8" y="2" width="18.4" height="11" rx="2.6" fill="${color}" stroke="${d}" stroke-width="1.4"/>
+                    <rect x="9.6" y="3.4" width="14.8" height="4.4" rx="1.2" fill="#2b3540"/>
+                    <rect x="9.6" y="3.4" width="14.8" height="2" rx="1" fill="#8fb3d9" opacity=".5"/></svg>`;
             case "MOTORCYCLE":
-                return `<svg viewBox="0 0 32 32" width="26" height="26">
-                    <ellipse cx="16" cy="7" rx="3.1" ry="3.3" fill="#22303f" stroke="${d}" stroke-width="1"/>
-                    <ellipse cx="16" cy="25" rx="3.1" ry="3.3" fill="#22303f" stroke="${d}" stroke-width="1"/>
-                    <rect x="13.7" y="7" width="4.6" height="18" rx="2.3" fill="${color}" stroke="${d}" stroke-width="1.1"/>
-                    <rect x="10" y="5" width="12" height="2.4" rx="1.2" fill="${color}" stroke="${d}" stroke-width=".8"/>
-                    <circle cx="16" cy="15" r="2" fill="#9db4c9"/></svg>`;
+                return `<svg viewBox="0 0 26 40" width="22" height="34">
+                    <ellipse cx="13" cy="7" rx="3.5" ry="4.1" fill="${g}"/>
+                    <ellipse cx="13" cy="7" rx="1.6" ry="2" fill="#3a4652"/>
+                    <ellipse cx="13" cy="33" rx="3.5" ry="4.1" fill="${g}"/>
+                    <ellipse cx="13" cy="33" rx="1.6" ry="2" fill="#3a4652"/>
+                    <path d="M10.6 8h4.8l-.6 6.5h-3.6z" fill="${color}" stroke="${d}" stroke-width="1"/>
+                    <rect x="10.7" y="19" width="4.6" height="13" rx="2.2" fill="${color}" stroke="${d}" stroke-width="1"/>
+                    <rect x="7.4" y="5.6" width="11.2" height="2.2" rx="1.1" fill="${color}" stroke="${d}" stroke-width=".7"/>
+                    <ellipse cx="13" cy="17" rx="2.6" ry="3.2" fill="#cfd8e0" stroke="${d}" stroke-width=".5"/></svg>`;
             case "HELICOPTER":
-                return `<svg viewBox="0 0 32 32" width="32" height="32">
-                    <line x1="3" y1="10" x2="29" y2="10" stroke="${color}" stroke-width="2.4" stroke-linecap="round"/>
-                    <line x1="8" y1="6" x2="24" y2="14" stroke="${color}" stroke-width="1.3" stroke-linecap="round" opacity=".45"/>
-                    <rect x="14.5" y="18" width="3" height="10" rx="1" fill="${color}"/>
-                    <line x1="12.5" y1="27.5" x2="19.5" y2="27.5" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
-                    <ellipse cx="16" cy="14" rx="4.6" ry="7.4" fill="${color}" stroke="${d}" stroke-width="1.2"/>
-                    <ellipse cx="16" cy="10.5" rx="2.5" ry="2.7" fill="#eaf2ff"/>
-                    <circle cx="16" cy="10" r="1.3" fill="#fff" stroke="${d}" stroke-width=".5"/></svg>`;
+                return `<svg viewBox="0 0 40 40" width="34" height="34">
+                    <circle cx="20" cy="13" r="15.5" fill="${color}" opacity=".08"/>
+                    <line x1="12" y1="26" x2="28" y2="26" stroke="${d}" stroke-width="1.5" stroke-linecap="round"/>
+                    <line x1="14.5" y1="21" x2="14.5" y2="26.5" stroke="${d}" stroke-width="1.3"/>
+                    <line x1="25.5" y1="21" x2="25.5" y2="26.5" stroke="${d}" stroke-width="1.3"/>
+                    <path d="M18.6 22h2.8l1 15h-4.8z" fill="${color}" stroke="${d}" stroke-width="1"/>
+                    <line x1="16" y1="36.5" x2="24" y2="36.5" stroke="${d}" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M20 6c-5 0-7.6 5-7.6 11 0 5 2.6 8 7.6 8s7.6-3 7.6-8C27.6 11 25 6 20 6z" fill="${color}" stroke="${d}" stroke-width="1.4"/>
+                    <path d="M20 8c-3.4 0-5.4 2.9-5.5 6.4h11C25.4 10.9 23.4 8 20 8z" fill="#dbeafe"/>
+                    <path d="M20 8c-3.4 0-5.4 2.9-5.5 6.4h5.5z" fill="#ffffff" opacity=".35"/>
+                    <line x1="4.5" y1="13" x2="35.5" y2="13" stroke="${color}" stroke-width="2.6" stroke-linecap="round"/>
+                    <line x1="9" y1="6" x2="31" y2="20" stroke="${color}" stroke-width="1.5" stroke-linecap="round" opacity=".4"/>
+                    <line x1="9" y1="20" x2="31" y2="6" stroke="${color}" stroke-width="1.5" stroke-linecap="round" opacity=".4"/>
+                    <circle cx="20" cy="13" r="1.8" fill="#fff" stroke="${d}" stroke-width=".7"/></svg>`;
             default: // CAR
-                return `<svg viewBox="0 0 32 32" width="28" height="28">
-                    <path d="M16 2.6c-3.6 0-5.6 2.2-5.9 6.4l-.4 12c-.1 3.2 2 5 6.3 5s6.4-1.8 6.3-5l-.4-12C21.6 4.8 19.6 2.6 16 2.6z" fill="${color}" stroke="${d}" stroke-width="1.2"/>
-                    <rect x="11.6" y="6.6" width="8.8" height="4" rx="1.2" fill="#eaf2ff"/>
-                    <rect x="12" y="18.4" width="8" height="3.4" rx="1.2" fill="#cfe0f5"/>
-                    <rect x="8.6" y="11" width="1.7" height="3" rx=".6" fill="${color}" stroke="${d}" stroke-width=".5"/>
-                    <rect x="21.7" y="11" width="1.7" height="3" rx=".6" fill="${color}" stroke="${d}" stroke-width=".5"/></svg>`;
+                return `<svg viewBox="0 0 34 40" width="28" height="33">
+                    <rect x="6.2" y="9.5" width="2.2" height="4.5" rx="1" fill="${g}"/>
+                    <rect x="25.6" y="9.5" width="2.2" height="4.5" rx="1" fill="${g}"/>
+                    <rect x="6.2" y="26" width="2.2" height="4.5" rx="1" fill="${g}"/>
+                    <rect x="25.6" y="26" width="2.2" height="4.5" rx="1" fill="${g}"/>
+                    <path d="M17 2.5c-5.2 0-7.7 3.3-8 8.2l-.6 16.8c-.2 5.3 2.8 8.3 8.6 8.3s8.8-3 8.6-8.3l-.6-16.8c-.3-4.9-2.8-8.2-8-8.2z" fill="${color}" stroke="${d}" stroke-width="1.5"/>
+                    <path d="M17 4c-3.9 0-5.9 2.5-6.3 6.8h12.6C22.9 6.5 20.9 4 17 4z" fill="#ffffff" opacity=".22"/>
+                    <path d="M11 11.4h12l-1.3 4.4h-9.4z" fill="#cfe3ff" stroke="${d}" stroke-width=".5"/>
+                    <rect x="11.4" y="16.6" width="11.2" height="8" rx="2.2" fill="#ffffff" opacity=".16"/>
+                    <path d="M12.3 25h9.4l1.2 3.6c.2 3.3-1.9 5-5.9 5s-6.1-1.7-5.9-5z" fill="#bcd4ef" stroke="${d}" stroke-width=".5"/>
+                    <path d="M8.8 12.6l-2.4.6v2.2l2.4.6z" fill="${color}" stroke="${d}" stroke-width=".6"/>
+                    <path d="M25.2 12.6l2.4.6v2.2l-2.4.6z" fill="${color}" stroke="${d}" stroke-width=".6"/></svg>`;
         }
     }
 
@@ -245,7 +269,7 @@
                      <div class="veh-ico${alerting ? " alert" : ""}" style="transform:rotate(${heading}deg)">${vehSvg(type, color)}</div>
                      ${badge}
                    </div>`,
-            className: "", iconSize: [32, 32], iconAnchor: [16, 16]
+            className: "", iconSize: [36, 36], iconAnchor: [18, 18]
         });
     }
 
