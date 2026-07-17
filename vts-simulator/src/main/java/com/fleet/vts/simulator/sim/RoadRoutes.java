@@ -19,18 +19,27 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Builds real road-following loops via the OSRM routing API so simulated
- * vehicles stay on roads instead of cutting across terrain. Four waypoints
- * around a city centre (back to the first) yield a closed driving route snapped
- * to the road network. Degrades gracefully: if routing is disabled or OSRM is
- * unreachable, callers fall back to synthetic {@link RouteFactory} loops, and
- * after a few failures we stop calling OSRM to keep startup fast.
+ * Builds real road-following routes via OSRM, so simulated land vehicles stay on roads
+ * instead of cutting across terrain. Four waypoints around a city centre (back to the
+ * first) yield a closed driving route snapped to the road network.
+ *
+ * <p>Returning {@code null} means "no road route", and callers must treat that as a
+ * refusal rather than a licence to invent one: a land vehicle with no route stays parked.
+ * There used to be synthetic fallback loops and straight lines for exactly this case,
+ * which is how vehicles ended up driving across mountains and lakes whenever OSRM was
+ * slow — and the public demo server it pointed at was slow often.
+ *
+ * <p>OSRM now runs locally (see the {@code osrm} service in docker-compose), so failures
+ * are a real fault rather than someone else's rate limit. There is no permanent give-up:
+ * a transient outage must not silently park the fleet forever, so every call retries and
+ * failures are only rate-limited in the log.
  */
 @Component
 public class RoadRoutes {
 
     private static final Logger log = LoggerFactory.getLogger(RoadRoutes.class);
-    private static final int MAX_FAILURES = 3;
+    /** Log at most one line per this many consecutive failures (avoid flooding). */
+    private static final int LOG_EVERY = 50;
 
     private final SimulatorProperties props;
     private final HttpClient http = HttpClient.newBuilder()
@@ -70,7 +79,7 @@ public class RoadRoutes {
      * clicked point unchanged.
      */
     public NearestRoad nearestRoad(double lat, double lon) {
-        if (!props.isRoadRouting() || failures.get() >= MAX_FAILURES) {
+        if (!props.isRoadRouting()) {
             return null;
         }
         try {
@@ -99,15 +108,14 @@ public class RoadRoutes {
     }
 
     private NearestRoad failNearest(String why) {
-        int n = failures.incrementAndGet();
-        if (n == 1 || n == MAX_FAILURES) {
+        if (failures.incrementAndGet() % LOG_EVERY == 1) {
             log.warn("OSRM nearest failed ({}); placing at click without snapping.", why);
         }
         return null;
     }
 
     private Route route(double[][] waypoints, boolean closed) {
-        if (!props.isRoadRouting() || failures.get() >= MAX_FAILURES) {
+        if (!props.isRoadRouting()) {
             return null;
         }
         try {
@@ -146,10 +154,9 @@ public class RoadRoutes {
     }
 
     private Route fail(String why) {
-        int n = failures.incrementAndGet();
-        if (n == 1 || n == MAX_FAILURES) {
-            log.warn("OSRM routing failed ({}); using local loops{}.",
-                    why, n >= MAX_FAILURES ? " for the rest of the fleet" : "");
+        if (failures.incrementAndGet() % LOG_EVERY == 1) {
+            log.warn("OSRM routing failed ({}); affected land vehicles stay parked until it recovers.",
+                    why);
         }
         return null;
     }

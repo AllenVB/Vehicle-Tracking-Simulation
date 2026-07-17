@@ -56,10 +56,6 @@ public class VehicleState {
     private final boolean engineOn = true;
     private final boolean ignition = true;
 
-    // Manual override from the operator console.
-    private volatile boolean manual;
-    private volatile double manualLat;
-    private volatile double manualLon;
     private String region;
 
     /** Loop vehicle (geofence). */
@@ -139,12 +135,6 @@ public class VehicleState {
 
     /** Advance the simulation by {@code dtSeconds}. */
     public void tick(double dtSeconds) {
-        if (manual) {                 // operator console is holding this vehicle in place
-            speedKmh = 0;
-            lat = manualLat;
-            lon = manualLon;
-            return;
-        }
         if (loop != null) {
             tickLoop(dtSeconds);
             return;
@@ -331,18 +321,21 @@ public class VehicleState {
     }
 
     // ── Operator-console control ───────────────────────────────────────────
-    public void setManual(double lat, double lon) {
-        this.manualLat = lat;
-        this.manualLon = lon;
-        this.manual = true;
-    }
 
-    public void clearManual() {
-        this.manual = false;
-    }
-
-    public boolean isManual() {
-        return manual;
+    /**
+     * Put the vehicle at a point without giving it a route.
+     *
+     * <p>Only valid while it is parked or waiting for an assignment: both of those tick
+     * states leave the position alone, so it stays put and the assigner routes it from here
+     * when the dwell ends. A vehicle that is driving is moved by handing it a new
+     * {@link #startJourney} instead, so that it carries on rather than stopping.
+     *
+     * <p>Must not be used on a {@link #isLoopVehicle() loop vehicle}: its position is
+     * recomputed from the loop on every tick, so the new position would be silently undone.
+     */
+    public void relocate(double lat, double lon) {
+        this.lat = lat;
+        this.lon = lon;
     }
 
     public void setRegion(String region) {

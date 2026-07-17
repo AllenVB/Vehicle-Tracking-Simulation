@@ -10,7 +10,7 @@
         :root {
             --bg: #0f1720; --panel: #16212e; --panel-2: #1c2b3a; --line: #26384a;
             --text: #e6edf3; --muted: #8aa0b4; --accent: #1d9e75; --alert: #e24b4a;
-            --manual: #e08a1d; --auto: #378add;
+            --manual: #e08a1d;
         }
         * { box-sizing: border-box; }
         html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
@@ -62,8 +62,6 @@
         #ctrl button:disabled { opacity: .45; cursor: default; }
         #selInfo { font-size: 12px; margin-top: 6px; min-height: 16px; }
         .pill { font-size: 9px; padding: 1px 6px; border-radius: 9px; margin-left: 5px; }
-        .pill.manual { background: rgba(224,138,29,.22); color: var(--manual); }
-        .pill.auto { background: rgba(55,138,221,.22); color: var(--auto); }
         .pill.heli { background: rgba(168,85,247,.22); color: #c4a5f7; }
 
         /* Araca uyarı mesajı kutusu */
@@ -177,13 +175,13 @@
 
     <div id="ctrl">
         <div class="hint">
-            Araç seç, sağdaki haritada yeni konuma <b>çift tıkla</b>. Kara araçları
-            <b>en yakın yola</b> oturtulur (yol dışı tıklamada uyarı). Helikopterler
-            (101–105) her yere konabilir. Seçilince gideceği rota çizilir.
+            Araç seç, sağdaki haritada yeni konuma <b>çift tıkla</b>. Kara araçları yalnızca
+            <b>yol üzerine</b> taşınabilir — yol dışına tıklarsan uyarı çıkar ve araç yerinde
+            kalır. Helikopterler (101–105) her yere konabilir. Taşınan araç <b>durmaz</b>:
+            aynı hedefe yeni rotasıyla, kendi hızıyla yoluna devam eder.
         </div>
         <input id="plateNo" type="number" min="1" max="105" placeholder="Plaka no 1–105 (101–105 helikopter)"/>
         <div id="selInfo"></div>
-        <button id="releaseBtn" disabled>Otomatiğe döndür</button>
 
         <div id="msgBox" style="display:none">
             <div class="msg-title">Araca uyarı gönder</div>

@@ -34,9 +34,34 @@ public class SimulatorProperties {
      */
     private Duration ingestionReadTimeout = Duration.ofSeconds(10);
 
-    /** When true, vehicle routes follow real roads via OSRM (fallback: local loops). */
+    /**
+     * When true, land vehicles only ever travel on OSRM-routed roads; when a route cannot
+     * be obtained they stay parked rather than move off-road. Turning this off leaves land
+     * vehicles permanently parked — helicopters are unaffected, they fly point to point.
+     */
     private boolean roadRouting = true;
 
-    /** OSRM routing service base URL (public demo server by default). */
-    private String osrmBaseUrl = "https://router.project-osrm.org";
+    /**
+     * OSRM routing service base URL. Defaults to a local instance (the {@code osrm} service
+     * in docker-compose): this used to point at OSRM's public demo server, whose latency and
+     * rate limits decided whether our fleet stayed on the road.
+     */
+    private String osrmBaseUrl = "http://localhost:5000";
+
+    /**
+     * How far from a road an operator's click may land and still count as "on that road",
+     * for moving a land vehicle. Beyond it the move is refused.
+     *
+     * <p>This is the whole definition of an on-road click, so it is a setting rather than a
+     * constant. Too tight and a click that visually lands on a road is rejected: the click
+     * carries the map's zoom error, the road's rendered width and OSM's own geometry error.
+     * Too loose and the vehicle silently lands somewhere the operator did not point at,
+     * which is the behaviour this replaced.
+     *
+     * <p>50 m is about a city block's width: unambiguous about which road was meant, while
+     * forgiving of a click near a road's edge. Note the operator still has to be zoomed in
+     * enough to mean a specific road — at a regional zoom a pixel is hundreds of metres, and
+     * refusing there is correct.
+     */
+    private double roadClickToleranceMeters = 50.0;
 }

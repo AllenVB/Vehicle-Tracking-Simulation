@@ -2,7 +2,6 @@ package com.fleet.vts.simulator.control;
 
 import com.fleet.vts.simulator.sim.FleetSimulator;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -60,16 +59,18 @@ public class ControlController {
         return simulator.routeGeometry(id);
     }
 
+    /**
+     * Move a vehicle and let it drive on. The body reports {@code moved}: a land vehicle
+     * clicked off-road is refused (with {@code reason} and {@code offRoadMeters}) rather
+     * than quietly snapped somewhere the operator did not pick. 200 either way — the
+     * request was understood, and the refusal is the answer.
+     *
+     * <p>{@code reason} is one of {@code OFF_ROAD}, {@code LOOP_VEHICLE} (the geofence
+     * vehicle laps a fixed zone), {@code NO_ROUTE_FROM_HERE} or {@code ROUTING_UNAVAILABLE}.
+     */
     @PostMapping("/control/{id}/position")
     public ResponseEntity<Map<String, Object>> move(@PathVariable long id, @RequestBody MoveRequest request) {
-        Map<String, Object> result = simulator.setManualPosition(id, request.lat(), request.lon());
+        Map<String, Object> result = simulator.moveVehicle(id, request.lat(), request.lon());
         return result == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(result);
-    }
-
-    @DeleteMapping("/control/{id}/position")
-    public ResponseEntity<Void> release(@PathVariable long id) {
-        return simulator.releaseVehicle(id)
-                ? ResponseEntity.ok().build()
-                : ResponseEntity.notFound().build();
     }
 }

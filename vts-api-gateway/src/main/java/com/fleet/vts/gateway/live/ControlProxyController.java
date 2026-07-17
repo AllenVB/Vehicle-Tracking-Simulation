@@ -2,7 +2,6 @@ package com.fleet.vts.gateway.live;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -114,7 +113,6 @@ public class ControlProxyController {
             }
             Map<String, Object> m = new HashMap<>();
             m.put("vehicleId", vehicleId);
-            m.put("manual", p.get("manual"));
             m.put("destination", p.get("destination"));
             m.put("destLat", p.get("destLat"));
             m.put("destLon", p.get("destLon"));
@@ -134,8 +132,8 @@ public class ControlProxyController {
         if (index == null) {
             return ResponseEntity.notFound().build();
         }
-        // Carry the simulator's outcome back (snapped-to-road? off-road distance? flying?)
-        // so the UI can warn and place the marker where the vehicle actually landed.
+        // Carry the simulator's outcome back (moved? refused, and how far off-road?) so the
+        // UI can either place the marker where the vehicle landed or explain the refusal.
         @SuppressWarnings("unchecked")
         Map<String, Object> result = simulator.post().uri("/api/control/{i}/position", index)
                 .body(request).retrieve().body(Map.class);
@@ -154,16 +152,6 @@ public class ControlProxyController {
         return ResponseEntity.ok(geometry);
     }
 
-    @DeleteMapping("/{vehicleId}/position")
-    public ResponseEntity<Void> release(@PathVariable Long vehicleId) {
-        Integer index = simIndex(vehicleId);
-        if (index == null) {
-            return ResponseEntity.notFound().build();
-        }
-        simulator.delete().uri("/api/control/{i}/position", index)
-                .retrieve().toBodilessEntity();
-        return ResponseEntity.ok().build();
-    }
 
     /** The simulator's index for a vehicle is its IMEI as a number (imei = %015d(index)). */
     private Integer simIndex(Long vehicleId) {

@@ -53,8 +53,12 @@ public class FleetSimulator {
     /** Vehicle indices 101..105 are helicopters (they fly). */
     private static final int HELI_FIRST = 101;
     private static final int HELI_LAST = 105;
-    /** An operator move further than this from a road is treated as an off-road click. */
-    private static final double OFF_ROAD_METERS = 20.0;
+    /**
+     * Centre of the seeded 'Tarihi Yarımada - Yasak Bölge' EXCLUSION polygon
+     * (lon 28.955..28.985, lat 41.000..41.020) — the geofence vehicle laps around it.
+     */
+    private static final double GEOFENCE_ZONE_LAT = 41.010;
+    private static final double GEOFENCE_ZONE_LON = 28.970;
 
     private final SimulatorProperties properties;
     private final IngestionClient ingestionClient;
@@ -99,16 +103,30 @@ public class FleetSimulator {
                     : TurkeyProvinces.ALL.get((i - 1) % TurkeyProvinces.ALL.size());
 
             String imei = String.format("%015d", i);
-            VehicleState v;
+            VehicleState v = null;
+
             if (i >= HELI_FIRST && i <= HELI_LAST) {
                 // Helicopters (101..105): flying journeys, high speed, exempt from road rules.
                 v = VehicleState.helicopter(imei, p.lat(), p.lon(), i);
             } else if (!geofenceAssigned && p.name().equals("İstanbul")) {
-                // One Istanbul vehicle circles inside the seeded restricted geofence, so
-                // geofence enter/exit events keep firing. It takes no destination.
-                v = new VehicleState(imei, BehaviorProfile.GEOFENCE, RouteFactory.restrictedZoneLoop(), i);
-                geofenceAssigned = true;
-            } else {
+                // One Istanbul vehicle circles the seeded restricted geofence, so enter/exit
+                // events keep firing. It takes no destination.
+                //
+                // The loop follows real roads through the zone. It used to be a synthetic
+                // circle of radius ~0.006 deg, which sat wholly *inside* the polygon — so it
+                // fired ENTER once and then never crossed the boundary again. A road loop
+                // around the zone crosses it every lap, which is what the demo wanted.
+                Route zoneLoop = roadRoutes.loopNear(GEOFENCE_ZONE_LAT, GEOFENCE_ZONE_LON);
+                if (zoneLoop != null) {
+                    v = new VehicleState(imei, BehaviorProfile.GEOFENCE, zoneLoop, i);
+                    geofenceAssigned = true;
+                } else {
+                    // Routing is down. Fall through to an ordinary journey vehicle rather than
+                    // circle a made-up loop: no land vehicle moves on invented geometry.
+                    log.warn("No road loop for the geofence zone; vehicle {} takes journeys instead", i);
+                }
+            }
+            if (v == null) {
                 BehaviorProfile profile = BehaviorProfile.forIndex(i);
                 if (profile == BehaviorProfile.GEOFENCE) {
                     profile = BehaviorProfile.NORMAL; // geofence is only meaningful in Istanbul
@@ -189,15 +207,22 @@ public class FleetSimulator {
         TurkeyProvinces.Province dest = TurkeyProvinces.nearbyDestination(
                 v.lat(), v.lon(), DESTINATION_CANDIDATES, rnd);
 
-        Route route = null;
-        if (!v.isFlying()) {
-            route = roadRoutes.routeBetween(v.lat(), v.lon(), dest.lat(), dest.lon());
-        }
-        if (route == null) {
-            // Helicopters always fly straight; road vehicles fall back to a straight line
-            // only when OSRM is unavailable (they still travel, arrive and close trips).
+        Route route;
+        if (v.isFlying()) {
+            // A helicopter's real path IS the straight line; nothing to route around.
             route = new Route(List.of(new GeoPoint(v.lat(), v.lon()),
                     new GeoPoint(dest.lat(), dest.lon())), false);
+        } else {
+            route = roadRoutes.routeBetween(v.lat(), v.lon(), dest.lat(), dest.lon());
+            if (route == null) {
+                // No road route: leave it parked rather than invent one. This fell back to a
+                // straight line so the vehicle would "still travel, arrive and close trips" —
+                // but a straight line across Turkey drives through mountains, lakes and fields,
+                // which is exactly what a land vehicle cannot do. It keeps needsJourney(), so
+                // the assigner retries in a few seconds; a stationary vehicle is a visible,
+                // honest symptom of routing being down, whereas one crossing a lake is not.
+                return;
+            }
         }
         v.startJourney(new Journey(dest.name(), dest.lat(), dest.lon(), route), startProgress);
         v.setRegion(dest.name());
@@ -247,7 +272,6 @@ public class FleetSimulator {
             m.put("lon", v.lon());
             m.put("speedKmh", v.speedKmh());
             m.put("heading", v.heading());
-            m.put("manual", v.isManual());
             m.put("region", v.region());
             m.put("destination", v.destination());
             m.put("destLat", v.destLat());
@@ -273,53 +297,100 @@ public class FleetSimulator {
     }
 
     /**
-     * Pin a vehicle to a manual position (operator override). Road vehicles are snapped to
-     * the nearest road (they cannot drive through buildings); helicopters are placed exactly
-     * where clicked (they fly). Returns the outcome, or {@code null} if the id is unknown.
+     * Move a vehicle to an operator-chosen point and let it carry on driving.
+     *
+     * <p>A land vehicle is only moved if the click is on a road; an off-road click is
+     * refused and the vehicle stays where it is. It used to be snapped to the nearest road
+     * instead, which quietly put the vehicle somewhere the operator had not chosen —
+     * a refusal the operator can see beats a silent correction they cannot.
+     * Helicopters are placed exactly where clicked; they fly, so every point is reachable.
+     *
+     * <p>The move is a teleport, not a pin: a vehicle that was driving is handed a fresh
+     * route from the new point to the same destination, so it keeps going at its own cruise
+     * speed. It used to be frozen at 0 km/h until an operator released it, which made every
+     * move look like a breakdown and stalled the vehicle's trip.
+     *
+     * <p>Returns the outcome — {@code moved} says whether it happened, {@code reason} why
+     * not — or {@code null} if the id is unknown.
      */
-    public Map<String, Object> setManualPosition(long id, double lat, double lon) {
+    public Map<String, Object> moveVehicle(long id, double lat, double lon) {
         VehicleState v = byId.get(id);
         if (v == null) {
             return null;
         }
+        Map<String, Object> result = new HashMap<>();
+        result.put("found", true);
+        result.put("flying", v.isFlying());
+
+        if (v.isLoopVehicle()) {
+            // The geofence vehicle exists to lap its zone, and its position is recomputed
+            // from that loop on every tick — so relocating it would be undone before the
+            // next reading and the move would be a lie the API told the operator.
+            return refuse(result, "LOOP_VEHICLE", null);
+        }
+
         double placeLat = lat;
         double placeLon = lon;
-        double offRoadMeters = 0;
-        boolean snapped = false;
+
         if (!v.isFlying()) {
-            RoadRoutes.NearestRoad nr = roadRoutes.nearestRoad(lat, lon);
-            if (nr != null) {
-                placeLat = nr.lat();
-                placeLon = nr.lon();
-                offRoadMeters = nr.distanceMeters();
-                snapped = offRoadMeters > OFF_ROAD_METERS;
+            RoadRoutes.NearestRoad nearest = roadRoutes.nearestRoad(lat, lon);
+            if (nearest == null) {
+                return refuse(result, "ROUTING_UNAVAILABLE", null);
             }
+            if (nearest.distanceMeters() > properties.getRoadClickToleranceMeters()) {
+                return refuse(result, "OFF_ROAD", nearest.distanceMeters());
+            }
+            // Within tolerance: settle onto the road itself, so the vehicle sits on the
+            // lane rather than a few metres beside it.
+            placeLat = nearest.lat();
+            placeLon = nearest.lon();
         }
-        v.setManual(placeLat, placeLon);
+
+        Journey current = v.journey();
+        if (current != null && !v.isParked()) {
+            Route route = routeFor(v, placeLat, placeLon, current.destLat(), current.destLon());
+            if (route == null) {
+                return refuse(result, "NO_ROUTE_FROM_HERE", null);
+            }
+            v.startJourney(new Journey(current.destination(), current.destLat(), current.destLon(),
+                    route), 0.0);
+        } else {
+            // Parked or waiting for an assignment: it has nowhere to be going, so just put
+            // it there. The assigner routes it from here once its dwell ends.
+            v.relocate(placeLat, placeLon);
+        }
+
         // Publish straight away instead of waiting for the next tick: otherwise the move
         // takes up to a full tick to enter the pipeline — most of the perceived latency.
         v.tick(0);
         ingestionClient.sendBatch(List.of(toPayload(v)));
         sent.increment();
 
-        Map<String, Object> result = new HashMap<>();
-        result.put("found", true);
-        result.put("flying", v.isFlying());
-        result.put("snapped", snapped);
-        result.put("lat", placeLat);
-        result.put("lon", placeLon);
-        result.put("offRoadMeters", Math.round(offRoadMeters));
+        result.put("moved", true);
+        result.put("lat", v.lat());
+        result.put("lon", v.lon());
+        result.put("speedKmh", v.speedKmh());
         return result;
     }
 
-    /** Release a vehicle back to automatic simulation. False if unknown id. */
-    public boolean releaseVehicle(long id) {
-        VehicleState v = byId.get(id);
-        if (v == null) {
-            return false;
+    private static Map<String, Object> refuse(Map<String, Object> result, String reason,
+                                              Double offRoadMeters) {
+        result.put("moved", false);
+        result.put("reason", reason);
+        if (offRoadMeters != null) {
+            result.put("offRoadMeters", Math.round(offRoadMeters));
         }
-        v.clearManual();
-        return true;
+        return result;
+    }
+
+    /** A helicopter's route to a destination is the straight line; a land vehicle's is OSRM's. */
+    private Route routeFor(VehicleState v, double fromLat, double fromLon,
+                           double toLat, double toLon) {
+        if (v.isFlying()) {
+            return new Route(List.of(new GeoPoint(fromLat, fromLon), new GeoPoint(toLat, toLon)),
+                    false);
+        }
+        return roadRoutes.routeBetween(fromLat, fromLon, toLat, toLon);
     }
 
     /** All province names (for the operator's "create route" destination picker). */
@@ -344,14 +415,11 @@ public class FleetSimulator {
         if (dest == null) {
             return false;
         }
-        v.clearManual();
-        Route route = null;
-        if (!v.isFlying()) {
-            route = roadRoutes.routeBetween(v.lat(), v.lon(), dest.lat(), dest.lon());
-        }
+        Route route = routeFor(v, v.lat(), v.lon(), dest.lat(), dest.lon());
         if (route == null) {
-            route = new Route(List.of(new GeoPoint(v.lat(), v.lon()),
-                    new GeoPoint(dest.lat(), dest.lon())), false);
+            // A land vehicle with no road route is refused, not sent across country on a
+            // straight line — the operator gets an error instead of a car crossing a lake.
+            return false;
         }
         v.startJourney(new Journey(dest.name(), dest.lat(), dest.lon(), route), 0.0);
         v.setRegion(dest.name());

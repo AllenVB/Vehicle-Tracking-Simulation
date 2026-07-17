@@ -104,8 +104,95 @@ services:
     volumes:
       - redis-data:/data
 
+  # ── OSRM: yerel rota motoru ────────────────────────────────────────────────
+  # Kara araçlarının yoldan gitmesi buna bağlı. Simülatör public OSRM demo
+  # sunucusunu kullanıyordu; o yavaşlayınca/yanıt vermeyince araçlar sentetik
+  # düz çizgilere düşüyor ve dağdan/gölden geçiyordu. Rota motoru artık yerel:
+  # başkasının rate limit'i bizim filomuzu araziye sürmez.
+  #
+  # İlk çalıştırma pahalıdır: ~400MB harita indirilir ve ön işlenir. Sonuç bir
+  # volume'da kalır; sonraki açılışlar anında.
+  #
+  # BELLEK: osrm-extract Türkiye haritası için ~6GB ister ve yetmezse çekirdek
+  # tarafından öldürülür (exit 137). Docker'a ayrılan bellek WSL2'de varsayılan
+  # olarak makinenin yarısıdır ve yığının geri kalanı da onu paylaşır. İlk kurulum
+  # OOM ile düşerse, ön işlemeyi yığın kapalıyken tek başına çalıştırın:
+  #
+  #   docker compose stop $(docker compose ps --services | grep -v osrm)
+  #   docker compose up osrm-init
+  #   docker compose up -d
+  #
+  # Bu bir kereliktir; veri hazırlandıktan sonra osrm-routed birkaç yüz MB ile çalışır.
+
+  # 1) Harita verisi. Ayrı bir konteyner çünkü osrm-backend imajında curl yok.
+  osrm-fetch:
+    image: curlimages/curl:8.11.1
+    container_name: vts-osrm-fetch
+    volumes:
+      - osrm-data:/data
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -f /data/turkey-latest.osm.pbf ]; then
+          echo "OSM verisi zaten var, indirme atlandı"; exit 0
+        fi
+        echo "Türkiye OSM verisi indiriliyor (~400MB)..."
+        curl -fsSL --retry 3 -o /data/turkey-latest.osm.pbf.part \
+          "${OSM_EXTRACT_URL:-https://download.geofabrik.de/europe/turkey-latest.osm.pbf}"
+        mv /data/turkey-latest.osm.pbf.part /data/turkey-latest.osm.pbf
+        echo "indirildi"
+
+  # 2) Ön işleme (extract -> partition -> customize). MLD algoritması.
+  osrm-init:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    container_name: vts-osrm-init
+    depends_on:
+      osrm-fetch:
+        condition: service_completed_successfully
+    volumes:
+      - osrm-data:/data
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        cd /data
+        # .mldgr, customize adımının son çıktısı: varsa hazırız.
+        if [ -f turkey-latest.osrm.mldgr ]; then
+          echo "OSRM verisi zaten hazır"; exit 0
+        fi
+        echo "osrm-extract..."   && osrm-extract -p /opt/car.lua turkey-latest.osm.pbf
+        echo "osrm-partition..." && osrm-partition turkey-latest.osrm
+        echo "osrm-customize..." && osrm-customize turkey-latest.osrm
+        echo "OSRM verisi hazır"
+
+  # 3) Rota servisi.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    container_name: vts-osrm
+    depends_on:
+      osrm-init:
+        condition: service_completed_successfully
+    volumes:
+      - osrm-data:/data
+    command: osrm-routed --algorithm mld /data/turkey-latest.osrm
+    expose: ["5000"]
+    healthcheck:
+      # osrm-routed portu ancak veriyi yükledikten sonra dinlemeye başlar, bu
+      # yüzden port kontrolü "hazır mı" sorusunun doğru cevabı.
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/5000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest
+    # Sabitlenmiş: :latest ile build'ler tekrarlanabilir olmaz — bir gün çalışan yığın
+    # ertesi gün upstream değiştiği için farklı davranır. Bu sürüm, sabitlendiği anda
+    # :latest'in çözüldüğü digest'in ta kendisi.
+    image: provectuslabs/kafka-ui:v0.7.2
     container_name: vts-kafka-ui
     depends_on:
       kafka:
@@ -118,7 +205,7 @@ services:
       DYNAMIC_CONFIG_ENABLED: "true"
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.1
     container_name: vts-prometheus
     ports:
       - "9090:9090"
@@ -127,7 +214,7 @@ services:
       - prometheus-data:/prometheus
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.1.0
     container_name: vts-grafana
     depends_on:
       - prometheus
@@ -220,9 +307,14 @@ services:
     build: {context: ., args: {MODULE: vts-simulator}}
     container_name: vts-simulator
     mem_limit: 448m
-    depends_on: {ingestion-service: {condition: service_started}}
+    depends_on:
+      ingestion-service: {condition: service_started}
+      # Rota motoru hazır olmadan başlarsa kara araçlarının hiçbiri yola çıkamaz
+      # (yol yoksa park ederler), bu yüzden hazır olmasını bekliyoruz.
+      osrm: {condition: service_healthy}
     environment:
       VTS_SIMULATOR_INGESTION_BASE_URL: http://ingestion-service:8081
+      VTS_SIMULATOR_OSRM_BASE_URL: http://osrm:5000
     # Kontrol API'si iç ağda kalır; UI ona gateway proxy'si üzerinden erişir.
     # Dışarı açmak, kimliksiz bir "aracı ışınla" ucunu herkese açmak demekti.
     expose: ["8085"]
@@ -234,3 +326,6 @@ volumes:
   redis-data:
   prometheus-data:
   grafana-data:
+  # İndirilen harita + ön işlenmiş OSRM grafiği. Kalıcı: silinirse ilk açılıştaki
+  # indirme ve ön işleme (birkaç dakika) tekrarlanır.
+  osrm-data:

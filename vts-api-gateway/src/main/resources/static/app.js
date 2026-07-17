@@ -2,8 +2,10 @@
  * VTS — tek sayfa, iki harita (2/5/5 grid), tek servis (gateway).
  *  - Sol harita  : canlı filo (OpenStreetMap) — tipe göre logo, yöne dönük + benzin istasyonları
  *  - Sağ harita  : operatör (CartoDB)          — logo + plaka no, çift tıkla taşı
- *  - Kara araçları taşınırken yol dışına tıklanırsa en yakın yola oturtulur (uyarı);
- *    helikopterler her yere konabilir.
+ *  - Kara aracı yalnızca yol üzerine taşınabilir: yol dışı tıklama reddedilir ve araç
+ *    yerinde kalır. Helikopterler her yere konabilir.
+ *  - Taşıma bir kilit değil, ışınlanmadır: araç aynı hedefe yeni rotasıyla yoluna devam
+ *    eder, hızı korunur.
  */
 (function () {
     "use strict";
@@ -15,7 +17,6 @@
     const pos = new Map();
     const vehicles = new Map();               // vehicleId -> {plate, plateNo, type, model}
     const byPlateNo = new Map();
-    const manual = new Set();
     const journey = new Map();
     let fuelStations = [];
     const messages = new Map();               // vehicleId -> [{category, body, at}]
@@ -86,8 +87,6 @@
             const n = parseInt(e.target.value, 10);
             select(byPlateNo.get(n) ?? null);
         });
-        document.getElementById("releaseBtn").addEventListener("click", release);
-
         loadProvinces();
         document.getElementById("routeBtn").addEventListener("click", openRoutePicker);
         document.getElementById("routeCancel").addEventListener("click", closeRoutePicker);
@@ -348,14 +347,12 @@
         refreshMarkers();
 
         const info = document.getElementById("selInfo");
-        const btn = document.getElementById("releaseBtn");
         const v = selected != null ? vehicles.get(selected) : null;
         // Rota Oluştur butonu ve uyarı kutusu yalnızca bir araç seçiliyken.
         document.getElementById("routeBtn").style.display = v ? "block" : "none";
         document.getElementById("msgBox").style.display = v ? "block" : "none";
         if (changedSelection) closeRoutePicker();
         if (v) {
-            const isManual = manual.has(selected);
             const j = journey.get(selected);
             const p = pos.get(selected);
             const heli = j && j.flying ? '<span class="pill heli">HELİKOPTER</span>' : "";
@@ -367,17 +364,14 @@
                 if (nf) fuelLine = `<div class="meta">⛽ En yakın benzin: ${nf.km.toFixed(1)} km · ${nf.f.brand}</div>`;
             }
             info.innerHTML = `<b>${v.plate}</b>${heli}` +
-                `<span class="pill ${isManual ? "manual" : "auto"}">${isManual ? "ELLE" : "OTOMATİK"}</span>` +
                 `<div class="meta" style="margin-top:4px">${v.model} · ${p ? p.speedKmh + " km/s" : "-"}${j ? " · " + journeyText(j) : ""}</div>` +
                 fuelLine;
-            btn.disabled = !isManual;
             if (p) ctrl.panTo([p.lat, p.lon]);
             if (changedSelection) showPlannedRoute(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
             if (row) row.scrollIntoView({ block: "nearest" });
         } else {
             info.textContent = "";
-            btn.disabled = true;
         }
     }
 
@@ -420,23 +414,41 @@
             });
             if (!res.ok) { flash("Taşıma başarısız."); return; }
             const r = await res.json().catch(() => ({}));
-            const plat = r.lat != null ? r.lat : lat, plon = r.lon != null ? r.lon : lon;
-            manual.add(selected);
-            const p = { ...(pos.get(selected) || {}), vehicleId: selected, lat: plat, lon: plon, speedKmh: 0 };
+
+            // Taşındığını yalnızca sunucu açıkça söylerse kabul et. `=== false` yerine
+            // `!== true`: alanı hiç taşımayan bir yanıt (ör. eski bir simülatör imajı)
+            // aksi halde başarı sayılır ve taşınmamış aracı taşınmış gibi gösterirdik.
+            if (r.moved !== true) {
+                if (r.reason === "OFF_ROAD") {
+                    flash(`⛔ Bu noktaya gidilemiyor — yol yok (en yakın yol ${r.offRoadMeters} m uzakta). ${plate} yerinde kaldı.`);
+                } else if (r.reason === "LOOP_VEHICLE") {
+                    flash(`⛔ ${plate} yasak bölge turunda; bu araç taşınamaz.`);
+                } else if (r.reason === "NO_ROUTE_FROM_HERE") {
+                    flash(`⛔ ${plate} için bu noktadan hedefine yol rotası bulunamadı.`);
+                } else if (r.reason === "ROUTING_UNAVAILABLE") {
+                    flash("⛔ Rota motoru şu an yanıt vermiyor, araç taşınamadı.");
+                } else {
+                    flash(`⛔ ${plate} taşınamadı.`);
+                }
+                return;
+            }
+
+            // Taşındı: araç yoluna devam ediyor, hızını sunucudan al (0 varsayma).
+            const p = {
+                ...(pos.get(selected) || {}),
+                vehicleId: selected,
+                lat: r.lat != null ? r.lat : lat,
+                lon: r.lon != null ? r.lon : lon,
+                speedKmh: r.speedKmh != null ? Math.round(r.speedKmh) : (pos.get(selected) || {}).speedKmh
+            };
             pos.set(selected, p);
             drawLive(p); drawCtrl(p); select(selected);
-            if (r.snapped) flash(`⚠ Yol dışına tıklandı — ${plate} en yakın yola oturtuldu (${r.offRoadMeters} m).`);
-            else if (r.flying) flash(`🚁 ${plate} taşındı (helikopter, her yere konabilir).`);
-            else flash(`${plate} taşındı → sol harita güncelleniyor.`);
-        } catch (_) { flash("Taşıma başarısız (bağlantı)."); }
-    }
+            // Hedefe yeni rota çizildi; select() yalnızca seçim değişince çiziyor.
+            showPlannedRoute(selected);
 
-    async function release() {
-        if (selected == null) return;
-        await fetch(`/api/v1/control/${selected}/position`, { method: "DELETE", headers: auth() });
-        manual.delete(selected);
-        select(selected);
-        flash("Araç otomatiğe döndü.");
+            if (r.flying) flash(`🚁 ${plate} taşındı (helikopter, her yere konabilir) — uçuşuna devam ediyor.`);
+            else flash(`✔ ${plate} taşındı — aynı hedefe yoluna devam ediyor.`);
+        } catch (_) { flash("Taşıma başarısız (bağlantı)."); }
     }
 
     // ── Rota Oluştur (hedef il seç) ─────────────────────────────────────────
@@ -475,8 +487,7 @@
                 method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
                 body: JSON.stringify({ province })
             });
-            if (!res.ok) { flash("Rota oluşturulamadı."); return; }
-            manual.delete(selected);
+            if (!res.ok) { flash("Rota oluşturulamadı — bu araç için hedefe yol rotası bulunamadı."); return; }
             setTimeout(() => showPlannedRoute(selected), 400);   // yeni rotayı çiz
             flash(`🗺️ ${plate} → ${province} rotasına yönlendirildi.`);
             closeRoutePicker();
@@ -552,9 +563,7 @@
         try {
             const res = await fetch("/api/v1/control/state", { headers: auth() });
             if (!res.ok) return;
-            manual.clear();
             (await res.json()).forEach(s => {
-                if (s.manual) manual.add(s.vehicleId);
                 journey.set(s.vehicleId, {
                     destination: s.destination, remainingKm: s.remainingKm,
                     etaMinutes: s.etaMinutes, parked: s.parked, flying: s.flying
