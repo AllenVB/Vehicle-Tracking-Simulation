@@ -26,8 +26,10 @@ Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita 
   **benzin istasyonları** (⛽) da işaretlidir. Bir araç seçilince **gideceği rota** akan
   kesikli çizgiyle çizilir ve **en yakın benzin istasyonu mesafesi** gösterilir.
 - **Sağ (5/12) — Operatör haritası** (CartoDB): aracı seç, yeni konuma **çift tıkla**.
-  Kara araçları **en yakın yola** oturtulur (yol dışına tıklamada uyarı); helikopterler her
-  yere konabilir. Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
+  Kara aracı yalnızca **yol üzerine** taşınabilir; yol dışına tıklanırsa *"bu noktaya
+  gidilemiyor"* uyarısı çıkar ve araç **yerinde kalır**. Helikopterler her yere konabilir.
+  Taşınan araç **durmaz**: aynı hedefe yeni rotasıyla, kendi hızıyla yoluna devam eder.
+  Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
 - **İhlaller** Türkçe adı ve **TL cinsinden cezasıyla** listelenir; toplam ceza barın üstünde
   görünür. Araçların çoğu limitlere uyduğu için akış seyrektir (saniyeler içinde sel değil).
 
@@ -148,28 +150,60 @@ Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında
 | Sonraki 13 büyükşehir | 2'şer | Bursa, Antalya, Adana, Konya, Gaziantep… |
 | Kalan 65 il | 1'er | Sinop, Ardahan, Yalova… |
 
-### Araç tipleri, plakalar ve hız sınırları
-Plaka, tipi de taşır: `VTS-001-Otomobil`, `VTS-027-Tır`, `VTS-063-Motor`.
+### Kategoriler ve araç tipleri
+Filo bir **taksonomi** ile modellenir (`vehicle_category` + `vehicle_type` tabloları):
 
-| Tip | Adet | Hız sınırı | Nasıl uygulanır |
-|---|---|---|---|
-| Otomobil | 50 | **110** km/s | `rule_assignment` GROUP override |
-| Motor | 20 | **90** km/s | `rule_assignment` GROUP override |
-| Tır | 30 | **80** km/s | temel `SPEED_LIMIT` eşiği |
-| Helikopter | 5 | — | **kural yok** (uçar, muaf) |
+| Kategori | Tipler | Adet |
+|---|---|---|
+| **Kara Araçları** (`LAND`) | Otomobil, Tır, Motor | 50 / 30 / 20 |
+| **Hava Araçları** (`AIR`) | Helikopter | 5 |
+| **Deniz Araçları** (`SEA`) | — | 0 |
+
+`SEA` bilerek boş: taksonomi, bir deniz filosunun ifade edilebilir olduğunu henüz tek bir
+tekne yokken söyleyebilsin diye kayıtlı. `GET /api/v1/vehicle-types` kategorileri boş
+olanlar dahil döner.
+
+**Kategori** hem hareketi hem kural uygulanabilirliğini belirleyen eksendir: kara araçları
+yol ağına bağlıdır, hava araçları değil. Kod tipe değil kategoriye bakar — "bu bir
+helikopter mi" sorusu, iki serviste birbirinden farklı iki muafiyet listesi doğurmuştu.
+
+Plaka tipi de taşır: `VTS-001-Otomobil`, `VTS-027-Tır`, `VTS-063-Motor`.
+
+### Hangi kural hangi tipe? (`rule_assignment` → `VEHICLE_TYPE`)
+İhlaller **kara araçlarına özeldir**; istisna, yola değil makineye ait olan yakıt/batarya
+kurallarıdır. Hem uygulanabilirlik hem eşik veridir — kod değişmeden ayarlanabilir:
+
+| Kural | Otomobil | Tır | Motor | Helikopter |
+|---|---|---|---|---|
+| `SPEED_LIMIT` / `SUSTAINED_SPEEDING` | 110 | 80 | 90 | **yok** |
+| `HARSH_BRAKING` (yavaşlama deltası) | −40 | **−30** | **−50** | **yok** |
+| `IDLING`, `GEOFENCE_ENTER/EXIT` | ✓ | ✓ | ✓ | **yok** |
+| `LOW_FUEL` | 15 | 20 | 10 | **25** |
+| `LOW_BATTERY` | 20 | 20 | 20 | 20 |
+
+Sert frende *küçük* magnitüd daha sıkı ayardır: yüklü bir tır tek ölçümde 30 km/s
+kaybediyorsa bu şiddetlidir, motosiklet 50'yi rutin olarak yapar. Ortak −40, tırları geç
+yakalayıp motosikletleri sürekli işaretliyordu.
+
+Bir tipin satırı yoksa kuralın kendi varsayılanı geçerlidir; tablo yalnızca **farkı**
+kaydeder. `enabled = false` ise kural o tipe hiç uygulanmaz.
 
 Kara araçlarına açılışta **rastgele 0–120 km/s** taban seyir hızı atanır; sınırı aşan araç
 ihlal üretir (aşağıdaki cooldown'a tabi).
 
 ### Helikopterler (plaka 101–105)
 5 helikopter, uçtukları için kara araçlarından farklı davranır:
-- **Düz uçuş, yüksek hız** (180–260 km/s); rotaları OSRM değil, kuş uçuşu hattı.
-- **Yol-tabanlı kurallardan muaf** — hız limiti, sürekli hız aşımı, sert fren, geofence
-  onlara işlemez (evlerin, denizin, yolların üstünden geçebilirler). Bu muafiyet
-  processing ve stream-analytics'te **araç tipine göre** uygulanır; trip ve rölanti hâlâ
-  geçerli (bir uçuş da bir trip'tir).
-- Operatör bir helikopteri **istediği yere** (deniz, bina üstü) koyabilir; kara araçları
-  ise en yakın yola oturtulur.
+- **Düz uçuş, yüksek hız** (180–260 km/s); rotaları OSRM değil, kuş uçuşu hattı — bir
+  helikopterin gerçek yolu zaten düz çizgidir.
+- **Yol-tabanlı kuralların hiçbiri işlemez**: hız limiti, sürekli hız aşımı, sert fren,
+  geofence ve rölanti. Hepsi aracın bir yolla ya da yer bölgesiyle ilişkisini tarif eder;
+  helikopterin böyle bir ilişkisi yoktur. Muafiyet artık tek yerde — `rule_assignment`'ın
+  `VEHICLE_TYPE` satırları — ve iki kural motoru da aynı satırları okur.
+- **Yakıt ve batarya işler** (yakıt eşiği 25, daha erken uyarır): bunlar yolu değil makineyi
+  tarif eder ve yakıtı biten bir helikopter en acil vakadır.
+- **Trip'ler işler** — bir uçuş da bir trip'tir, ve trip bir ihlal değildir.
+- Operatör bir helikopteri **istediği yere** (deniz, bina üstü) koyabilir; kara aracı ise
+  yalnızca yol üzerine taşınabilir, yol dışı tıklama reddedilir.
 
 ### Yolculuklar: hedef, gerçek yol, kalan km
 Araçlar amaçsız dönmez; **gerçek yolculuk** yapar:
@@ -184,8 +218,23 @@ o zaman `trip`, `trip_point`, `stop_event`, sürücü skoru ve bakım verisi *ka
 kalır. Araçlar rotalarında **rastgele bir ilerlemeyle** başlar — yoksa ilk varışlar (ve ilk
 trip'ler) saatler sonra görünürdü.
 
-OSRM'e ulaşılamazsa sistem düz çizgi rotaya düşer: araç yine gider, yine varır, trip yine
-kapanır — sadece yol geometrisi olmaz. İnternet olmadan da ayakta kalır.
+### Rota motoru yereldir (OSRM)
+`docker compose` bir **yerel OSRM** ayağa kaldırır (`osrm` servisi, Türkiye OSM verisi).
+İlk açılış pahalıdır — ~400MB indirme + birkaç dakikalık ön işleme — ama sonuç bir
+volume'da kalır ve sonraki açılışlar anında olur. Sistem böylece internetten bağımsız
+çalışır.
+
+Simülatör önceden OSRM'in **public demo sunucusuna** bağlıydı ve o yavaşladığında/yanıt
+vermediğinde kara araçlarına **A'dan B'ye düz çizgi** veriliyordu: araç yine gidiyor, yine
+varıyor, trip yine kapanıyordu — ama Türkiye'yi dağdan, gölden, tarladan keserek. Yani
+araçların araziden geçmesinin sebebi bir hata değil, bilinçli bir "hareket etmeye devam
+etsin" tercihiydi.
+
+Artık **kara aracı yol rotası olmadan hareket etmez**. Rota alınamazsa araç park eder ve
+atayıcı birkaç saniyede bir yeniden dener. Duran bir araç, rota motorunun bozuk olduğunun
+görünür ve dürüst bir belirtisidir; gölün üstünden geçen bir araç değildir. Sentetik rota
+üreten kod tamamen kaldırıldı — kara aracına yol-dışı geometri verebilecek bir kod yolu
+artık yok.
 
 ### Sürücü skorları
 `driver_score_daily`: 30 günlük geçmiş seed'lenir (sürücü başına kalıcı bir "karakter" biası
@@ -236,6 +285,21 @@ Tüm sistem tek komutla (altyapı + 8 servis):
 docker compose up -d --build
 ```
 
+> **İlk açılış uzundur.** Yerel rota motoru (OSRM) için ~400MB Türkiye haritası
+> indirilir ve ön işlenir — internet hızına göre 15–40 dakika. Sonuç `osrm-data`
+> volume'unda kalır; sonraki açılışlar saniyeler sürer.
+>
+> `osrm-init` **exit 137** ile düşerse bellek yetmemiştir (`osrm-extract` Türkiye
+> için ~6GB ister; WSL2'de Docker varsayılan olarak makinenin yarısını alır ve
+> yığının geri kalanı da onu paylaşır). Ön işlemeyi yığın kapalıyken tek başına
+> çalıştırın — bir kereliktir, sonra `osrm-routed` birkaç yüz MB ile çalışır:
+>
+> ```bash
+> docker compose stop $(docker compose ps --services | grep -v osrm)
+> docker compose up osrm-init      # bitmesini bekleyin
+> docker compose up -d
+> ```
+
 Ardından tarayıcıdan:
 
 | Arayüz | Adres | Giriş |
@@ -279,16 +343,27 @@ viewport için `/app/viewport`.
 ### Operatör kontrol API (gateway proxy — `vehicleId` ile)
 
 ```bash
-# elle kontrol edilen araçların bayrakları
+# araçların hedef/rota durumu
 curl localhost:8080/api/v1/control/state -H "Authorization: Bearer $TOKEN"
 
 # aracı taşı (vehicleId ile — plaka numarası DEĞİL)
 curl -X POST localhost:8080/api/v1/control/49/position -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"lat":39.92,"lon":32.85}'
-
-# otomatiğe döndür
-curl -X DELETE localhost:8080/api/v1/control/49/position -H "Authorization: Bearer $TOKEN"
 ```
+
+Taşıma bir **kilit değil, ışınlanmadır**: araç aynı hedefe yeni rotasıyla, kendi hızıyla
+yoluna devam eder. Yanıt `moved` ile sonucu söyler — yol dışı bir tıklama 200 döner ama
+`moved:false` olur, çünkü istek anlaşılmıştır ve **ret, cevabın kendisidir**:
+
+```json
+{"found":true,"flying":false,"moved":false,"reason":"OFF_ROAD","offRoadMeters":10576}
+```
+
+Bir kara aracının tıklamayı "yol üzerinde" sayması için en yakın yolun
+`vts.simulator.road-click-tolerance-meters` (varsayılan **50 m**) içinde olması gerekir.
+Bu eşik, "yol üstü tıklama"nın tanımıdır: fazla dar olursa görsel olarak yola yapılan
+tıklama reddedilir (tıklama; zoom hatasını, yolun çizim kalınlığını ve OSM geometri hatasını
+taşır), fazla geniş olursa araç operatörün göstermediği bir yere sessizce konar.
 
 Gateway, `vehicleId`'yi imei üzerinden simülatörün cihaz index'ine çevirir; simülatörün
 `:8085/api/**` ucu iç ağda kalır, UI hiç oraya gitmez.
