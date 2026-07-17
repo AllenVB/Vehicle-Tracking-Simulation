@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
@@ -25,7 +26,7 @@ import org.springframework.util.backoff.ExponentialBackOff;
  * topic. The record keeps its original partition, which preserves per-vehicle ordering on
  * the DLQ for anyone replaying it.
  */
-@AutoConfiguration
+@AutoConfiguration(after = KafkaAutoConfiguration.class)
 @ConditionalOnClass(KafkaTemplate.class)
 public class VtsKafkaErrorHandlingAutoConfiguration {
 
@@ -39,11 +40,17 @@ public class VtsKafkaErrorHandlingAutoConfiguration {
      * Requires a {@code KafkaTemplate} to publish with; a service without one has no producer
      * and so cannot dead-letter. {@link ConditionalOnMissingBean} lets a service override the
      * policy with its own bean.
+     *
+     * <p>The template is taken as {@code KafkaTemplate<?, ?>} because all the recoverer needs
+     * is something that can publish. Asking for {@code KafkaTemplate<String, Object>} assumed
+     * every service that depends on vts-common serialises the same way — the scheduler, which
+     * only produces and holds a {@code KafkaTemplate<String, String>}, then failed to start:
+     * {@link ConditionalOnBean} matched the raw type, and the generic injection did not.
      */
     @Bean
     @ConditionalOnBean(KafkaTemplate.class)
     @ConditionalOnMissingBean(DefaultErrorHandler.class)
-    public DefaultErrorHandler vtsKafkaErrorHandler(KafkaTemplate<String, Object> kafkaTemplate) {
+    public DefaultErrorHandler vtsKafkaErrorHandler(KafkaTemplate<?, ?> kafkaTemplate) {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 kafkaTemplate,
                 (record, exception) -> new TopicPartition(Topics.dlqFor(record.topic()), record.partition()));
