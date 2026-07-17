@@ -5,8 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fleet.vts.analytics.config.Serdes;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
-import com.fleet.vts.analytics.rules.HelicopterRegistry;
-import com.fleet.vts.analytics.rules.SpeedLimitRegistry;
+import com.fleet.vts.analytics.rules.VehicleRuleRegistry;
 import com.fleet.vts.analytics.topology.AnalyticsTopology;
 import com.fleet.vts.common.enums.GeofenceEventType;
 import com.fleet.vts.common.enums.RuleType;
@@ -48,11 +47,26 @@ class AnalyticsTopologyTest {
     private TopologyTestDriver driver;
     private TestInputTopic<String, TelemetryEvent> input;
 
+    /**
+     * Test aracı 42: kara aracı, yani her kural uygulanır. Bir kuralın anahtarının
+     * bulunmaması o kuralın araca uygulanmadığı anlamına gelir; eşiksiz (pencere tabanlı)
+     * kurallar NaN taşır. Sert fren -40'ta tutuldu — tipe göre eşikler devreye girmeden
+     * önceki değer, böylece mevcut testlerin beklentisi korunur.
+     */
+    private static final Map<String, Double> LAND_VEHICLE_42 = Map.of(
+            "SPEED_LIMIT:42", 80.0,
+            "SUSTAINED_SPEEDING:42", 80.0,
+            "HARSH_BRAKING:42", -40.0,
+            "IDLING:42", Double.NaN,
+            "GEOFENCE_ENTER:42", Double.NaN);
+
     private void start(GeofenceRegistry registry) {
+        start(registry, LAND_VEHICLE_42);
+    }
+
+    private void start(GeofenceRegistry registry, Map<String, Double> applicableRules) {
         StreamsBuilder builder = new StreamsBuilder();
-        // Test aracı 42: tır eşiği (80), helikopter değil — mevcut testlerin davranışı korunur.
-        new AnalyticsTopology(registry, new SpeedLimitRegistry(Map.of(42L, 80.0)),
-                new HelicopterRegistry(java.util.Set.of()), mapper)
+        new AnalyticsTopology(registry, new VehicleRuleRegistry(applicableRules), mapper)
                 .buildPipeline(builder);
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, "analytics-test");
@@ -86,6 +100,73 @@ class AnalyticsTopologyTest {
     private TestOutputTopic<String, ViolationEvent> violations() {
         return driver.createOutputTopic(Topics.VIOLATION,
                 new StringDeserializer(), Serdes.json(ViolationEvent.class, mapper).deserializer());
+    }
+
+    /**
+     * Helicopter 99: no road rule applies to it, so no key for it exists. Vehicle 42 stays
+     * a land vehicle in the same fleet — the point is that they are told apart, not that
+     * the topology is empty.
+     */
+    private static final Map<String, Double> LAND_42_AND_HELICOPTER_99 = Map.of(
+            "SPEED_LIMIT:42", 80.0,
+            "SUSTAINED_SPEEDING:42", 80.0,
+            "HARSH_BRAKING:42", -40.0,
+            "IDLING:42", Double.NaN,
+            "GEOFENCE_ENTER:42", Double.NaN);
+
+    @Test
+    void helicopterProducesNoRoadViolations() {
+        // The complaint this fixes: helicopters collected violations meant for road
+        // vehicles. A helicopter decelerating hard and hovering is flying, not braking
+        // badly or idling at a kerb.
+        start(emptyRegistry(), LAND_42_AND_HELICOPTER_99);
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+
+        // A drop far past any braking threshold.
+        input.pipeInput("99", event(99, 250, true, true, 41.01, 28.97, t), t);
+        input.pipeInput("99", event(99, 40, true, true, 41.01, 28.97, t.plusSeconds(5)), t.plusSeconds(5));
+        // Stationary with the engine on, well past the 10-minute idling window.
+        input.pipeInput("99", event(99, 0, true, true, 41.01, 28.97, t.plusSeconds(10)), t.plusSeconds(10));
+        input.pipeInput("99", event(99, 0, true, true, 41.01, 28.97, t.plusSeconds(1200)), t.plusSeconds(1200));
+
+        assertTrue(violations().readValuesToList().isEmpty(),
+                "a helicopter must not produce road violations");
+    }
+
+    @Test
+    void landVehicleStillProducesRoadViolationsAlongsideHelicopters() {
+        // Guards the other direction: the exemption must not silence the fleet.
+        start(emptyRegistry(), LAND_42_AND_HELICOPTER_99);
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+
+        input.pipeInput("99", event(99, 250, true, true, 41.01, 28.97, t), t);
+        input.pipeInput("99", event(99, 40, true, true, 41.01, 28.97, t.plusSeconds(1)), t.plusSeconds(1));
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(5)), t.plusSeconds(5));
+
+        List<ViolationEvent> out = violations().readValuesToList();
+        assertEquals(1, out.size(), "only the land vehicle's brake is a violation");
+        assertEquals(42L, out.get(0).vehicleId());
+        assertEquals(RuleType.HARSH_BRAKING, out.get(0).ruleType());
+    }
+
+    @Test
+    void harshBrakingThresholdComesFromTheVehiclesType() {
+        // A 35 km/h drop is harsh for a truck (-30) and unremarkable for a motorcycle
+        // (-50). One shared -40 could not express that.
+        Map<String, Double> byType = Map.of("HARSH_BRAKING:7", -30.0, "HARSH_BRAKING:8", -50.0);
+        start(emptyRegistry(), byType);
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+
+        input.pipeInput("7", event(7, 80, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("7", event(7, 45, true, true, 41.0, 29.0, t.plusSeconds(1)), t.plusSeconds(1));
+        input.pipeInput("8", event(8, 80, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("8", event(8, 45, true, true, 41.0, 29.0, t.plusSeconds(1)), t.plusSeconds(1));
+
+        List<ViolationEvent> out = violations().readValuesToList();
+        assertEquals(1, out.size(), "same 35 km/h drop: harsh for the truck, not for the motorcycle");
+        assertEquals(7L, out.get(0).vehicleId());
+        assertEquals(-30.0, out.get(0).threshold());
     }
 
     @Test

@@ -15,7 +15,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @Configuration
 @EnableKafkaStreams
-@EnableScheduling   // SpeedLimitRegistry re-resolves thresholds periodically
+@EnableScheduling   // VehicleRuleRegistry re-resolves rule applicability/thresholds periodically
 public class AnalyticsConfig {
 
     @Bean

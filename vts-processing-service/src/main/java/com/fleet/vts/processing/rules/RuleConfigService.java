@@ -16,10 +16,17 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Resolves the effective rules for a vehicle. Thresholds are never hard-coded:
- * they come from the {@code rule} table with {@code rule_assignment} GROUP
- * overrides applied (e.g. trucks 80, cars 110). Everything is cached in Caffeine
- * (TTL 60s) and can be flushed on a rule-change invalidation event.
+ * Resolves the effective rules for a vehicle: which ones apply to it, and at what
+ * threshold. Neither is hard-coded — both come from the {@code rule} table with
+ * {@code rule_assignment} overrides applied. Everything is cached in Caffeine (TTL 60s)
+ * and can be flushed on a rule-change invalidation event.
+ *
+ * <p>Applicability is resolved from the vehicle's <em>type</em>. This used to be a
+ * hard-coded set holding the single entry {@code SPEED_LIMIT}, skipped for vehicles whose
+ * type happened to read {@code HELICOPTER} — so helicopters, exempt from speed limits,
+ * still collected idling and road-shaped violations, and the stream topology maintained
+ * its own differently-wrong copy of the same idea. Both engines now read the same
+ * {@code VEHICLE_TYPE}-scoped rows.
  */
 @Service
 public class RuleConfigService {
@@ -28,15 +35,21 @@ public class RuleConfigService {
                            double thresholdDefault, boolean enabled, int cooldownSeconds) {
     }
 
-    /** Road-based rules that do not apply to aircraft (helicopters fly over everything). */
-    private static final Set<String> ROAD_RULES = Set.of("SPEED_LIMIT");
+    /**
+     * What a {@code VEHICLE_TYPE}-scoped assignment says about one (rule, type) pair:
+     * whether the rule applies at all, and the threshold to use if it does
+     * ({@code null} = keep the rule's own default).
+     */
+    private record TypeAssignment(Double thresholdOverride, boolean enabled) {
+    }
 
     private final JdbcTemplate jdbc;
 
     private final Cache<Long, Map<String, RuleDef>> rulesByTenant = build();
     private final Cache<Long, Map<String, Map<Long, Double>>> groupOverridesByTenant = build();
+    private final Cache<Long, Map<String, Map<String, TypeAssignment>>> typeAssignmentsByTenant = build();
     private final Cache<Long, Optional<Long>> vehicleGroup = build();
-    private final Cache<Long, Boolean> helicopter = build();
+    private final Cache<Long, Optional<String>> vehicleType = build();
 
     public RuleConfigService(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
@@ -49,22 +62,39 @@ public class RuleConfigService {
                 .build();
     }
 
-    /** Effective rules for a vehicle, keyed by rule code. */
+    /**
+     * Effective rules for a vehicle, keyed by rule code. A rule the vehicle's type is
+     * exempt from is absent from the result entirely, so callers cannot evaluate it.
+     *
+     * <p>Threshold precedence, narrowest last: the rule's default, then the type override
+     * (what this kind of vehicle warrants), then the group override. Group wins because it
+     * is a deliberate choice about specific vehicles, whereas the type override is the
+     * baseline for every vehicle of that kind.
+     */
     public Map<String, RuleView> rulesFor(Long tenantId, Long vehicleId) {
         Map<String, RuleDef> defs = rulesByTenant.get(tenantId, this::loadRules);
-        Map<String, Map<Long, Double>> overrides =
+        Map<String, Map<Long, Double>> groupOverrides =
                 groupOverridesByTenant.get(tenantId, this::loadGroupOverrides);
+        Map<String, Map<String, TypeAssignment>> typeAssignments =
+                typeAssignmentsByTenant.get(tenantId, this::loadTypeAssignments);
         Long groupId = vehicleGroup.get(vehicleId, this::loadVehicleGroup).orElse(null);
-        boolean isHelicopter = helicopter.get(vehicleId, this::loadIsHelicopter);
+        String type = vehicleType.get(vehicleId, this::loadVehicleType).orElse(null);
 
         Map<String, RuleView> result = new LinkedHashMap<>();
         for (RuleDef def : defs.values()) {
-            if (isHelicopter && ROAD_RULES.contains(def.code())) {
-                continue;   // helicopters are exempt from road rules
+            TypeAssignment forType = type == null
+                    ? null
+                    : typeAssignments.getOrDefault(def.code(), Map.of()).get(type);
+            if (forType != null && !forType.enabled()) {
+                continue;   // this rule does not apply to this kind of vehicle
             }
+
             double threshold = def.thresholdDefault();
+            if (forType != null && forType.thresholdOverride() != null) {
+                threshold = forType.thresholdOverride();
+            }
             if (groupId != null) {
-                Double override = overrides.getOrDefault(def.code(), Map.of()).get(groupId);
+                Double override = groupOverrides.getOrDefault(def.code(), Map.of()).get(groupId);
                 if (override != null) {
                     threshold = override;
                 }
@@ -79,15 +109,34 @@ public class RuleConfigService {
     public void invalidateAll() {
         rulesByTenant.invalidateAll();
         groupOverridesByTenant.invalidateAll();
+        typeAssignmentsByTenant.invalidateAll();
         vehicleGroup.invalidateAll();
-        helicopter.invalidateAll();
+        vehicleType.invalidateAll();
     }
 
-    private Boolean loadIsHelicopter(Long vehicleId) {
-        Boolean heli = jdbc.query("SELECT type = 'HELICOPTER' FROM vehicle WHERE id = ?",
-                (ResultSetExtractor<Boolean>) rs -> rs.next() && rs.getBoolean(1),
+    private Optional<String> loadVehicleType(Long vehicleId) {
+        return jdbc.query("SELECT type FROM vehicle WHERE id = ?",
+                (ResultSetExtractor<Optional<String>>) rs ->
+                        rs.next() ? Optional.ofNullable(rs.getString("type")) : Optional.empty(),
                 vehicleId);
-        return Boolean.TRUE.equals(heli);
+    }
+
+    /** rule code -> vehicle type -> what that type's assignment says. */
+    private Map<String, Map<String, TypeAssignment>> loadTypeAssignments(Long tenantId) {
+        Map<String, Map<String, TypeAssignment>> map = new HashMap<>();
+        jdbc.query("SELECT r.code AS code, ra.scope_code AS vehicle_type, "
+                        + "ra.threshold_override AS thr, ra.enabled AS enabled "
+                        + "FROM rule_assignment ra JOIN rule r ON r.id = ra.rule_id "
+                        + "WHERE ra.tenant_id = ? AND ra.scope_type = 'VEHICLE_TYPE'",
+                rs -> {
+                    Number threshold = (Number) rs.getObject("thr");
+                    map.computeIfAbsent(rs.getString("code"), k -> new HashMap<>())
+                            .put(rs.getString("vehicle_type"), new TypeAssignment(
+                                    threshold == null ? null : threshold.doubleValue(),
+                                    rs.getBoolean("enabled")));
+                },
+                tenantId);
+        return map;
     }
 
     private Map<String, RuleDef> loadRules(Long tenantId) {

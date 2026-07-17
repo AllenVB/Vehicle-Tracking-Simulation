@@ -7,13 +7,17 @@ import com.fleet.vts.gateway.web.dto.GeofenceDto;
 import com.fleet.vts.gateway.web.dto.TelemetryBucketDto;
 import com.fleet.vts.gateway.web.dto.TripPointDto;
 import com.fleet.vts.gateway.web.dto.TripSummaryDto;
+import com.fleet.vts.gateway.web.dto.VehicleCategoryDto;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The read side behind the dashboard and the map: fleet counters, telemetry history,
@@ -150,6 +154,40 @@ public class ReportingQueryRepository {
                             rs.getString("status"));
                 },
                 tenantId, vehicleId, limit);
+    }
+
+    /**
+     * The fleet taxonomy: every category with its types, in display order, each type
+     * carrying how many of the tenant's vehicles are of that type.
+     *
+     * <p>Categories are returned even when empty, so an operator can see that a maritime
+     * fleet is expressible before one exists. The count is a LEFT JOIN for the same reason:
+     * a type with no vehicles is still a type.
+     */
+    public List<VehicleCategoryDto> findVehicleTaxonomy(long tenantId) {
+        Map<String, List<VehicleCategoryDto.VehicleTypeDto>> typesByCategory = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT t.category, t.code, t.label, count(v.id) AS vehicle_count
+                FROM vehicle_type t
+                LEFT JOIN vehicle v ON v.type = t.code AND v.tenant_id = ?
+                GROUP BY t.category, t.code, t.label, t.sort_order
+                ORDER BY t.sort_order
+                """,
+                rs -> {
+                    typesByCategory
+                            .computeIfAbsent(rs.getString("category"), k -> new ArrayList<>())
+                            .add(new VehicleCategoryDto.VehicleTypeDto(
+                                    rs.getString("code"),
+                                    rs.getString("label"),
+                                    rs.getLong("vehicle_count")));
+                },
+                tenantId);
+
+        return jdbc.query("SELECT code, label FROM vehicle_category ORDER BY sort_order",
+                (rs, n) -> new VehicleCategoryDto(
+                        rs.getString("code"),
+                        rs.getString("label"),
+                        typesByCategory.getOrDefault(rs.getString("code"), List.of())));
     }
 
     /** The trip's breadcrumb. Tenant ownership is enforced by the join on {@code trip}. */

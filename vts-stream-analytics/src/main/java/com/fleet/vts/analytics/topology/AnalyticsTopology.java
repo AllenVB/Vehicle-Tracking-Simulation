@@ -4,10 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
 import com.fleet.vts.analytics.rules.GeofenceRule;
 import com.fleet.vts.analytics.rules.HarshBrakingRule;
-import com.fleet.vts.analytics.rules.HelicopterRegistry;
 import com.fleet.vts.analytics.rules.IdlingRule;
-import com.fleet.vts.analytics.rules.SpeedLimitRegistry;
 import com.fleet.vts.analytics.rules.TripRule;
+import com.fleet.vts.analytics.rules.VehicleRuleRegistry;
 import com.fleet.vts.analytics.state.GeofenceState;
 import com.fleet.vts.analytics.state.SpeedWindowAgg;
 import com.fleet.vts.analytics.state.TripState;
@@ -49,8 +48,7 @@ public class AnalyticsTopology {
     private static final double SUSTAINED_RATIO = 0.8;
 
     private final GeofenceRegistry geofenceRegistry;
-    private final SpeedLimitRegistry speedLimits;
-    private final HelicopterRegistry helicopters;
+    private final VehicleRuleRegistry rules;
     private final Serde<TelemetryEvent> telemetrySerde;
     private final Serde<ViolationEvent> violationSerde;
     private final Serde<GeofenceEvent> geofenceSerde;
@@ -59,11 +57,10 @@ public class AnalyticsTopology {
     private final Serde<GeofenceState> geofenceStateSerde;
     private final Serde<TripState> tripStateSerde;
 
-    public AnalyticsTopology(GeofenceRegistry geofenceRegistry, SpeedLimitRegistry speedLimits,
-                            HelicopterRegistry helicopters, ObjectMapper mapper) {
+    public AnalyticsTopology(GeofenceRegistry geofenceRegistry, VehicleRuleRegistry rules,
+                            ObjectMapper mapper) {
         this.geofenceRegistry = geofenceRegistry;
-        this.speedLimits = speedLimits;
-        this.helicopters = helicopters;
+        this.rules = rules;
         this.telemetrySerde = json(TelemetryEvent.class, mapper);
         this.violationSerde = json(ViolationEvent.class, mapper);
         this.geofenceSerde = json(GeofenceEvent.class, mapper);
@@ -78,17 +75,30 @@ public class AnalyticsTopology {
         KStream<String, TelemetryEvent> raw = builder.stream(Topics.TELEMETRY_RAW,
                 Consumed.with(Serdes.String(), telemetrySerde));
 
-        // Helicopters fly, so the road-based rules below skip them. Trip detection and
-        // idling run on the full stream (a flight is a trip; a landed helicopter can idle).
-        KStream<String, TelemetryEvent> road = raw.filter((k, e) -> !helicopters.isHelicopter(k));
-
         Produced<String, ViolationEvent> toViolation = Produced.with(Serdes.String(), violationSerde);
 
+        // Each rule filters on its own applicability rather than sharing one "not a
+        // helicopter" stream. The blanket filter was applied to braking, speeding and
+        // geofences but not to idling, so helicopters collected idling violations while
+        // being exempt from everything else. Now the question each rule asks is the one it
+        // means -- "does this rule apply to this vehicle's type?" -- answered from the same
+        // rule_assignment rows the processing service reads.
+        KStream<String, TelemetryEvent> harshBraking =
+                raw.filter((k, e) -> rules.applies(RuleType.HARSH_BRAKING.name(), k));
+        KStream<String, TelemetryEvent> idling =
+                raw.filter((k, e) -> rules.applies(RuleType.IDLING.name(), k));
+        KStream<String, TelemetryEvent> geofence =
+                raw.filter((k, e) -> rules.applies(RuleType.GEOFENCE_ENTER.name(), k));
+        KStream<String, TelemetryEvent> sustainedSpeeding =
+                raw.filter((k, e) -> rules.applies(RuleType.SUSTAINED_SPEEDING.name(), k));
+
         // Stateful rules (Processor API + RocksDB state stores)
-        road.process(new HarshBrakingRule()).to(Topics.VIOLATION, toViolation);
-        raw.process(new IdlingRule()).to(Topics.VIOLATION, toViolation);
-        road.process(new GeofenceRule(geofenceRegistry, geofenceStateSerde))
+        harshBraking.process(new HarshBrakingRule(rules)).to(Topics.VIOLATION, toViolation);
+        idling.process(new IdlingRule()).to(Topics.VIOLATION, toViolation);
+        geofence.process(new GeofenceRule(geofenceRegistry, geofenceStateSerde))
                 .to(Topics.GEOFENCE_EVENT, Produced.with(Serdes.String(), geofenceSerde));
+
+        // Trips stay on the full stream: a flight is a trip, and a trip is not a violation.
         raw.process(new TripRule(tripStateSerde))
                 .to(Topics.TRIP, Produced.with(Serdes.String(), tripSerde));
 
@@ -100,11 +110,11 @@ public class AnalyticsTopology {
         // third of the fleet permanently speeding that alone was ~33 events/min and
         // dominated the violation stream. A tumbling window emits at most once per
         // 5 minutes per vehicle, matching the rule's cooldown_seconds (300).
-        road.filter((k, e) -> e != null && e.speedKmh() != null)
+        sustainedSpeeding.filter((k, e) -> e != null && e.speedKmh() != null)
                 .groupByKey(Grouped.with(Serdes.String(), telemetrySerde))
                 .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(5), Duration.ZERO))
                 .aggregate(SpeedWindowAgg::empty,
-                        (k, e, agg) -> agg.add(e, speedLimits.forVehicle(k)),
+                        (k, e, agg) -> agg.add(e, rules.speedLimit(k)),
                         Materialized.<String, SpeedWindowAgg, org.apache.kafka.streams.state.WindowStore<org.apache.kafka.common.utils.Bytes, byte[]>>
                                         as("sustained-speeding-store")
                                 .withKeySerde(Serdes.String())
@@ -119,7 +129,7 @@ public class AnalyticsTopology {
     }
 
     private ViolationEvent sustainedViolation(String vehicleId, SpeedWindowAgg agg, long windowEnd) {
-        double limit = speedLimits.forVehicle(vehicleId);   // per-type: car 110, motorcycle 90, truck 80
+        double limit = rules.speedLimit(vehicleId);   // per-type: car 110, motorcycle 90, truck 80
         return ViolationEvent.builder()
                 .tenantId(agg.tenantId())
                 .vehicleId(Long.valueOf(vehicleId))

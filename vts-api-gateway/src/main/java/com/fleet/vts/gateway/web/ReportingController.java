@@ -9,6 +9,7 @@ import com.fleet.vts.gateway.web.dto.GeofenceDto;
 import com.fleet.vts.gateway.web.dto.TelemetryBucketDto;
 import com.fleet.vts.gateway.web.dto.TripPointDto;
 import com.fleet.vts.gateway.web.dto.TripSummaryDto;
+import com.fleet.vts.gateway.web.dto.VehicleCategoryDto;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -58,6 +59,15 @@ public class ReportingController {
     @GetMapping("/geofences")
     public List<GeofenceDto> geofences(@AuthenticationPrincipal Jwt jwt) {
         return reporting.findActiveGeofences(CurrentUser.tenantId(jwt));
+    }
+
+    /**
+     * The fleet taxonomy: land / air / sea, and the types under each. Categories with no
+     * types are included — SEA is registered and empty on purpose.
+     */
+    @GetMapping("/vehicle-types")
+    public List<VehicleCategoryDto> vehicleTypes(@AuthenticationPrincipal Jwt jwt) {
+        return reporting.findVehicleTaxonomy(CurrentUser.tenantId(jwt));
     }
 
     /** Fuel stations (for the map and the nearest-station distance shown on select). */

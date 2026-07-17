@@ -18,8 +18,14 @@ import java.time.Duration;
 import java.util.Set;
 
 /**
- * HARSH_BRAKING: a drop of more than 40 km/h between consecutive readings of the
- * same vehicle. Previous speed is kept in a per-vehicle KeyValueStore (RocksDB).
+ * HARSH_BRAKING: a drop in speed between consecutive readings of the same vehicle that
+ * exceeds the vehicle's threshold. Previous speed is kept in a per-vehicle KeyValueStore
+ * (RocksDB).
+ *
+ * <p>The threshold comes from the rule tables per vehicle type, not from a constant here:
+ * mass decides what counts as harsh, so a truck shedding 30 km/h in one sample is violent
+ * while a motorcycle does 50 routinely. It was hard-coded at -40 for every vehicle, which
+ * flagged trucks late and motorcycles constantly.
  *
  * <p>Emission is debounced per vehicle: a driver who brakes hard repeatedly yields
  * at most one violation per {@link #COOLDOWN_MILLIS} window (mirrors the rule's
@@ -30,8 +36,15 @@ public class HarshBrakingRule implements ProcessorSupplier<String, TelemetryEven
 
     public static final String STORE = "harsh-braking-prev-speed";
     public static final String COOLDOWN_STORE = "harsh-braking-cooldown";
-    private static final int DROP_THRESHOLD = -40;
+    /** Used only if a vehicle has no resolvable threshold; matches the rule's own default. */
+    private static final double FALLBACK_DROP_THRESHOLD = -40.0;
     private static final long COOLDOWN_MILLIS = Duration.ofSeconds(300).toMillis();
+
+    private final VehicleRuleRegistry rules;
+
+    public HarshBrakingRule(VehicleRuleRegistry rules) {
+        this.rules = rules;
+    }
 
     @Override
     public Processor<String, TelemetryEvent, String, ViolationEvent> get() {
@@ -56,9 +69,11 @@ public class HarshBrakingRule implements ProcessorSupplier<String, TelemetryEven
                 Integer previous = prevSpeed.get(record.key());
                 if (previous != null) {
                     int delta = e.speedKmh() - previous;
-                    if (delta < DROP_THRESHOLD && passesCooldown(record.key(), record.timestamp())) {
+                    double threshold = rules.threshold(RuleType.HARSH_BRAKING.name(), record.key(),
+                            FALLBACK_DROP_THRESHOLD);
+                    if (delta < threshold && passesCooldown(record.key(), record.timestamp())) {
                         ViolationEvent v = Violations.of(e, RuleType.HARSH_BRAKING,
-                                Severity.HIGH, delta, (double) DROP_THRESHOLD);
+                                Severity.HIGH, delta, threshold);
                         context.forward(new Record<>(record.key(), v, record.timestamp()));
                     }
                 }
