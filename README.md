@@ -28,7 +28,7 @@ Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita 
 - **Sağ (5/12) — Operatör haritası** (CartoDB): aracı seç, yeni konuma **çift tıkla**.
   Kara aracı yalnızca **yol üzerine** taşınabilir; yol dışına tıklanırsa *"bu noktaya
   gidilemiyor"* uyarısı çıkar ve araç **yerinde kalır**. Helikopterler her yere konabilir.
-  Taşınan araç **durmaz**: aynı hedefe yeni rotasıyla, kendi hızıyla yoluna devam eder.
+  Taşınan araç **durmaz**: bırakıldığı noktadan **yeni bir hedefe** kendi hızıyla yola çıkar.
   Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
 - **İhlaller** Türkçe adı ve **TL cinsinden cezasıyla** listelenir; toplam ceza barın üstünde
   görünür. Araçların çoğu limitlere uyduğu için akış seyrektir (saniyeler içinde sel değil).
@@ -351,9 +351,13 @@ curl -X POST localhost:8080/api/v1/control/49/position -H "Authorization: Bearer
   -H 'Content-Type: application/json' -d '{"lat":39.92,"lon":32.85}'
 ```
 
-Taşıma bir **kilit değil, ışınlanmadır**: araç aynı hedefe yeni rotasıyla, kendi hızıyla
-yoluna devam eder. Yanıt `moved` ile sonucu söyler — yol dışı bir tıklama 200 döner ama
-`moved:false` olur, çünkü istek anlaşılmıştır ve **ret, cevabın kendisidir**:
+Taşıma bir **kilit değil, ışınlanmadır**: araç bırakıldığı noktaya iner ve oradan **yeni bir
+hedefe** kendi hızıyla yola çıkar. Hedef, aracın *yeni* konumundan seçilir — eski hedefi
+korumak taşımayı kendi kendini iptal eden bir işleme çevirirdi: Hatay'dan Ankara'ya taşınan
+bir tırın hâlâ Kayseri'ye varması gerekirdi ve hemen güneydoğuya, geldiği yöne dönerdi.
+
+Yanıt `moved` ile sonucu söyler — yol dışı bir tıklama 200 döner ama `moved:false` olur,
+çünkü istek anlaşılmıştır ve **ret, cevabın kendisidir**:
 
 ```json
 {"found":true,"flying":false,"moved":false,"reason":"OFF_ROAD","offRoadMeters":10576}

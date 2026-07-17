@@ -322,21 +322,6 @@ public class VehicleState {
 
     // ── Operator-console control ───────────────────────────────────────────
 
-    /**
-     * Put the vehicle at a point without giving it a route.
-     *
-     * <p>Only valid while it is parked or waiting for an assignment: both of those tick
-     * states leave the position alone, so it stays put and the assigner routes it from here
-     * when the dwell ends. A vehicle that is driving is moved by handing it a new
-     * {@link #startJourney} instead, so that it carries on rather than stopping.
-     *
-     * <p>Must not be used on a {@link #isLoopVehicle() loop vehicle}: its position is
-     * recomputed from the loop on every tick, so the new position would be silently undone.
-     */
-    public void relocate(double lat, double lon) {
-        this.lat = lat;
-        this.lon = lon;
-    }
 
     public void setRegion(String region) {
         this.region = region;

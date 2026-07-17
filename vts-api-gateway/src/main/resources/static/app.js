@@ -4,8 +4,8 @@
  *  - Sağ harita  : operatör (CartoDB)          — logo + plaka no, çift tıkla taşı
  *  - Kara aracı yalnızca yol üzerine taşınabilir: yol dışı tıklama reddedilir ve araç
  *    yerinde kalır. Helikopterler her yere konabilir.
- *  - Taşıma bir kilit değil, ışınlanmadır: araç aynı hedefe yeni rotasıyla yoluna devam
- *    eder, hızı korunur.
+ *  - Taşıma bir kilit değil, ışınlanmadır: araç bırakıldığı noktadan yeni bir hedefe
+ *    kendi hızıyla yola çıkar (durmaz, geldiği yöne dönmez).
  */
 (function () {
     "use strict";
@@ -446,8 +446,9 @@
             // Hedefe yeni rota çizildi; select() yalnızca seçim değişince çiziyor.
             showPlannedRoute(selected);
 
-            if (r.flying) flash(`🚁 ${plate} taşındı (helikopter, her yere konabilir) — uçuşuna devam ediyor.`);
-            else flash(`✔ ${plate} taşındı — aynı hedefe yoluna devam ediyor.`);
+            const hedef = r.destination ? ` → ${r.destination}` : "";
+            if (r.flying) flash(`🚁 ${plate} taşındı (helikopter, her yere konabilir) — uçuşuna devam ediyor${hedef}.`);
+            else flash(`✔ ${plate} taşındı — buradan yola devam ediyor${hedef}.`);
         } catch (_) { flash("Taşıma başarısız (bağlantı)."); }
     }
 

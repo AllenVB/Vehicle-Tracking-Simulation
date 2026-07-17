@@ -204,28 +204,36 @@ public class FleetSimulator {
     }
 
     private void assignJourney(VehicleState v, double startProgress) {
-        TurkeyProvinces.Province dest = TurkeyProvinces.nearbyDestination(
-                v.lat(), v.lon(), DESTINATION_CANDIDATES, rnd);
+        startFreshJourney(v, v.lat(), v.lon(), startProgress);
+    }
 
-        Route route;
-        if (v.isFlying()) {
-            // A helicopter's real path IS the straight line; nothing to route around.
-            route = new Route(List.of(new GeoPoint(v.lat(), v.lon()),
-                    new GeoPoint(dest.lat(), dest.lon())), false);
-        } else {
-            route = roadRoutes.routeBetween(v.lat(), v.lon(), dest.lat(), dest.lon());
-            if (route == null) {
-                // No road route: leave it parked rather than invent one. This fell back to a
-                // straight line so the vehicle would "still travel, arrive and close trips" —
-                // but a straight line across Turkey drives through mountains, lakes and fields,
-                // which is exactly what a land vehicle cannot do. It keeps needsJourney(), so
-                // the assigner retries in a few seconds; a stationary vehicle is a visible,
-                // honest symptom of routing being down, whereas one crossing a lake is not.
-                return;
-            }
+    /**
+     * Send the vehicle from {@code (fromLat, fromLon)} to a fresh destination drawn from the
+     * provinces near that point, and start it driving.
+     *
+     * <p>The destination is chosen from where the vehicle <em>is</em>, which is what makes an
+     * operator's move meaningful: keeping the old destination sent a vehicle teleported from
+     * Hatay to Ankara straight back south-east, so the move undid itself.
+     *
+     * <p>Returns false when a land vehicle has no road route from here — the caller must then
+     * leave it be rather than invent one. A straight line would let it "still travel, arrive
+     * and close trips" while driving through mountains and lakes, which is exactly what a land
+     * vehicle cannot do. The vehicle keeps {@code needsJourney()}, so the assigner retries in
+     * a few seconds; a stationary vehicle is a visible, honest symptom of routing being down,
+     * whereas one crossing a lake is not.
+     */
+    private boolean startFreshJourney(VehicleState v, double fromLat, double fromLon,
+                                      double startProgress) {
+        TurkeyProvinces.Province dest = TurkeyProvinces.nearbyDestination(
+                fromLat, fromLon, DESTINATION_CANDIDATES, rnd);
+
+        Route route = routeFor(v, fromLat, fromLon, dest.lat(), dest.lon());
+        if (route == null) {
+            return false;
         }
         v.startJourney(new Journey(dest.name(), dest.lat(), dest.lon(), route), startProgress);
         v.setRegion(dest.name());
+        return true;
     }
 
     /** One simulation cycle: advance every vehicle in parallel, then batch-send. */
@@ -305,13 +313,13 @@ public class FleetSimulator {
      * a refusal the operator can see beats a silent correction they cannot.
      * Helicopters are placed exactly where clicked; they fly, so every point is reachable.
      *
-     * <p>The move is a teleport, not a pin: a vehicle that was driving is handed a fresh
-     * route from the new point to the same destination, so it keeps going at its own cruise
-     * speed. It used to be frozen at 0 km/h until an operator released it, which made every
-     * move look like a breakdown and stalled the vehicle's trip.
+     * <p>The move is a teleport, not a pin: the vehicle lands at the point and sets off for a
+     * fresh destination near it, at its own cruise speed. It used to be frozen at 0 km/h until
+     * an operator released it, which made every move look like a breakdown and stalled the
+     * vehicle's trip.
      *
      * <p>Returns the outcome — {@code moved} says whether it happened, {@code reason} why
-     * not — or {@code null} if the id is unknown.
+     * not, {@code destination} where it is now headed — or {@code null} if the id is unknown.
      */
     public Map<String, Object> moveVehicle(long id, double lat, double lon) {
         VehicleState v = byId.get(id);
@@ -346,18 +354,12 @@ public class FleetSimulator {
             placeLon = nearest.lon();
         }
 
-        Journey current = v.journey();
-        if (current != null && !v.isParked()) {
-            Route route = routeFor(v, placeLat, placeLon, current.destLat(), current.destLon());
-            if (route == null) {
-                return refuse(result, "NO_ROUTE_FROM_HERE", null);
-            }
-            v.startJourney(new Journey(current.destination(), current.destLat(), current.destLon(),
-                    route), 0.0);
-        } else {
-            // Parked or waiting for an assignment: it has nowhere to be going, so just put
-            // it there. The assigner routes it from here once its dwell ends.
-            v.relocate(placeLat, placeLon);
+        // Drive on from here to a NEW destination, rather than resuming the old one. Keeping
+        // the old destination made the move undo itself: a vehicle carried from Hatay to
+        // Ankara still had Kayseri to reach, so it set off south-east — back the way it came.
+        // A destination near where it now stands is the only reading of "move" that sticks.
+        if (!startFreshJourney(v, placeLat, placeLon, 0.0)) {
+            return refuse(result, "NO_ROUTE_FROM_HERE", null);
         }
 
         // Publish straight away instead of waiting for the next tick: otherwise the move
@@ -370,6 +372,7 @@ public class FleetSimulator {
         result.put("lat", v.lat());
         result.put("lon", v.lon());
         result.put("speedKmh", v.speedKmh());
+        result.put("destination", v.destination());
         return result;
     }
 
