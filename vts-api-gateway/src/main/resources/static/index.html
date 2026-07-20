@@ -10,7 +10,7 @@
         :root {
             --bg: #0f1720; --panel: #16212e; --panel-2: #1c2b3a; --line: #26384a;
             --text: #e6edf3; --muted: #8aa0b4; --accent: #1d9e75; --alert: #e24b4a;
-            --manual: #e08a1d;
+            --manual: #e08a1d; --fuel-low: #ffc400;
         }
         * { box-sizing: border-box; }
         html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
@@ -117,6 +117,13 @@
                    transition: transform .9s linear; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
         .veh-ico.alert { animation: pulse .6s ease-in-out 6 alternate; }
         @keyframes pulse { to { filter: drop-shadow(0 0 8px var(--alert)); } }
+        /* Düşük yakıt: ihlal darbesinin aksine SONSUZ döner — bu bir olay bildirimi değil,
+           depo dolana kadar süren bir durum. Araç istasyona varıp doldurunca kendiliğinden söner. */
+        .veh-ico.lowfuel { animation: lowfuel 1s ease-in-out infinite alternate; }
+        @keyframes lowfuel {
+            from { filter: drop-shadow(0 0 2px var(--fuel-low)); }
+            to   { filter: drop-shadow(0 0 10px var(--fuel-low)) drop-shadow(0 0 16px var(--fuel-low)); }
+        }
         .veh-badge { position: absolute; right: -3px; bottom: -1px; min-width: 15px; height: 15px; padding: 0 3px;
                      border-radius: 8px; background: #16212e; color: #fff; border: 1px solid #fff;
                      font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; }

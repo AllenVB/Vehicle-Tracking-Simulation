@@ -29,6 +29,11 @@ public class VehicleState {
     private static final int DWELL_MIN_SECONDS = 330;   // 5.5 dk
     private static final int DWELL_MAX_SECONDS = 720;   // 12 dk
 
+    /** Tank level after a refuel stop. */
+    private static final double FULL_TANK_PCT = 100.0;
+    /** Default tank drain while driving; overridden from configuration at fleet build. */
+    private static final double DEFAULT_FUEL_DRAIN_PCT_PER_MINUTE = 2.0;
+
     private final String imei;
     private final BehaviorProfile profile;
     private final Random rnd;
@@ -44,6 +49,13 @@ public class VehicleState {
     private volatile boolean needsJourney;
     private double parkedSeconds;
     private double dwellSeconds;
+
+    /** True while this journey's destination is a fuel station rather than a province. */
+    private volatile boolean refuelTrip;
+    /** How long to stand at the pump once there. */
+    private double refuelDwellSeconds;
+    /** Tank drain per minute of driving; 0 leaves the tank untouched (helicopters). */
+    private volatile double fuelDrainPctPerMinute;
 
     private double distanceAlongKm;
     private double speedKmh;
@@ -100,6 +112,9 @@ public class VehicleState {
             this.baseSpeedKmh = baseSpeedKmh >= 0 ? Math.min(baseSpeedKmh, 120) : 35 + rnd.nextInt(71);
             this.maxSpeedKmh = 120;
         }
+        // Helicopters are outside the fuel model entirely: they cannot use a roadside pump,
+        // so draining them would strand them at zero with nowhere to go.
+        this.fuelDrainPctPerMinute = flying ? 0.0 : DEFAULT_FUEL_DRAIN_PCT_PER_MINUTE;
         this.battery = profile == BehaviorProfile.LOW_BATTERY
                 ? 22 + rnd.nextDouble() * 6 : 80 + rnd.nextDouble() * 20;
         this.fuelPct = 30 + rnd.nextDouble() * 70;
@@ -167,6 +182,13 @@ public class VehicleState {
             speedKmh = 0;
             return;
         }
+        if (isOutOfFuel()) {
+            // A dry tank stops the vehicle where it stands. Without this it kept driving at
+            // cruise speed on 0%, so the warning light blinked forever on a vehicle that was,
+            // as far as the model was concerned, running on nothing.
+            speedKmh = 0;
+            return;
+        }
 
         speedKmh = nextSpeed();
         double movedKm = speedKmh * dtSeconds / 3600.0;
@@ -181,7 +203,18 @@ public class VehicleState {
             speedKmh = 0;
             parked = true;
             parkedSeconds = 0;
-            dwellSeconds = DWELL_MIN_SECONDS + rnd.nextInt(DWELL_MAX_SECONDS - DWELL_MIN_SECONDS);
+            if (refuelTrip) {
+                // At the pump: fill on arrival, then stand for the refuel dwell. Filling here
+                // rather than when the dwell ends keeps the tank and the map honest — the
+                // low-fuel warning clears the moment the vehicle actually reaches fuel, and no
+                // ordering window exists where a full-looking vehicle is sent to refuel again.
+                fuelPct = FULL_TANK_PCT;
+                refuelTrip = false;
+                dwellSeconds = refuelDwellSeconds;
+            } else {
+                dwellSeconds = DWELL_MIN_SECONDS
+                        + rnd.nextInt(DWELL_MAX_SECONDS - DWELL_MIN_SECONDS);
+            }
             return;
         }
 
@@ -195,7 +228,7 @@ public class VehicleState {
     private void drain(double dtSeconds) {
         double batteryDrain = (profile == BehaviorProfile.LOW_BATTERY ? 0.05 : 0.0005) * dtSeconds;
         battery = clamp(battery - batteryDrain, 0, 100);
-        fuelPct = clamp(fuelPct - 0.005 * dtSeconds, 0, 100);
+        fuelPct = clamp(fuelPct - fuelDrainPctPerMinute * dtSeconds / 60.0, 0, 100);
     }
 
     private double nextSpeed() {
@@ -318,6 +351,46 @@ public class VehicleState {
 
     public boolean ignition() {
         return ignition;
+    }
+
+    // ── Fuel ───────────────────────────────────────────────────────────────
+
+    /**
+     * Send this vehicle to a fuel station. Identical to any other journey except that the tank
+     * is filled on arrival and the stop is short, after which it asks for a normal destination.
+     */
+    public void startRefuelJourney(Journey toStation, double dwellAtPumpSeconds) {
+        startJourney(toStation, 0.0);
+        this.refuelTrip = true;
+        this.refuelDwellSeconds = dwellAtPumpSeconds;
+    }
+
+    /** True while this vehicle is on its way to a pump, so it is not dispatched twice. */
+    public boolean isSeekingFuel() {
+        return refuelTrip;
+    }
+
+    /**
+     * Adopt a tank level measured elsewhere. Used when a real fuel-data source has a reading
+     * for this vehicle; it overrides the simulated tank for as long as readings keep arriving.
+     */
+    public void overrideFuelPct(double pct) {
+        this.fuelPct = clamp(pct, 0, 100);
+    }
+
+    /** Tank drain per minute of driving. Zero keeps the tank full (helicopters). */
+    public void setFuelDrainPctPerMinute(double pctPerMinute) {
+        this.fuelDrainPctPerMinute = Math.max(0, pctPerMinute);
+    }
+
+    /** True when this vehicle burns fuel at all — false for aircraft, which are outside the model. */
+    public boolean usesFuel() {
+        return fuelDrainPctPerMinute > 0;
+    }
+
+    /** Dry tank: the vehicle is stopped wherever it stands until something refuels it. */
+    public boolean isOutOfFuel() {
+        return usesFuel() && fuelPct <= 0;
     }
 
     // ── Operator-console control ───────────────────────────────────────────

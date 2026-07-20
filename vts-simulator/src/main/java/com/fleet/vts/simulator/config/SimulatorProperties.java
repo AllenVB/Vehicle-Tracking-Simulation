@@ -49,6 +49,26 @@ public class SimulatorProperties {
     private String osrmBaseUrl = "http://localhost:5000";
 
     /**
+     * How much of the tank a land vehicle burns per minute of driving. Helicopters are outside
+     * the fuel model and ignore this — they cannot use a roadside pump, so draining them would
+     * only strand them.
+     *
+     * <p>At the default a full tank lasts 50 minutes and the warning threshold is reached after
+     * ~37, which is what makes refuelling a visible part of a demo rather than a rare event.
+     */
+    private double fuelDrainPctPerMinute = 2.0;
+
+    /**
+     * Tank level at or below which a vehicle is flagged low and sent to the nearest station.
+     * Kept in step with the {@code LOW_FUEL} rule threshold, so the map's warning and the
+     * recorded violation mean the same thing.
+     */
+    private double lowFuelThresholdPct = 25.0;
+
+    /** How long a vehicle stands at the pump before setting off again. */
+    private Duration refuelDwell = Duration.ofMinutes(1);
+
+    /**
      * How far from a road an operator's click may land and still count as "on that road",
      * for moving a land vehicle. Beyond it the move is refused.
      *

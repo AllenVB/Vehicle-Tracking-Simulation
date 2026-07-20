@@ -70,6 +70,56 @@ class SimulationLogicTest {
     }
 
     @Test
+    void tankDrainsTwoPercentPerMinuteOfDriving() {
+        VehicleState v = new VehicleState("000000000000002", BehaviorProfile.NORMAL, squareRoute(), 2L, 60);
+        double start = v.fuelPct();
+
+        for (int i = 0; i < 60; i++) {      // 60 x 5 s = 5 dakika
+            v.tick(5.0);
+        }
+
+        // 5 dakika x %2 = %10. Tolerans, fuelPct()'in tam sayıya yuvarlamasından.
+        assertEquals(start - 10, v.fuelPct(), 1.0,
+                "tank should fall 2% per minute of driving");
+    }
+
+    @Test
+    void helicopterTankNeverDrains() {
+        // Helikopter yol kenarındaki pompayı kullanamaz; deposunu tüketmek onu sıfırda,
+        // gidecek yeri olmadan bırakırdı.
+        VehicleState heli = VehicleState.helicopter("000000000000101", 41.0, 29.0, 101L);
+        int start = heli.fuelPct();
+        heli.startJourney(new Journey("Ankara", 39.93, 32.86,
+                new Route(List.of(new GeoPoint(41.0, 29.0), new GeoPoint(39.93, 32.86)), false)), 0.0);
+
+        for (int i = 0; i < 120; i++) {     // 10 dakika
+            heli.tick(5.0);
+        }
+
+        assertFalse(heli.usesFuel(), "a helicopter is outside the fuel model");
+        assertEquals(start, heli.fuelPct(), "helicopter tank must not drain");
+    }
+
+    @Test
+    void arrivingAtAPumpFillsTheTankAndEndsTheRefuelTrip() {
+        VehicleState v = new VehicleState("000000000000003", BehaviorProfile.NORMAL, 41.00, 29.00, 3L, 90);
+        v.overrideFuelPct(8);
+
+        // Kısa bir istasyon rotası: birkaç tick'te varır.
+        Route toPump = new Route(List.of(new GeoPoint(41.00, 29.00), new GeoPoint(41.00, 29.02)), false);
+        v.startRefuelJourney(new Journey("Shell Ankara", 41.00, 29.02, toPump), 60);
+        assertTrue(v.isSeekingFuel(), "vehicle should be marked as heading for a pump");
+
+        for (int i = 0; i < 200 && !v.isParked(); i++) {
+            v.tick(5.0);
+        }
+
+        assertTrue(v.isParked(), "vehicle should reach the pump and stop");
+        assertEquals(100, v.fuelPct(), "tank is full on arrival");
+        assertFalse(v.isSeekingFuel(), "the refuel trip is over once filled");
+    }
+
+    @Test
     void openRouteDistanceIsTheRoadDistanceNotTheRoundTrip() {
         // A journey route must NOT count a closing segment back to the start, otherwise
         // "remaining km" is doubled and the vehicle never arrives.

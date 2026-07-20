@@ -1,6 +1,8 @@
 package com.fleet.vts.simulator.sim;
 
 import com.fleet.vts.simulator.config.SimulatorProperties;
+import com.fleet.vts.simulator.fuel.FuelLevelSource;
+import com.fleet.vts.simulator.fuel.FuelStations;
 import com.fleet.vts.simulator.ingestion.IngestionClient;
 import com.fleet.vts.simulator.ingestion.TelemetryPayload;
 import com.fleet.vts.simulator.model.BehaviorProfile;
@@ -63,6 +65,8 @@ public class FleetSimulator {
     private final SimulatorProperties properties;
     private final IngestionClient ingestionClient;
     private final RoadRoutes roadRoutes;
+    private final FuelStations fuelStations;
+    private final FuelLevelSource fuelLevelSource;
     private final Counter sent;
     private final Random rnd = new Random(42);
 
@@ -72,10 +76,13 @@ public class FleetSimulator {
     private ScheduledExecutorService assigner;
 
     public FleetSimulator(SimulatorProperties properties, IngestionClient ingestionClient,
-                          RoadRoutes roadRoutes, MeterRegistry registry) {
+                          RoadRoutes roadRoutes, FuelStations fuelStations,
+                          FuelLevelSource fuelLevelSource, MeterRegistry registry) {
         this.properties = properties;
         this.ingestionClient = ingestionClient;
         this.roadRoutes = roadRoutes;
+        this.fuelStations = fuelStations;
+        this.fuelLevelSource = fuelLevelSource;
         this.sent = Counter.builder("simulator.telemetry.sent")
                 .description("Telemetry readings posted to ingestion").register(registry);
     }
@@ -132,6 +139,11 @@ public class FleetSimulator {
                     profile = BehaviorProfile.NORMAL; // geofence is only meaningful in Istanbul
                 }
                 v = new VehicleState(imei, profile, p.lat(), p.lon(), i);
+            }
+            // Only land vehicles burn fuel; the constructor leaves helicopters at zero drain
+            // and this must not override that.
+            if (v.usesFuel()) {
+                v.setFuelDrainPctPerMinute(properties.getFuelDrainPctPerMinute());
             }
             v.setRegion(p.name());
             vehicles.add(v);
@@ -198,13 +210,66 @@ public class FleetSimulator {
             for (VehicleState v : pending) {
                 assignJourney(v, 0.0);
             }
+            divertLowFuelVehicles();
         } catch (Exception e) {
             log.warn("Journey assignment cycle failed: {}", e.getMessage());
         }
     }
 
+    /**
+     * Send vehicles whose tank has fallen to the warning level to the nearest station.
+     *
+     * <p>Runs on the assigner rather than the tick, for the same reason journeys do: reaching a
+     * station needs a road route, and an OSRM call on the 1-second tick would stall the whole
+     * fleet's batch.
+     *
+     * <p>Only vehicles already driving are diverted here. One that is parked keeps its low tank
+     * until its dwell ends, and {@link #assignJourney} then sends it to a pump instead of a
+     * province — there is nothing to gain from waking a parked vehicle early, and diverting it
+     * would cut short the stop its trip record depends on.
+     */
+    private void divertLowFuelVehicles() {
+        if (fuelStations.isEmpty()) {
+            return;   // reference data not loaded yet; vehicles keep driving
+        }
+        List<VehicleState> lowOnFuel = fleet.stream()
+                .filter(v -> !v.isLoopVehicle() && v.usesFuel())
+                .filter(v -> !v.isSeekingFuel() && !v.isParked() && v.journey() != null)
+                .filter(v -> v.fuelPct() <= properties.getLowFuelThresholdPct())
+                .limit(ASSIGN_BATCH)
+                .toList();
+        for (VehicleState v : lowOnFuel) {
+            dispatchToFuelStation(v);
+        }
+    }
+
+    /** A vehicle asking for work goes to a pump when its tank is low, otherwise to a province. */
     private void assignJourney(VehicleState v, double startProgress) {
+        if (v.usesFuel() && v.fuelPct() <= properties.getLowFuelThresholdPct()
+                && !fuelStations.isEmpty() && dispatchToFuelStation(v)) {
+            return;
+        }
         startFreshJourney(v, v.lat(), v.lon(), startProgress);
+    }
+
+    /**
+     * Route {@code v} to the fuel station nearest to it. False when no road route reaches one,
+     * in which case the caller leaves the vehicle as it was — the same refusal to invent
+     * geometry that applies to every other journey.
+     */
+    private boolean dispatchToFuelStation(VehicleState v) {
+        FuelStations.Station station = fuelStations.nearest(v.lat(), v.lon());
+        if (station == null) {
+            return false;
+        }
+        Route route = routeFor(v, v.lat(), v.lon(), station.lat(), station.lon());
+        if (route == null) {
+            return false;
+        }
+        v.startRefuelJourney(
+                new Journey(station.name(), station.lat(), station.lon(), route),
+                properties.getRefuelDwell().toSeconds());
+        return true;
     }
 
     /**
@@ -247,6 +312,10 @@ public class FleetSimulator {
             for (VehicleState v : fleet) {
                 futures.add(vt.submit(() -> {
                     v.tick(tickSeconds);
+                    // A real fuel source, once one is registered, is the authority for the
+                    // vehicles it knows: applied after the tick so it overrides the simulated
+                    // drain rather than racing it. Vehicles it has no reading for keep theirs.
+                    fuelLevelSource.readFuelPct(v.imei()).ifPresent(v::overrideFuelPct);
                     return toPayload(v);
                 }));
             }

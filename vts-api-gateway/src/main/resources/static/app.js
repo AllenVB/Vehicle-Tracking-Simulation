@@ -26,6 +26,8 @@
 
     // Tip -> renk: otomobil mavi, tır sarı, motor beyaz, helikopter mor
     const TYPE_COLOR = { CAR: "#2b7fff", TRUCK: "#f5b301", MOTORCYCLE: "#f8fafc", HELICOPTER: "#a855f7" };
+    /** Bu seviyenin altında araç sarı yanıp söner ve en yakın istasyona yönelir (sunucuyla aynı eşik). */
+    const LOW_FUEL_PCT = 25;
 
     // İhlal kodları: Türkçe ad + TL ceza
     const RULES = {
@@ -263,13 +265,23 @@
         const color = alerting ? "#e24b4a" : (TYPE_COLOR[type] || "#2b7fff");
         const sel = vehicleId === selected ? " selected" : "";
         const badge = showBadge ? `<span class="veh-badge">${v.plateNo != null ? v.plateNo : "?"}</span>` : "";
+        // Düşük yakıt, aracı boyamak yerine yanıp sönen sarı bir ışıkla gösterilir: tırın
+        // gövde rengi zaten sarı, ve tipi görebilmek yakıt uyarısı kadar önemli. İhlal
+        // uyarısı (kırmızı) varsa o öncelikli — iki animasyon üst üste okunmaz olurdu.
+        const low = isLowFuel(vehicleId) && !alerting;
         return L.divIcon({
             html: `<div class="veh-mk${sel}">
-                     <div class="veh-ico${alerting ? " alert" : ""}" style="transform:rotate(${heading}deg)">${vehSvg(type, color)}</div>
+                     <div class="veh-ico${alerting ? " alert" : ""}${low ? " lowfuel" : ""}" style="transform:rotate(${heading}deg)">${vehSvg(type, color)}</div>
                      ${badge}
                    </div>`,
             className: "", iconSize: [36, 36], iconAnchor: [18, 18]
         });
+    }
+
+    /** Depo eşiğin altında mı? Yakıt bildirmeyen araç (ör. helikopter) düşük sayılmaz. */
+    function isLowFuel(vehicleId) {
+        const p = pos.get(vehicleId);
+        return !!p && p.fuelPct != null && p.fuelPct <= LOW_FUEL_PCT;
     }
 
     function refreshMarkers() {
@@ -363,9 +375,16 @@
                 const nf = nearestFuel(p.lat, p.lon);
                 if (nf) fuelLine = `<div class="meta">⛽ En yakın benzin: ${nf.km.toFixed(1)} km · ${nf.f.brand}</div>`;
             }
+            // Depo seviyesi: aracın neden yanıp söndüğünü haritaya bakmadan da açıklar.
+            let tankLine = "";
+            if (p && p.fuelPct != null) {
+                const low = p.fuelPct <= LOW_FUEL_PCT;
+                tankLine = `<div class="meta"${low ? ' style="color:var(--fuel-low);font-weight:600"' : ""}>` +
+                    `${low ? "⚠ " : ""}Depo: %${p.fuelPct}${low ? " — istasyona yöneliyor" : ""}</div>`;
+            }
             info.innerHTML = `<b>${v.plate}</b>${heli}` +
                 `<div class="meta" style="margin-top:4px">${v.model} · ${p ? p.speedKmh + " km/s" : "-"}${j ? " · " + journeyText(j) : ""}</div>` +
-                fuelLine;
+                tankLine + fuelLine;
             if (p) ctrl.panTo([p.lat, p.lon]);
             if (changedSelection) showPlannedRoute(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);

@@ -14,7 +14,7 @@ class LiveMapStateTest {
     private final LiveMapState state = new LiveMapState();
 
     private Position at(long id, double lat, double lon) {
-        return new Position(id, lat, lon, 50, 90, Instant.parse("2026-07-13T10:00:00Z"));
+        return new Position(id, lat, lon, 50, 90, 80, Instant.parse("2026-07-13T10:00:00Z"));
     }
 
     @Test

@@ -26,7 +26,8 @@ public class LiveRelays {
 
     @KafkaListener(topics = Topics.TELEMETRY_PROCESSED, containerFactory = "processedTelemetryFactory")
     public void onTelemetry(TelemetryEvent e) {
-        state.update(new Position(e.vehicleId(), e.lat(), e.lon(), e.speedKmh(), e.heading(), e.ts()));
+        state.update(new Position(e.vehicleId(), e.lat(), e.lon(), e.speedKmh(), e.heading(),
+                e.fuelPct(), e.ts()));
     }
 
     @KafkaListener(topics = Topics.VIOLATION, containerFactory = "violationStreamFactory")
