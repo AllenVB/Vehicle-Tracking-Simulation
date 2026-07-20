@@ -70,8 +70,12 @@ class SimulationLogicTest {
     }
 
     @Test
-    void tankDrainsTwoPercentPerMinuteOfDriving() {
+    void tankDrainsAtTheConfiguredRatePerMinuteOfDriving() {
         VehicleState v = new VehicleState("000000000000002", BehaviorProfile.NORMAL, squareRoute(), 2L, 60);
+        // Oran açıkça verilir: test edilen şey mekanizma, o günkü varsayılan değer değil.
+        // Varsayılan, istasyon yoğunluğuyla birlikte ayarlanır ve değiştiğinde bu test
+        // yanlış alarm vermemeli.
+        v.setFuelDrainPctPerMinute(2.0);
         double start = v.fuelPct();
 
         for (int i = 0; i < 60; i++) {      // 60 x 5 s = 5 dakika
@@ -80,7 +84,7 @@ class SimulationLogicTest {
 
         // 5 dakika x %2 = %10. Tolerans, fuelPct()'in tam sayıya yuvarlamasından.
         assertEquals(start - 10, v.fuelPct(), 1.0,
-                "tank should fall 2% per minute of driving");
+                "tank should fall at the configured rate per minute of driving");
     }
 
     @Test

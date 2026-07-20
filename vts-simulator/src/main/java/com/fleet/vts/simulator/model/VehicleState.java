@@ -31,8 +31,12 @@ public class VehicleState {
 
     /** Tank level after a refuel stop. */
     private static final double FULL_TANK_PCT = 100.0;
-    /** Default tank drain while driving; overridden from configuration at fleet build. */
-    private static final double DEFAULT_FUEL_DRAIN_PCT_PER_MINUTE = 2.0;
+    /**
+     * Default tank drain while driving; overridden from configuration at fleet build.
+     * Kept in step with {@code vts.simulator.fuel-drain-pct-per-minute}, whose javadoc explains
+     * why the number is what it is — it is tied to how far apart the fuel stations are.
+     */
+    private static final double DEFAULT_FUEL_DRAIN_PCT_PER_MINUTE = 0.2;
 
     private final String imei;
     private final BehaviorProfile profile;

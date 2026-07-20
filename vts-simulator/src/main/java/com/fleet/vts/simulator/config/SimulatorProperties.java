@@ -53,10 +53,22 @@ public class SimulatorProperties {
      * the fuel model and ignore this — they cannot use a roadside pump, so draining them would
      * only strand them.
      *
-     * <p>At the default a full tank lasts 50 minutes and the warning threshold is reached after
-     * ~37, which is what makes refuelling a visible part of a demo rather than a rare event.
+     * <p>This is paired with how densely the map is stocked with stations, and the two cannot
+     * be chosen apart: what matters is whether the quarter-tank left when the warning fires
+     * still covers the distance to the nearest pump. With stations capped at five per province
+     * (see migration V28) the farthest a vehicle was measured from one is 50 km — call it 65 km
+     * of road. The slowest vehicles cruise at 35 km/h, so that is a 111-minute run, and 25% of
+     * the tank has to outlast it. That puts the ceiling at 0.22%/min.
+     *
+     * <p>Hence 0.2: a full tank lasts ~8 hours and the warning arrives after ~6. Sized for the
+     * compound worst case — the farthest-placed vehicle also being one of the slowest — because
+     * a vehicle that strands is a dead marker on the map with no way back, while an unhurried
+     * tank merely makes refuelling occasional. That is the real cost here: with a station map
+     * sparse enough to be realistic, the refuel cycle is something you catch rather than watch.
+     * Raise this to compress it for a short demo, but raise station density with it or vehicles
+     * will start running dry in the east, where the corridors are longest.
      */
-    private double fuelDrainPctPerMinute = 2.0;
+    private double fuelDrainPctPerMinute = 0.2;
 
     /**
      * Tank level at or below which a vehicle is flagged low and sent to the nearest station.
