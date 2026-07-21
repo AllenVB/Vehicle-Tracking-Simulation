@@ -13,11 +13,8 @@ TimescaleDB + PostGIS · Redis · Leaflet · çok modüllü Maven monorepo.**
 
 ---
 
-## Ekran görüntüsü
+<img width="1920" height="1000" alt="ats" src="https://github.com/user-attachments/assets/41450fa4-e215-4e25-ae8f-3d12a3c3184e" />
 
-Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita · 5 operatör haritası**.
-
-![VTS tek sayfa](docs/screenshots/vts-tek-sayfa.png)
 
 - **Sol (2/12) — Filo barı:** araç listesi, sürücü skorları, canlı ihlaller, seçim ve kontrol kutusu.
 - **Orta (5/12) — Canlı harita** (OpenStreetMap): 105 araç **gerçek yollarda** (OSRM rotaları).
@@ -36,7 +33,6 @@ Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita 
 ### Operatör: rota oluşturma ve araç uyarıları
 
 ![Rota oluşturma ve araç uyarısı](docs/screenshots/vts-mesaj-rota.png)
-<img width="1920" height="1000" alt="ats" src="https://github.com/user-attachments/assets/41450fa4-e215-4e25-ae8f-3d12a3c3184e" />
 
 
 
