@@ -20,6 +20,8 @@
     const journey = new Map();
     /** vehicleId -> son yolculukların ortalama puanı (1..10). */
     const vehicleScore = new Map();
+    /** driverId -> {name, score} — harita balonu ve skor tablosu aynı kaynaktan beslenir. */
+    const driverScores = new Map();
     let fuelStations = [];
     const messages = new Map();               // vehicleId -> [{category, body, at}]
     let selected = null;
@@ -119,7 +121,11 @@
         list.sort((a, b) => plateNo(a.plate) - plateNo(b.plate));
         list.forEach(v => {
             const no = plateNo(v.plate);
-            vehicles.set(v.id, { plate: v.plate, plateNo: no, type: v.type, model: [v.make, v.model].filter(Boolean).join(" ") });
+            vehicles.set(v.id, {
+                plate: v.plate, plateNo: no, type: v.type,
+                model: [v.make, v.model].filter(Boolean).join(" "),
+                driverId: v.currentDriverId
+            });
             byPlateNo.set(no, v.id);
             const row = document.createElement("div");
             row.className = "row";
@@ -306,7 +312,29 @@
             ? `<br><span style="color:#ffd27f">⚠ ${msgs[0].category}:</span> ${msgs[0].body}` : "";
         return `<b>${v ? v.plate : "#" + p.vehicleId}</b>` +
             `<br><small>${v ? v.model : ""}</small><br>Hız: ${p.speedKmh ?? "-"} km/s` +
+            driverScoreLine(v) +
             (j && j.destination ? `<br>${journeyText(j)}` : "") + lastMsg;
+    }
+
+    /** Balondaki sürücü puanı satırı: aracı kullanan sürücü ve yolculuk ortalaması. */
+    function driverScoreLine(v) {
+        if (!v || v.driverId == null) return "";
+        const d = driverScores.get(v.driverId);
+        // Puanlanmış yolculuğu olmayan sürücü listede yok; uydurmak yerine bunu söyle.
+        if (!d) return `<br>Sürücü puanı: <span style="color:#8aa0b4">henüz yok</span>`;
+        const renk = d.score >= 8 ? "#3ddc84" : (d.score >= 6 ? "#e0b800" : "#e24b4a");
+        return `<br>Sürücü puanı: <b style="color:${renk}">${d.score.toFixed(1)}/10</b>` +
+            `<br><small>${d.name}</small>`;
+    }
+
+    /** Skorlar yenilenince açık balonlar da tazelensin — yoksa eski puanı gösterirler. */
+    function refreshOpenPopups() {
+        liveMarkers.forEach((m, id) => {
+            if (m.isPopupOpen && m.isPopupOpen()) {
+                const p = pos.get(id);
+                if (p) m.setPopupContent(popup(p));
+            }
+        });
     }
 
     // ── Benzin istasyonları ─────────────────────────────────────────────────
@@ -673,13 +701,25 @@
     }
 
     // ── Sürücü skorları ─────────────────────────────────────────────────────
+    /**
+     * Tüm sürücülerin puanı çekilir, panelde yalnızca ilk beşi gösterilir.
+     *
+     * Tamamı, çünkü harita balonu da bu veriyi kullanıyor: araca tıklayan operatör o aracı
+     * kimin kullandığını ve nasıl sürdüğünü orada görüyor. Sürücü başına ayrı istek atmak,
+     * aynı listeyi 105 kez parça parça sormak olurdu.
+     */
     async function loadScores() {
         try {
-            const res = await fetch("/api/v1/drivers/scores?days=30&limit=5", { headers: auth() });
+            const res = await fetch("/api/v1/drivers/scores?days=30&limit=500", { headers: auth() });
             if (!res.ok) return;
+            const all = await res.json();
+            driverScores.clear();
+            all.forEach(d => driverScores.set(d.driverId, { name: d.name, score: Number(d.score) }));
+            refreshOpenPopups();
+
             const el = document.getElementById("scoreList");
             el.innerHTML = "";
-            (await res.json()).forEach((d, i) => {
+            all.slice(0, 5).forEach((d, i) => {
                 const s = Number(d.score);
                 const cls = s >= 8 ? "good" : s >= 6 ? "mid" : "bad";
                 const row = document.createElement("div");

@@ -33,7 +33,15 @@ import java.util.List;
 @RequestMapping("/api/v1")
 public class ReportingController {
 
-    private static final int MAX_DRIVER_SCORES = 100;
+    /**
+     * Upper bound on the scoreboard page.
+     *
+     * <p>Above the fleet's driver count on purpose: the live map's popup shows each vehicle's
+     * driver score, and it gets them by pulling the whole scoreboard once rather than asking
+     * per driver. At the previous cap of 100 against 200 drivers, half the fleet's popups
+     * reported "no score yet" for drivers who had one.
+     */
+    private static final int MAX_DRIVER_SCORES = 500;
 
     private final ReportingQueryRepository reporting;
 
