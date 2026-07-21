@@ -138,7 +138,7 @@ public class ReportingQueryRepository {
 
     public List<TripSummaryDto> findVehicleTrips(long tenantId, long vehicleId, int limit) {
         return jdbc.query("""
-                SELECT id, started_at, ended_at, distance_km, status
+                SELECT id, started_at, ended_at, distance_km, score, status
                 FROM trip
                 WHERE tenant_id = ? AND vehicle_id = ?
                 ORDER BY started_at DESC
@@ -151,6 +151,7 @@ public class ReportingQueryRepository {
                             rs.getObject("started_at", OffsetDateTime.class).toInstant(),
                             ended == null ? null : ended.toInstant(),
                             rs.getBigDecimal("distance_km"),
+                            rs.getObject("score", Integer.class),
                             rs.getString("status"));
                 },
                 tenantId, vehicleId, limit);

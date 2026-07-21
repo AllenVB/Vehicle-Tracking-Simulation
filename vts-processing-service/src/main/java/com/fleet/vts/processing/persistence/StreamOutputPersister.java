@@ -8,6 +8,7 @@ import com.fleet.vts.common.topic.Topics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -91,27 +92,68 @@ public class StreamOutputPersister {
             return; // only completed trips are persisted
         }
         Long driverId = e.driverId() != null ? e.driverId() : driverAt(e.vehicleId(), e.startedAt());
+        Violations counts = violationsDuring(e);
+        double distanceKm = e.distanceKm() == null ? 0 : e.distanceKm();
+        int score = TripScore.of(distanceKm, counts.speeding(), counts.harsh(), counts.idling());
 
         Long tripId = jdbc.queryForObject("""
                 INSERT INTO trip
                     (tenant_id, vehicle_id, driver_id, started_at, ended_at,
                      start_location, end_location, distance_km, avg_speed_kmh, max_speed_kmh,
-                     violation_count, status)
+                     violation_count, score, status)
                 VALUES (?, ?, ?, ?, ?,
                         ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
                         ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
-                        ?, ?, ?, ?, 'CLOSED')
+                        ?, ?, ?, ?, ?, 'CLOSED')
                 RETURNING id
                 """, Long.class,
                 e.tenantId(), e.vehicleId(), driverId, ts(e.startedAt()), ts(e.endedAt()),
                 e.startLon(), e.startLat(), e.endLon(), e.endLat(),
                 e.distanceKm(), e.avgSpeedKmh(), e.maxSpeedKmh(),
-                e.violationCount() == null ? 0 : e.violationCount());
+                counts.total(), score);
 
         int points = persistBreadcrumb(tripId, e);
         if (points == 0) {
             log.warn("Trip {} (vehicle {}) closed with no telemetry breadcrumb", tripId, e.vehicleId());
         }
+    }
+
+    /** Violation tally for one journey, by the kinds the score weighs. */
+    private record Violations(int total, int speeding, int harsh, int idling) {
+
+        static final Violations NONE = new Violations(0, 0, 0, 0);
+    }
+
+    /**
+     * What went wrong during this journey, counted from the violation table.
+     *
+     * <p>The trip event cannot tell us: the stream topology emits {@code violationCount} as a
+     * hard-coded zero, because the rules that detect violations run in a different part of the
+     * graph from the one that tracks trips and never meet. Counting here — where the trip's
+     * window and the persisted violations are both in reach — is what makes both the stored
+     * {@code violation_count} and the score mean anything.
+     *
+     * <p>Safe to read now: violations are written as their readings are processed, so those
+     * inside the window are already committed by the time a trip closes 90 s after its last
+     * movement.
+     */
+    private Violations violationsDuring(TripEvent e) {
+        if (e.startedAt() == null || e.endedAt() == null) {
+            return Violations.NONE;
+        }
+        return jdbc.query("""
+                SELECT count(*)                                            AS total,
+                       count(*) FILTER (WHERE rule_code = 'SPEED_LIMIT')   AS speeding,
+                       count(*) FILTER (WHERE rule_code = 'HARSH_BRAKING') AS harsh,
+                       count(*) FILTER (WHERE rule_code = 'IDLING')        AS idling
+                FROM violation
+                WHERE vehicle_id = ? AND occurred_at >= ? AND occurred_at <= ?
+                """,
+                (ResultSetExtractor<Violations>) rs -> rs.next()
+                        ? new Violations(rs.getInt("total"), rs.getInt("speeding"),
+                                         rs.getInt("harsh"), rs.getInt("idling"))
+                        : Violations.NONE,
+                e.vehicleId(), ts(e.startedAt()), ts(e.endedAt()));
     }
 
     /**
