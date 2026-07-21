@@ -110,18 +110,27 @@ public class ReportingQueryRepository {
                 tenantId);
     }
 
-    /** Best drivers over the window, by average daily score. */
+    /**
+     * Best drivers over the window, by the average of their journey scores.
+     *
+     * <p>Derived from {@code trip.score} on read rather than from a nightly rollup table (which
+     * this replaced): a driver's standing is then, by construction, the average of exactly the
+     * numbers the operator saw as each journey ended. A separately-computed figure drifted from
+     * them and left two scores disagreeing about the same driving.
+     */
     public List<DriverScoreDto> findDriverScores(long tenantId, int days, int limit) {
         return jdbc.query("""
                 SELECT d.id,
                        d.first_name || ' ' || d.last_name AS name,
-                       round(avg(s.score), 1)             AS avg_score,
-                       round(sum(s.distance_km), 0)       AS distance_km,
-                       sum(s.violation_count)             AS violation_count,
-                       count(*)                           AS days_scored
-                FROM driver_score_daily s
-                JOIN driver d ON d.id = s.driver_id
-                WHERE s.tenant_id = ? AND s.score_date >= current_date - ?::int
+                       round(avg(t.score), 1)             AS avg_score,
+                       round(sum(t.distance_km), 0)       AS distance_km,
+                       sum(t.violation_count)             AS violation_count,
+                       count(*)                           AS trips_scored
+                FROM trip t
+                JOIN driver d ON d.id = t.driver_id
+                WHERE t.tenant_id = ?
+                  AND t.score IS NOT NULL
+                  AND t.ended_at >= now() - make_interval(days => ?)
                 GROUP BY d.id, name
                 ORDER BY avg_score DESC NULLS LAST
                 LIMIT ?
@@ -132,7 +141,7 @@ public class ReportingQueryRepository {
                         rs.getBigDecimal("avg_score"),
                         rs.getBigDecimal("distance_km"),
                         rs.getObject("violation_count", Long.class),
-                        rs.getLong("days_scored")),
+                        rs.getLong("trips_scored")),
                 tenantId, days, limit);
     }
 

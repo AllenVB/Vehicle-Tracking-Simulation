@@ -1,22 +1,26 @@
 package com.fleet.vts.processing.persistence;
 
 /**
- * Scores a finished journey from 1 to 10.
+ * Scores a finished journey from 1 to 10. This is now the fleet's only driving score — the
+ * nightly 0–100 driver score it used to mirror was removed, so nothing can disagree with it.
  *
- * <p>Deliberately the same shape as the nightly driver score (see {@code ScheduledJobs}): the
- * same violation weights, the same per-100 km normalisation, the same floor on distance. A
- * second, differently-tuned notion of "good driving" would be worse than no trip score at all —
- * an operator would see a run praised at 9/10 that the daily scoreboard then marks the driver
- * down for, and neither number would be believed again.
+ * <p>The rate is set so that <b>one speeding violation per 100 km costs half a point</b>. The
+ * previous tuning made violations invisible: a speeding tick per 100 km cost 0.3 of a point,
+ * which rounded straight back to 10/10, and 43 of 66 measured journeys scored a perfect ten.
+ * A scoreboard where nearly everyone is flawless tells an operator nothing.
  *
- * <p>What differs is only the scale and the window: one journey, out of ten.
+ * <p>Kinds are still weighted relative to each other, with speeding as the reference: mass and
+ * driving style make a harsh brake say more about a journey than a moment over the limit.
  */
 final class TripScore {
 
-    /** Weights per violation kind: a harsh brake says more about a journey than a speeding tick. */
-    private static final int SPEEDING_WEIGHT = 3;
-    private static final int HARSH_WEIGHT = 5;
-    private static final int IDLING_WEIGHT = 2;
+    /** What one speeding violation per 100 km costs, out of ten. */
+    private static final double PENALTY_PER_VIOLATION = 0.5;
+
+    /** Severity relative to a speeding violation, which is the reference at 1.0. */
+    private static final double SPEEDING_WEIGHT = 1.0;
+    private static final double HARSH_WEIGHT = 5.0 / 3.0;
+    private static final double IDLING_WEIGHT = 2.0 / 3.0;
 
     /**
      * Distance floor, in km, for the per-100 km rate.
@@ -36,16 +40,18 @@ final class TripScore {
     /**
      * The journey's score. Ten when nothing went wrong; one is the floor, because a journey that
      * still ended where it was meant to is never a total loss.
+     *
+     * <p>Rounded DOWN, not to nearest. Rounding a 9.5 up to 10 would erase the very violation
+     * this is meant to show — the point of the score is that a flawed journey does not read as
+     * perfect. So ten means exactly one thing: nothing went wrong.
      */
     static int of(double distanceKm, int speeding, int harsh, int idling) {
-        double penaltyPoints = speeding * SPEEDING_WEIGHT
+        double weightedViolations = speeding * SPEEDING_WEIGHT
                 + harsh * HARSH_WEIGHT
                 + idling * IDLING_WEIGHT;
-        double per100Km = penaltyPoints / Math.max(distanceKm, MIN_DISTANCE_KM) * 100.0;
+        double per100Km = weightedViolations / Math.max(distanceKm, MIN_DISTANCE_KM) * 100.0;
 
-        // 100-point scale first, so this stays visibly the daily formula, then down to ten.
-        double outOfHundred = 100.0 - per100Km;
-        int score = (int) Math.round(outOfHundred / 10.0);
-        return Math.max(WORST, Math.min(BEST, score));
+        double score = BEST - per100Km * PENALTY_PER_VIOLATION;
+        return (int) Math.max(WORST, Math.min(BEST, Math.floor(score)));
     }
 }
