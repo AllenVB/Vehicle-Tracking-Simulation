@@ -213,6 +213,28 @@ services:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
 
+  # Dağıtık izleme toplayıcısı. Bir telemetri ölçümünün simülatörden haritaya kadar
+  # geçtiği altı durağı tek bir zaman çizelgesinde birleştirir — hangi adımın kaç ms
+  # sürdüğü, altı ayrı servisin logunu elle eşleştirmeden görünür olur.
+  #
+  # Jaeger all-in-one, kendi arayüzü olan tek bir konteyner. Bellek dar (yığın 7.4 GB'ın
+  # ~4.3'ünü kullanıyor), bu yüzden depolama bellekte ve iz sayısı sınırlı: izler kalıcı
+  # değil, son birkaç dakikayı incelemek için var.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: vts-jaeger
+    mem_limit: 384m
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      # Bellekte tutulan iz sayısı. Sınırsız bırakılırsa saniyede ~100 iz üreten bir
+      # filoda konteyner kısa sürede kendi limitini yer.
+      MEMORY_MAX_TRACES: "20000"
+    ports:
+      # 16686 arayüz; 4318 OTLP/HTTP, servislerin iz gönderdiği uç.
+      - "16686:16686"
+    expose: ["4318"]
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana:13.1.0
     container_name: vts-grafana
@@ -247,6 +269,10 @@ services:
         KAFKA_BOOTSTRAP_SERVERS: kafka:9092
         REDIS_HOST: redis
         REDIS_PORT: "6379"
+        # İzler buraya gider. Ortak blokta, çünkü izin değeri tam olarak servisleri
+        # BİRLEŞTİRMESİNDE: yalnızca bir kısmı gönderirse zincir ortasından kopar ve
+        # geriye tek tek logdan farkı olmayan parçalar kalır.
+        OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       # The gateway serves the whole UI and proxies operator control to the simulator.
       SIMULATOR_BASE_URL: http://simulator:8085
     ports: ["8080:8080"]
@@ -313,6 +339,10 @@ services:
       # (yol yoksa park ederler), bu yüzden hazır olmasını bekliyoruz.
       osrm: {condition: service_healthy}
     environment:
+      # Simülatör ortak env bloğunu almaz (veritabanı/Kafka bağlantısı yok), ama izin
+      # BAŞLADIĞI yer burasıdır: bunu atlarsak her iz ingestion'da başlar ve ölçümün
+      # nereden geldiği görünmez olur.
+      OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       VTS_SIMULATOR_INGESTION_BASE_URL: http://ingestion-service:8081
       VTS_SIMULATOR_OSRM_BASE_URL: http://osrm:5000
     # Kontrol API'si iç ağda kalır; UI ona gateway proxy'si üzerinden erişir.

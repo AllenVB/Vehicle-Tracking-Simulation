@@ -29,6 +29,14 @@ spring:
       port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Kafka uzerinden iz zincirini surdurur: uretici, iz kimligini mesaj basligina
+    # yazar; tuketici onu okuyup kendi span'ini ayni ize baglar. Bu ayar olmadan zincir
+    # tam Kafka'da kopar ve geriye birbirine baglanmayan iki yarim iz kalir -- oysa
+    # hattaki en uzun bekleme genellikle tam orada.
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
     consumer:
       group-id: vts-gateway
       auto-offset-reset: latest
@@ -53,6 +61,18 @@ management:
     web:
       exposure:
         include: health, info, metrics, prometheus
+  # Dagitik izleme. Ornekleme %2: 105 arac saniyede bir olcum gonderiyor, hepsini
+  # izlemek saniyede ~600 span eder ve Jaeger'in bellegini birkac dakikada doldurur.
+  # Yuzde iki, dakikada ~120 iz demek -- bir hattin nasil davrandigini gormek icin fazlasiyla
+  # yeterli, sistemi tasimayacagi bir yuke sokmadan.
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:0.02}
+  otlp:
+    tracing:
+      # Uc verilmezse Boot varsayilan olarak localhost'a gonderir ve her istek sessizce
+      # basarisiz olur; compose bunu jaeger'a yonlendirir.
+      endpoint: ${OTLP_ENDPOINT:http://localhost:4318/v1/traces}
   metrics:
     tags:
       application: ${spring.application.name}

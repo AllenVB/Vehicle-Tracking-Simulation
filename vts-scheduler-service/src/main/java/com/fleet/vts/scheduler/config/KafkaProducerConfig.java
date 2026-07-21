@@ -20,6 +20,11 @@ public class KafkaProducerConfig {
 
     @Bean
     public KafkaTemplate<String, String> kafkaTemplate(ProducerFactory<String, String> pf) {
-        return new KafkaTemplate<>(pf);
+        KafkaTemplate<String, String> template = new KafkaTemplate<>(pf);
+        // Uretici, iz kimligini mesaj basligina yazar. Bu template elle kuruldugu icin
+        // spring.kafka.template.observation-enabled ona ulasmaz; acikca acilmazsa tuketici
+        // devam ettirecek bir iz bulamaz ve zincir Kafka'da kopar.
+        template.setObservationEnabled(true);
+        return template;
     }
 }

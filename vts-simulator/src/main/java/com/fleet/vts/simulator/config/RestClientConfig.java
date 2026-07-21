@@ -19,12 +19,21 @@ public class RestClientConfig {
      * timeout at all, so an ingestion service that accepts the connection and then
      * never answers would block the calling tick thread forever.
      */
+    /**
+     * Built from the injected {@code RestClient.Builder} rather than {@code RestClient.builder()}.
+     *
+     * <p>They are not the same: Boot's builder comes pre-loaded with the observation registry,
+     * a bare one does not. That is the difference between a trace that starts here — where a
+     * telemetry reading is actually born — and one that only appears from ingestion onwards,
+     * with no record of where the reading came from.
+     */
     @Bean
-    public RestClient ingestionRestClient(SimulatorProperties properties) {
+    public RestClient ingestionRestClient(SimulatorProperties properties,
+                                          RestClient.Builder builder) {
         ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.DEFAULTS
                 .withConnectTimeout(properties.getIngestionConnectTimeout())
                 .withReadTimeout(properties.getIngestionReadTimeout());
-        return RestClient.builder()
+        return builder
                 .baseUrl(properties.getIngestionBaseUrl())
                 .requestFactory(ClientHttpRequestFactories.get(settings))
                 .build();

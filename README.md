@@ -406,3 +406,45 @@ Micrometer + Prometheus + Grafana. Metrikler: `telemetry.ingested`,
 `telemetry.persisted`, `violation.produced`, `notification.sent`, consumer lag,
 DLQ oranı. Grafana'da hazır **"VTS — Fleet Telematics Overview"** dashboard'u
 otomatik yüklenir. Her olayda `correlationId` ile yapılandırılmış JSON log.
+
+### Dağıtık izleme (Jaeger)
+
+Metrikler *ne kadar* sorusuna cevap verir, izleme **nerede** sorusuna. Bir ölçüm altı
+servisten geçtiği için "harita neden geç güncellendi" sorusunun cevabı, altı ayrı logu
+zaman damgasına göre elle eşleştirmeden bulunamıyordu. Artık tek bir zaman çizelgesinde
+görünür:
+
+```
+İz 1  ├─ simulator   → POST /telemetry/batch        ~35 ms
+      └─ ingestion   → imei→araç + 105 Kafka gönderimi
+
+      ✂ zincir burada kopuyor (aşağıya bakın)
+
+İz 2  ├─ processing  → vehicle.telemetry.processed send
+      └─ gateway     → receive → WebSocket push
+```
+
+**Arayüz:** http://localhost:16686 (Jaeger) — servis olarak `vts-simulator` seçip bir iz açın.
+
+**Dürüst sınır:** Hat şu an **iki yarım iz** halinde görünüyor, tek parça değil. Sebebi
+`vts-processing`'in `vehicle.telemetry.raw`'ı **batch** tüketmesi: Spring Kafka'nın gözlem
+desteği batch dinleyicileri kapsamaz, çünkü farklı izlerden gelen 500 kayıtlık bir yığının
+tek bir ebeveyni olamaz — tüketici zorunlu olarak yeni bir iz başlatır. Kapatmak için batch
+dinleyicide her kaydın başlığından iz bağlamını elle çıkarmak gerekir; sıcak yol üzerinde
+kayıt başına span demektir, ölçülmeden yapılacak bir şey değil.
+
+Buna rağmen elde edilen: simülatör→ingestion gecikmesi ve processing→gateway gecikmesi
+ayrı ayrı ölçülebiliyor. Ölçülemeyen tek şey ikisi arasındaki Kafka bekleme süresi.
+
+İki ayrıntı, izin işe yaraması bunlara bağlı:
+
+- **Örnekleme %2** (`TRACING_SAMPLE_RATE`). 105 araç saniyede bir ölçüm gönderiyor;
+  hepsini izlemek saniyede ~600 span eder ve toplayıcının belleğini dakikalar içinde
+  doldurur. %2, dakikada ~120 iz demek — bir hattın davranışını görmek için fazlasıyla
+  yeterli.
+- **Kafka propagasyonu** (`spring.kafka.*.observation-enabled`). Bu ayar olmadan zincir
+  tam Kafka'da kopar ve geriye birbirine bağlanmayan iki yarım iz kalır — oysa hattaki en
+  uzun bekleme genellikle tam orada.
+
+İzler bellekte tutulur ve kalıcı değildir: amaç son birkaç dakikayı incelemek, arşiv
+tutmak değil.

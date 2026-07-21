@@ -27,11 +27,14 @@ public class SimulatorRestClientConfig {
     @Bean
     public RestClient simulatorRestClient(@Value("${vts.simulator.base-url}") String baseUrl,
                                           @Value("${vts.simulator.connect-timeout:2s}") Duration connectTimeout,
-                                          @Value("${vts.simulator.read-timeout:5s}") Duration readTimeout) {
+                                          @Value("${vts.simulator.read-timeout:5s}") Duration readTimeout,
+                                          RestClient.Builder builder) {
         ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.DEFAULTS
                 .withConnectTimeout(connectTimeout)
                 .withReadTimeout(readTimeout);
-        return RestClient.builder()
+        // Boot'un builder'ı: gözlem kaydı yüklü gelir, çıplak RestClient.builder() gelmez —
+        // operatörün taşıma isteği de böylece ize dahil olur.
+        return builder
                 .baseUrl(baseUrl)
                 .requestFactory(ClientHttpRequestFactories.get(settings))
                 .build();

@@ -42,6 +42,9 @@ public class KafkaConsumerConfig {
         factory.setConcurrency(CONCURRENCY);
         factory.getContainerProperties().setAckMode(AckMode.MANUAL);
         factory.setCommonErrorHandler(errorHandler);
+        // Bu factory elle kuruluyor, dolayısıyla spring.kafka.listener.observation-enabled
+        // ona ulaşmaz; izin Kafka'da kopmaması için açıkça açılır.
+        VtsKafkaConsumers.enableObservation(factory);
         return factory;
     }
 }

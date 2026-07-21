@@ -54,6 +54,24 @@ public final class VtsKafkaConsumers {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory(properties, objectMapper, type));
         factory.setCommonErrorHandler(errorHandler);
+        enableObservation(factory);
         return factory;
+    }
+
+    /**
+     * Turn on tracing for a hand-built listener factory.
+     *
+     * <p>{@code spring.kafka.listener.observation-enabled} only reaches the factory Boot
+     * auto-configures, and every factory in this system is built here instead — so without
+     * this call the property looks set while no consumer is actually traced, and the trace
+     * chain snaps at Kafka.
+     *
+     * <p>What it buys: the consumer reads the trace id the producer wrote into the message
+     * headers and continues that trace rather than starting a new one. Without it a single
+     * telemetry reading shows up as two unrelated halves, split at exactly the hop where the
+     * time usually goes.
+     */
+    public static void enableObservation(ConcurrentKafkaListenerContainerFactory<?, ?> factory) {
+        factory.getContainerProperties().setObservationEnabled(true);
     }
 }
