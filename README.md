@@ -36,7 +36,8 @@ Tek sayfa, tek servis (`:8080`), **12'lik grid: 2 filo barı · 5 canlı harita 
 ### Operatör: rota oluşturma ve araç uyarıları
 
 ![Rota oluşturma ve araç uyarısı](docs/screenshots/vts-mesaj-rota.png)
-![Uploading image.png…]()
+<img width="1917" height="1003" alt="ats" src="https://github.com/user-attachments/assets/3d85ea19-118d-46b0-92d4-561d53170b07" />
+
 
 
 - **Rota Oluştur:** Araç seçilince operatör haritasının sağ altında bir buton çıkar; **hedef
