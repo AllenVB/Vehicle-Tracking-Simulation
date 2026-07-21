@@ -382,13 +382,20 @@ public class FleetSimulator {
      * a refusal the operator can see beats a silent correction they cannot.
      * Helicopters are placed exactly where clicked; they fly, so every point is reachable.
      *
-     * <p>The move is a teleport, not a pin: the vehicle lands at the point and sets off for a
-     * fresh destination near it, at its own cruise speed. It used to be frozen at 0 km/h until
-     * an operator released it, which made every move look like a breakdown and stalled the
-     * vehicle's trip.
+     * <p>The move is a teleport, not a pin: the vehicle lands at the point and drives on at its
+     * own cruise speed. It used to be frozen at 0 km/h until an operator released it, which made
+     * every move look like a breakdown and stalled the vehicle's trip.
+     *
+     * <p>It keeps the destination it already had, so a move relocates the vehicle without
+     * cancelling its errand — it finishes the run it was on, then parks, is scored, and takes a
+     * new route from there. Note this can send it back the way it came: a vehicle carried from
+     * Hatay to Ankara still owes a trip to Kayseri and will head south-east to make it. That is
+     * the deliberate reading of "let them finish their own route first"; the alternative —
+     * picking a fresh destination near the drop point — silently cancels whatever the vehicle
+     * was doing, which is a bigger surprise than driving back.
      *
      * <p>Returns the outcome — {@code moved} says whether it happened, {@code reason} why
-     * not, {@code destination} where it is now headed — or {@code null} if the id is unknown.
+     * not, {@code destination} where it is headed — or {@code null} if the id is unknown.
      */
     public Map<String, Object> moveVehicle(long id, double lat, double lon) {
         VehicleState v = byId.get(id);
@@ -423,11 +430,12 @@ public class FleetSimulator {
             placeLon = nearest.lon();
         }
 
-        // Drive on from here to a NEW destination, rather than resuming the old one. Keeping
-        // the old destination made the move undo itself: a vehicle carried from Hatay to
-        // Ankara still had Kayseri to reach, so it set off south-east — back the way it came.
-        // A destination near where it now stands is the only reading of "move" that sticks.
-        if (!startFreshJourney(v, placeLat, placeLon, 0.0)) {
+        // Resume the errand it was already on, re-routed from where it now stands. A vehicle
+        // that was parked or waiting has no errand to resume, so it gets a fresh one instead.
+        Journey current = v.journey();
+        boolean resumed = current != null && !v.isParked()
+                && resumeJourneyFrom(v, placeLat, placeLon, current);
+        if (!resumed && !startFreshJourney(v, placeLat, placeLon, 0.0)) {
             return refuse(result, "NO_ROUTE_FROM_HERE", null);
         }
 
@@ -453,6 +461,23 @@ public class FleetSimulator {
             result.put("offRoadMeters", Math.round(offRoadMeters));
         }
         return result;
+    }
+
+    /**
+     * Put the vehicle back on the errand it was already running, routed from its new position
+     * to the destination it already had. False when no road route reaches that destination
+     * from here, in which case the caller falls back to a fresh journey rather than stranding
+     * it — an unreachable old destination is no reason to leave a vehicle standing.
+     */
+    private boolean resumeJourneyFrom(VehicleState v, double fromLat, double fromLon,
+                                      Journey current) {
+        Route route = routeFor(v, fromLat, fromLon, current.destLat(), current.destLon());
+        if (route == null) {
+            return false;
+        }
+        v.startJourney(new Journey(current.destination(), current.destLat(), current.destLon(),
+                route), 0.0);
+        return true;
     }
 
     /** A helicopter's route to a destination is the straight line; a land vehicle's is OSRM's. */

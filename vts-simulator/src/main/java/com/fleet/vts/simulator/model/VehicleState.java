@@ -25,9 +25,16 @@ import java.util.Random;
  */
 public class VehicleState {
 
-    /** Park long enough on arrival that the 5-minute trip-stop window elapses. */
-    private static final int DWELL_MIN_SECONDS = 330;   // 5.5 dk
-    private static final int DWELL_MAX_SECONDS = 720;   // 12 dk
+    /**
+     * How long a vehicle stands at its destination before taking a new route.
+     *
+     * <p>This has to outlast the stream topology's trip-stop window, or trips never close:
+     * TripRule ends a trip after a stretch of no movement, and a vehicle that sets off again
+     * first leaves the trip open forever — with it, {@code trip}, {@code trip_point},
+     * {@code stop_event} and driver scoring all stay empty. The window is 90 s
+     * (TripRule.STOP_MILLIS), so this must stay comfortably above it.
+     */
+    private static final int ARRIVAL_DWELL_SECONDS = 120;   // 2 dk
 
     /** Tank level after a refuel stop. */
     private static final double FULL_TANK_PCT = 100.0;
@@ -147,6 +154,11 @@ public class VehicleState {
         this.parked = false;
         this.needsJourney = false;
         this.parkedSeconds = 0;
+        // Any new journey is an ordinary one until told otherwise (startRefuelJourney sets the
+        // flag straight after). Without this a vehicle re-routed while seeking fuel — moved by
+        // an operator, or dispatched elsewhere — kept the flag and "filled up" on arriving at a
+        // province with no pump in sight.
+        this.refuelTrip = false;
         GeoPoint p = journey.route().positionAtClamped(distanceAlongKm);
         this.lat = p.lat();
         this.lon = p.lon();
@@ -216,8 +228,7 @@ public class VehicleState {
                 refuelTrip = false;
                 dwellSeconds = refuelDwellSeconds;
             } else {
-                dwellSeconds = DWELL_MIN_SECONDS
-                        + rnd.nextInt(DWELL_MAX_SECONDS - DWELL_MIN_SECONDS);
+                dwellSeconds = ARRIVAL_DWELL_SECONDS;
             }
             return;
         }

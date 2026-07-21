@@ -26,14 +26,28 @@ import java.util.Set;
 
 /**
  * TRIP_DETECTION: a trip opens when the vehicle starts moving with ignition on
- * and closes after 5 minutes without movement (detected on a later reading or by
+ * and closes after a stretch without movement (detected on a later reading or by
  * a stream-time punctuator). Emits ONGOING on open and CLOSED with distance,
  * avg/max speed on close.
  */
 public class TripRule implements ProcessorSupplier<String, TelemetryEvent, String, TripEvent> {
 
     public static final String STORE = "trip-state";
-    private static final long STOP_MILLIS = Duration.ofMinutes(5).toMillis();
+
+    /**
+     * How long a vehicle must sit still before its trip is considered over.
+     *
+     * <p>This is bounded from both sides. It has to be SHORTER than the simulator's arrival
+     * dwell (VehicleState.ARRIVAL_DWELL_SECONDS = 120 s) or trips never close at all: the
+     * vehicle sets off again before the window elapses, the trip stays open forever, and
+     * {@code trip}, {@code trip_point}, {@code stop_event} and driver scoring all stay empty.
+     * It also has to be LONGER than a refuelling stop (60 s), so topping up the tank counts as
+     * part of the journey rather than ending it.
+     *
+     * <p>90 s is the middle of that range. It was 5 minutes, sized when arrivals dwelled for
+     * 5.5–12 minutes; shortening the dwell to 2 minutes is what forced this down.
+     */
+    private static final long STOP_MILLIS = Duration.ofSeconds(90).toMillis();
 
     /**
      * Consecutive readings that are further apart than this are a jump, not driving:

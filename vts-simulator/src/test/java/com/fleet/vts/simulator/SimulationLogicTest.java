@@ -124,6 +124,28 @@ class SimulationLogicTest {
     }
 
     @Test
+    void rerouteWhileSeekingFuelDoesNotFillTheTankAtAProvince() {
+        // İkmale giderken rotası değişen araç (operatör taşıması ya da yeni görev), sıradan
+        // bir hedefe varınca depoyu doldurmamalı: orada pompa yok.
+        VehicleState v = new VehicleState("000000000000004", BehaviorProfile.NORMAL, 41.00, 29.00, 4L, 90);
+        v.overrideFuelPct(12);
+        v.startRefuelJourney(new Journey("Shell Ankara", 41.00, 29.02,
+                new Route(List.of(new GeoPoint(41.00, 29.00), new GeoPoint(41.00, 29.02)), false)), 60);
+        assertTrue(v.isSeekingFuel());
+
+        // Pompaya varmadan sıradan bir yolculuğa yönlendirilir.
+        v.startJourney(new Journey("Bolu", 40.74, 31.61,
+                new Route(List.of(new GeoPoint(41.00, 29.00), new GeoPoint(41.00, 29.01)), false)), 0.0);
+        assertFalse(v.isSeekingFuel(), "a fresh journey is not a refuel trip");
+
+        for (int i = 0; i < 200 && !v.isParked(); i++) {
+            v.tick(5.0);
+        }
+        assertTrue(v.isParked());
+        assertTrue(v.fuelPct() < 100, "tank must not fill at a province: " + v.fuelPct());
+    }
+
+    @Test
     void openRouteDistanceIsTheRoadDistanceNotTheRoundTrip() {
         // A journey route must NOT count a closing segment back to the start, otherwise
         // "remaining km" is doubled and the vehicle never arrives.
