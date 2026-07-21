@@ -18,8 +18,8 @@
     const vehicles = new Map();               // vehicleId -> {plate, plateNo, type, model}
     const byPlateNo = new Map();
     const journey = new Map();
-    /** vehicleId -> son kapanan yolculuğun puanı (1..10). Araç yola çıkınca temizlenir. */
-    const lastTripScore = new Map();
+    /** vehicleId -> son yolculukların ortalama puanı (1..10). */
+    const vehicleScore = new Map();
     let fuelStations = [];
     const messages = new Map();               // vehicleId -> [{category, body, at}]
     let selected = null;
@@ -377,21 +377,20 @@
                 const nf = nearestFuel(p.lat, p.lon);
                 if (nf) fuelLine = `<div class="meta">⛽ En yakın benzin: ${nf.km.toFixed(1)} km · ${nf.f.brand}</div>`;
             }
-            // Varışta bekleyen aracın biten yolculuğu 10 üzerinden puanlanır.
+            // Aracın güncel puanı: son yolculuklarının ortalaması, 10 üzerinden. Park
+            // şartına bağlı DEĞİL -- şehirlerarası seferler saatler sürdüğü için park anını
+            // yakalamak neredeyse imkânsızdı ve puan pratikte hiç görünmüyordu.
             let scoreLine = "";
-            if (j && j.parked) {
-                const s = lastTripScore.get(selected);
-                if (s != null) {
-                    // 8+ iyi, 5-7 orta, altı kötü — renk puanı okumadan da anlatsın.
-                    const renk = s >= 8 ? "#3ddc84" : (s >= 5 ? "var(--fuel-low)" : "var(--alert)");
-                    scoreLine = `<div class="meta" style="color:${renk};font-weight:600">` +
-                        `★ Yolculuk puanı: ${s}/10</div>`;
-                } else {
-                    // Trip henüz kapanmamış olabilir; çağrı kendini kısıtlıyor.
-                    scoreLine = '<div class="meta">★ Yolculuk puanlanıyor…</div>';
-                    loadLastTripScore(selected);
-                }
+            const sc = vehicleScore.get(selected);
+            if (sc != null) {
+                // 8+ iyi, 6-7 orta, altı kötü — renk, puanı okumadan da durumu anlatsın.
+                const renk = sc >= 8 ? "#3ddc84" : (sc >= 6 ? "var(--fuel-low)" : "var(--alert)");
+                scoreLine = `<div class="meta" style="color:${renk};font-weight:600">` +
+                    `★ Güncel puan: ${sc.toFixed(1)}/10</div>`;
+            } else {
+                scoreLine = '<div class="meta">★ Henüz puanlanmış yolculuk yok</div>';
             }
+            loadVehicleScore(selected);   // kendini kısıtlar
             // Depo seviyesi: aracın neden yanıp söndüğünü haritaya bakmadan da açıklar.
             let tankLine = "";
             if (p && p.fuelPct != null) {
@@ -601,12 +600,6 @@
             const res = await fetch("/api/v1/control/state", { headers: auth() });
             if (!res.ok) return;
             (await res.json()).forEach(s => {
-                // Araç yola çıktığı anda puanı unut: o puan biten yolculuğa aitti ve elde
-                // tutulursa bir sonraki varışta, yeni yolculuk henüz puanlanmamışken eski
-                // puan gösterilir — sessizce yanlış bir sayı.
-                if (!s.parked) {
-                    lastTripScore.delete(s.vehicleId);
-                }
                 journey.set(s.vehicleId, {
                     destination: s.destination, remainingKm: s.remainingKm,
                     etaMinutes: s.etaMinutes, parked: s.parked, flying: s.flying
@@ -627,27 +620,34 @@
     }
 
     /**
-     * Park halindeki aracın son KAPANMIŞ yolculuğunun puanı.
+     * Aracın güncel puanı: son yolculuklarının ortalaması.
      *
-     * Araç varır varmaz puan hazır değildir: trip, son hareketten 90 sn sonra kapanır ve puan
-     * ancak o zaman yazılır. Yani bekleme boyunca birkaç kez sormak gerekir — ama saniyede bir
-     * değil. Kendi kendini kısıtlar: aynı araç için 5 saniyede birden fazla istek gitmez ve
-     * uçuşta olan istek tekrarlanmaz.
+     * Tek bir seferin puanı değil ortalama, çünkü tek sefer aracın nasıl kullanıldığını
+     * anlatmaz -- bir kötü gün ya da bir şanslı sefer tabloyu yanıltır. Son SCORE_WINDOW
+     * yolculuk, "şu aralar nasıl gidiyor" sorusunun cevabı.
+     *
+     * Kendini kısıtlar: aynı araç için 10 saniyede birden fazla istek gitmez. Trip, son
+     * hareketten 90 sn sonra kapandığı için yeni puanlar zaten bu hızda gelir.
      */
+    const SCORE_WINDOW = 10;
     const scoreFetchAt = new Map();
-    async function loadLastTripScore(vehicleId) {
+    async function loadVehicleScore(vehicleId) {
         const now = Date.now();
-        if (now - (scoreFetchAt.get(vehicleId) || 0) < 5000) return;
+        if (now - (scoreFetchAt.get(vehicleId) || 0) < 10000) return;
         scoreFetchAt.set(vehicleId, now);
         try {
-            const res = await fetch(`/api/v1/vehicles/${vehicleId}/trips?limit=1`, { headers: auth() });
+            const res = await fetch(`/api/v1/vehicles/${vehicleId}/trips?limit=${SCORE_WINDOW}`,
+                { headers: auth() });
             if (!res.ok) return;
             const trips = await res.json();
-            const t = Array.isArray(trips) ? trips[0] : null;
-            if (t && t.score != null) {
-                lastTripScore.set(vehicleId, t.score);
-                if (selected === vehicleId) select(vehicleId);   // gelen puanı hemen göster
-            }
+            const scores = (Array.isArray(trips) ? trips : [])
+                .map(t => t.score).filter(s => s != null);
+            if (scores.length === 0) return;
+            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+            const prev = vehicleScore.get(vehicleId);
+            vehicleScore.set(vehicleId, avg);
+            // Yalnızca değiştiyse yeniden çiz: her istek panelin yeniden kurulmasına yol açmasın.
+            if (selected === vehicleId && prev !== avg) select(vehicleId);
         } catch (_) { /* yoksay */ }
     }
 
@@ -681,7 +681,7 @@
             el.innerHTML = "";
             (await res.json()).forEach((d, i) => {
                 const s = Number(d.score);
-                const cls = s >= 85 ? "good" : s >= 65 ? "mid" : "bad";
+                const cls = s >= 8 ? "good" : s >= 6 ? "mid" : "bad";
                 const row = document.createElement("div");
                 row.className = "row scoreRow";
                 row.innerHTML = `<span class="rank">${i + 1}</span>` +
