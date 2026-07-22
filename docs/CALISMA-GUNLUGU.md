@@ -178,11 +178,16 @@ Yani o sıçrama Tomcat değil, biriken kuyruğun yakalanmasıydı; 10 dakika so
 Değişmemiş servisler −46 ile +9 MB arasında gezindi, gerçek bedel bu gürültünün üstünde
 kalan +34 MB.
 
-**Analytics'in sayısına güvenmiyorum ve limiti yine de yükselttim.** Öncesi 2 saatlik, sonrası
+**Analytics'in sayısına güvenmedim ve limiti yine de yükselttim.** Öncesi 2 saatlik, sonrası
 10 dakikalık bir süreçten; RocksDB durumu uptime ile büyüdüğü için düşük çıkması bir kazanç
 değil, yalnızca daha genç bir süreç. 763'ün üstüne ölçülen +34 MB, 896'nın **%89**'u eder.
 Sınır 1024 MB'a çıkarıldı — bir rezervasyon değil tavan olduğu için kullanılmadıkça hiçbir
-şeye mal olmuyor, ama dar bırakmak bir gece boyunca OOM demek. **OOM 0, restart 0.**
+şeye mal olmuyor, ama dar bırakmak bir gece boyunca OOM demek.
+
+**Projeksiyon aynı oturumda doğrulandı.** Yeni sınırla başlayan süreç ~20 dakikada 286 →
+**788 MB**'a çıktı. Eski 896 MB sınırına karşı bu %88 eder — yani tahmin edilen %89'un
+neredeyse tam üstü. Yükseltme gerekliymiş; 896'da bırakılsaydı gece boyu OOM'a en fazla
+bir RocksDB compaction'ı kalırdı. **OOM 0, restart 0.**
 
 Aynı ölçüm sırasında Docker Engine iki kez düştü (yığın imajları derlenirken bir, sonra boşta
 bir). Konteyner OOM'u değil, WSL VM'inin kendisi: 16 GB'lık makinede `.wslconfig` yok, WSL
@@ -191,8 +196,8 @@ varsayılan olarak yarısını alıyor ve yığın o 7.4 GB'ın ~6.5'ini istiyor
 
 ### Günün açık bıraktıkları
 
-- **Analytics'in değişiklik sonrası 2 saatlik bellek ölçümü.** Elimdeki 10 dakikalık; sınır
-  bir projeksiyona göre yükseltildi, ölçüme göre değil.
+- **Analytics'in değişiklik sonrası uzun soluklu bellek ölçümü.** 20 dakikada 788 MB'a
+  çıktığı görüldü (yeni 1024 sınırının %77'si) ama nerede düzleştiği hâlâ bilinmiyor.
 - **stream-analytics lag'i** üç ölçümde 1798 → 1337 → 1532. Büyümüyor, sıfıra da inmiyor.
   Beklenen davranış: Kafka Streams `at_least_once` ile 30 saniyede bir commit ediyor, saniyede
   ~103 ölçümde bu tek başına ~3100'lük bir testere dişi demek. Yani gözlenen aralık bir birikme

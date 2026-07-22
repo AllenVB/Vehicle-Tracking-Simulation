@@ -599,12 +599,11 @@ Prometheus; bu yüzden Tomcat iş havuzu varsayılan 200'den **5**'e indirildi (
 `stream-analytics`'in sınırı ölçümden **sonra** 896 → **1024 MB**'a çıkarıldı; yukarıdaki
 629.9 rakamı eski sınıra karşı alınmıştır.
 
-> **Dürüst sınır — analytics'in sayısı kıyaslanabilir değil.** Öncesi 2 saatlik, sonrası 10
-> dakikalık bir süreçten alındı; RocksDB durumu uptime ile büyüdüğü için düşük çıkması bir
-> kazanç değil, yalnızca daha genç bir süreç. Ölçülebilen: Tomcat'in bedeli `processing`'de
-> +34 MB. 763'ün üstüne o bedel 896'nın **%89**'u eder — bu yüzden sınır 1024 MB'a çıkarıldı
-> (sınır rezervasyon değil tavandır; kullanılmadıkça maliyeti yok). Değişiklik sonrası 2
-> saatlik bir ölçüm hâlâ alınmadı. OOM: 0, restart: 0.
+Analytics'in 10 dakikalık sayısı düşük çıkmıştı ama bu bir kazanç değildi — RocksDB durumu
+uptime ile büyüdüğü için yalnızca daha genç bir süreçti. Sınır, `processing`'de ölçülen
++34 MB'ın 2 saatlik 763 MB tabanına eklenmesiyle (896'nın **%89**'u) 1024 MB'a çıkarılmıştı.
+**Projeksiyon doğrulandı:** aynı süreç ~20 dakikada 286 → **788 MB**'a çıktı; eski 896 MB
+sınırına karşı bu **%88** ederdi. Yükseltme gerekliymiş. OOM: 0, restart: 0.
 
 ### Dağıtık izleme (Jaeger)
 
