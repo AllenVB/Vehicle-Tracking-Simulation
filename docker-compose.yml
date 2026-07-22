@@ -303,7 +303,12 @@ services:
   stream-analytics:
     build: {context: ., args: {MODULE: vts-stream-analytics}}
     container_name: vts-stream-analytics
-    mem_limit: 896m
+    # 896m -> 1024m: actuator'ı asabilmek için eklenen Tomcat'in ölçülen bedeli ~34 MB
+    # (processing'de, aynı değişiklikle). Bu servisin 2 saatlik ölçümü değişiklikten önce
+    # 763 MB idi; üstüne o bedel 896'nın %89'u eder. Sınır bir rezervasyon değil tavandır --
+    # yükseltmek kullanılmadıkça hiçbir şeye mal olmaz, ama RocksDB durumu uptime ile
+    # büyüdüğü için dar bırakmak bir gece boyunca OOM demek.
+    mem_limit: 1024m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
     environment:
       <<: *db-kafka-redis

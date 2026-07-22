@@ -40,6 +40,13 @@ vts:
 
 server:
   port: 8083
+  tomcat:
+    # Bu port yalnizca /actuator/* sunar ve tek istemcisi var: Prometheus, 15 saniyede
+    # bir. Varsayilan 200 is parcacigi hicbir zaman kullanilmayacak yigin alani ayirir;
+    # bu serviste her MB'in RocksDB'ye ayrilmis bir karsiligi var.
+    threads:
+      max: 5
+      min-spare: 1
 
 management:
   endpoints:

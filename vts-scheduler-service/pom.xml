@@ -44,6 +44,15 @@
             <artifactId>shedlock-provider-jdbc-template</artifactId>
         </dependency>
 
+        <!-- Actuator tek basina bir HTTP sunucusu getirmez. Bu servis zamanlanmis is
+             calistiricisi; disariya sundugu tek HTTP yuzeyi /actuator/*. Servlet
+             konteyneri olmadan Prometheus hedefi "down" kalir ve buradaki metrikler
+             uretilse de okunamaz. Tomcat is havuzu 15 saniyede bir gelen tek bir kazima
+             icin kucultuldu (application.yml: server.tomcat.threads). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

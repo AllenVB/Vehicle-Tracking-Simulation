@@ -580,13 +580,31 @@ DLQ oranı; cihaz kanalı için `device.connections`, `device.records`,
 Grafana'da hazır **"VTS — Fleet Telematics Overview"** dashboard'u otomatik yüklenir.
 Her olayda `correlationId` ile yapılandırılmış JSON log.
 
-> **Dürüst sınır — üç servisin metriği toplanmıyor.** Prometheus hedeflerinden üçü `down`:
-> `vts-processing-service:8082`, `vts-stream-analytics:8083`, `vts-scheduler-service:8086`.
-> Bu üçünde `spring-boot-starter-web` yok, dolayısıyla actuator'ın asacağı bir HTTP sunucusu
-> da yok — port eşlemesi compose'da duruyor ama arkasında dinleyen bir şey yok. Yani
-> `telemetry.persisted`, `violation.produced`, `telemetry.late` ve `telemetry.lateness`
-> **üretiliyor ama okunamıyor.** Ölçülen: `/api/v1/targets` → 5 up, 3 down.
-> Ayakta olanlar: ingestion, notification, gateway, simulator.
+Bu üçü — `processing:8082`, `stream-analytics:8083`, `scheduler:8086` — uzun süre metriğini
+üretip **okutamadı**: actuator'ın asılacağı bir servlet konteyneri yoktu, port eşlemesi
+compose'da duruyordu ama arkasında dinleyen bir şey yoktu. Üçüne de `spring-boot-starter-web`
+eklendi. Dışarı açtıkları tek yüzey `/actuator/*` ve tek istemcileri 15 saniyede bir gelen
+Prometheus; bu yüzden Tomcat iş havuzu varsayılan 200'den **5**'e indirildi (`server.tomcat.threads`).
+
+**Ölçülen (22 Temmuz):** `/api/v1/targets` → **8 up, 0 down**, soğuk başlatma sonrası doğrulandı.
+`curl localhost:8082/actuator/prometheus` artık `telemetry_late_total` ve
+`telemetry_lateness_seconds` döndürüyor. Bellek bedeli, 10 dakika akış altında:
+
+| Servis | Öncesi | Sonrası | Fark |
+|---|---|---|---|
+| `processing` | 344.6 / 512 MB | 378.8 / 512 MB (%74) | **+34 MB** |
+| `scheduler` | 180.6 / 448 MB | 177.0 / 448 MB (%40) | fark yok |
+| `stream-analytics` | 763.5 / 896 MB | 629.9 / 896 MB (%70) | ↓ ama kıyaslanamaz |
+
+`stream-analytics`'in sınırı ölçümden **sonra** 896 → **1024 MB**'a çıkarıldı; yukarıdaki
+629.9 rakamı eski sınıra karşı alınmıştır.
+
+> **Dürüst sınır — analytics'in sayısı kıyaslanabilir değil.** Öncesi 2 saatlik, sonrası 10
+> dakikalık bir süreçten alındı; RocksDB durumu uptime ile büyüdüğü için düşük çıkması bir
+> kazanç değil, yalnızca daha genç bir süreç. Ölçülebilen: Tomcat'in bedeli `processing`'de
+> +34 MB. 763'ün üstüne o bedel 896'nın **%89**'u eder — bu yüzden sınır 1024 MB'a çıkarıldı
+> (sınır rezervasyon değil tavandır; kullanılmadıkça maliyeti yok). Değişiklik sonrası 2
+> saatlik bir ölçüm hâlâ alınmadı. OOM: 0, restart: 0.
 
 ### Dağıtık izleme (Jaeger)
 

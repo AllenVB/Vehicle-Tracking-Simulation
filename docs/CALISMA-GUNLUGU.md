@@ -7,8 +7,9 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ## 22 Temmuz 2026
 
-İki commit. Konu: testin ve CI'ın hiç olmaması, cihazın gerçekte ne konuştuğu, ve ikincisinin
-birincisi olmadan sistemi **sessizce yanlış** hale getirmesi.
+Üç commit. Konu: testin ve CI'ın hiç olmaması, cihazın gerçekte ne konuştuğu, ikincisinin
+birincisi olmadan sistemi **sessizce yanlış** hale getirmesi — ve üç servisin metriğini
+üretip okutamaması.
 
 ### 1. Test zemini ve CI — `4796efb`
 
@@ -142,22 +143,56 @@ satırları birleştirir; işaretin gerisindeki delik delik kalır.
           araç 7 için o pencerede kapanan trip: 0 (yolculuk bölünmedi)
 ```
 
-### Sağlık taramasında çıkan, düzeltilmeyen sorun
+### 3. Sağlık taramasında çıkan sorun — kapatıldı
 
-**Üç servisin metriği hiç toplanmıyor.** Prometheus hedeflerinin üçü `down`:
+**Üç servisin metriği hiç toplanmıyordu.** Prometheus hedeflerinin üçü `down`:
 `vts-processing-service:8082`, `vts-stream-analytics:8083`, `vts-scheduler-service:8086`.
 Sebep basit — bu üçünde `spring-boot-starter-web` yok, dolayısıyla actuator'ın asacağı bir HTTP
 sunucusu da yok. README'nin "Metrikler: `telemetry.persisted`, `violation.produced`…" cümlesi
-bu üçü için **hiçbir zaman doğru olmamış**.
+bu üçü için **hiçbir zaman doğru olmamıştı**.
 
-Bu turda düzeltilmedi: analytics'in belleği zaten 896 MB limitinin %87'sinde ve oraya bir
-Tomcat eklemek ölçmeden yapılacak bir şey değil. Bugün eklenen `telemetry.late` /
-`telemetry.lateness` sayaçları da aynı sebeple okunamıyor — bunu bilerek bırakıyorum, çünkü
-"metrik var" ile "metrik görülebiliyor" aynı şey değil.
+Gün içinde kapatıldı. Bekleten şey kod değildi — analytics'in belleği 896 MB'ın %85'indeydi ve
+oraya bir Tomcat eklemek **ölçmeden** yapılacak bir şey değildi. Ölçüldü.
+
+**Neden `spring-boot-starter-web`.** Alternatif, `management.server.port` ile ayrı bir hafif
+sunucuydu; ama servlet konteynerinden kaçılmıyor, yalnızca ikinci bir porta taşınıyordu. Aynı
+bedele iki port. Bunun yerine tek yüzey `/actuator/*` bırakıldı ve asıl tasarruf iş havuzundan
+alındı: tek istemci 15 saniyede bir gelen Prometheus olduğu için Tomcat havuzu 200'den **5**'e
+indirildi. Kullanılmayacak 195 iş parçacığının yığın alanını ayırmanın anlamı yoktu.
+
+**Ölçüm — 10 dakika akış altında, `docker stats`:**
+
+| Servis | Öncesi (2 sa) | Sonrası (10 dk) | Fark |
+|---|---|---|---|
+| `processing` (değişti) | 344.6 / 512 | 378.8 / 512 — %74 | **+34 MB** |
+| `scheduler` (değişti) | 180.6 / 448 | 177.0 / 448 — %40 | fark yok |
+| `stream-analytics` (değişti) | 763.5 / 896 — %85 | 629.9 / 896 — %70 | kıyaslanamaz |
+| `ingestion` (kontrol) | 307.3 / 448 | 296.9 / 448 | −10 MB |
+| `notification` (kontrol) | 241.2 / 448 | 223.2 / 448 | −18 MB |
+| `gateway` (kontrol) | 407.8 / 512 | 416.4 / 512 | +9 MB |
+
+**Kontrol servisleri neden tabloda.** İlk ölçüm yeniden başlatmadan hemen sonra alındı ve
+`processing` %88 gösterdi — Tomcat'in faturası gibi duruyordu. Ama hiç dokunulmamış
+`ingestion` aynı anda %88'deydi. İkisi değişiklikten önce de birbirinin 1.3 puan içindeydi.
+Yani o sıçrama Tomcat değil, biriken kuyruğun yakalanmasıydı; 10 dakika sonra ikisi de indi.
+Değişmemiş servisler −46 ile +9 MB arasında gezindi, gerçek bedel bu gürültünün üstünde
+kalan +34 MB.
+
+**Analytics'in sayısına güvenmiyorum ve limiti yine de yükselttim.** Öncesi 2 saatlik, sonrası
+10 dakikalık bir süreçten; RocksDB durumu uptime ile büyüdüğü için düşük çıkması bir kazanç
+değil, yalnızca daha genç bir süreç. 763'ün üstüne ölçülen +34 MB, 896'nın **%89**'u eder.
+Sınır 1024 MB'a çıkarıldı — bir rezervasyon değil tavan olduğu için kullanılmadıkça hiçbir
+şeye mal olmuyor, ama dar bırakmak bir gece boyunca OOM demek. **OOM 0, restart 0.**
+
+Aynı ölçüm sırasında Docker Engine iki kez düştü (yığın imajları derlenirken bir, sonra boşta
+bir). Konteyner OOM'u değil, WSL VM'inin kendisi: 16 GB'lık makinede `.wslconfig` yok, WSL
+varsayılan olarak yarısını alıyor ve yığın o 7.4 GB'ın ~6.5'ini istiyor. Değişikliğin payı
++34 MB; sebep bu değil, ama zemin bu kadar dar.
 
 ### Günün açık bıraktıkları
 
-- Yukarıdaki metrik boşluğu.
+- **Analytics'in değişiklik sonrası 2 saatlik bellek ölçümü.** Elimdeki 10 dakikalık; sınır
+  bir projeksiyona göre yükseltildi, ölçüme göre değil.
 - **stream-analytics lag'i** üç ölçümde 1798 → 1337 → 1532. Büyümüyor, sıfıra da inmiyor.
   Beklenen davranış: Kafka Streams `at_least_once` ile 30 saniyede bir commit ediyor, saniyede
   ~103 ölçümde bu tek başına ~3100'lük bir testere dişi demek. Yani gözlenen aralık bir birikme
