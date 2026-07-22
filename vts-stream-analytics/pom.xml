@@ -84,6 +84,13 @@
             <artifactId>kafka-streams-test-utils</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Paylasilan Testcontainers altyapisi (Postgres+Kafka+Redis, migrasyonlu). -->
+        <dependency>
+            <groupId>com.fleet.vts</groupId>
+            <artifactId>vts-test-support</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

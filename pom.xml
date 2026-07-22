@@ -20,6 +20,7 @@
 
     <modules>
         <module>vts-common</module>
+        <module>vts-test-support</module>
         <module>vts-simulator</module>
         <module>vts-ingestion-service</module>
         <module>vts-processing-service</module>
@@ -41,6 +42,19 @@
         <shedlock.version>5.16.0</shedlock.version>
         <hibernate-spatial.version>6.5.3.Final</hibernate-spatial.version>
         <jts.version>1.20.0</jts.version>
+        <netty.version>4.1.115.Final</netty.version>
+
+        <!-- Ahead of the Boot BOM (1.19.x): org.testcontainers.kafka.KafkaContainer, which runs
+             the same apache/kafka image as docker-compose, only exists from 1.20.0 on. -->
+        <testcontainers.version>1.21.3</testcontainers.version>
+        <jacoco.version>0.8.12</jacoco.version>
+
+        <!-- docker-java (inside Testcontainers) still asks for API 1.32 by default, and Docker
+             Engine 29 dropped everything below 1.44 — the handshake then fails with a bare
+             HTTP 400 and Testcontainers reports "no valid Docker environment", which points
+             nowhere near the real cause. Pinning 1.44 works on Docker 25 and up; override with
+             -Ddocker.api.version=... on an older engine. -->
+        <docker.api.version>1.44</docker.api.version>
     </properties>
 
     <dependencyManagement>
@@ -49,6 +63,11 @@
             <dependency>
                 <groupId>com.fleet.vts</groupId>
                 <artifactId>vts-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fleet.vts</groupId>
+                <artifactId>vts-test-support</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -128,5 +147,60 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+
+        <plugins>
+            <!-- Integration tests (*IT) run in a separate phase from unit tests (*Test):
+                 they need Docker, so `mvn test` stays runnable without it while CI runs
+                 `mvn verify` and gets both. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!-- Read by docker-java; see docker.api.version above. -->
+                        <api.version>${docker.api.version}</api.version>
+                    </systemPropertyVariables>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Report only, no threshold. A coverage gate on a codebase that starts near zero
+                 either fails every build or is set so low it says nothing; the number is here
+                 to be watched, not enforced. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-unit</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>prepare-integration</id>
+                        <goals>
+                            <goal>prepare-agent-integration</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                            <goal>report-integration</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>

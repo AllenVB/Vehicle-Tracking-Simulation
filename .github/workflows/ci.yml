@@ -1,0 +1,70 @@
+name: CI
+
+# Her push ve her PR. Iki gercek hata (scheduler'in jenerik uyusmazligi yuzunden 57 kez
+# cokmesi, V22 migration'inin VARCHAR tasmasiyla patlamasi) yalnizca elle deploy edilip
+# loglara bakildigi icin yakalanmisti; ikisi de derlemeden ve birim testlerden gecmisti.
+# Bu is akisinin varlik sebebi o ikisi.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # Testcontainers'in ilk indirmesi buildin en uzun adimi; ayri bir adim olmasi
+      # sureyi loglarda gorunur kilar (timescaledb-ha imaji ~2 GB).
+      - name: Test imajlarini indir
+        run: |
+          docker pull timescale/timescaledb-ha:pg16 &
+          docker pull apache/kafka:3.8.1 &
+          docker pull redis:7-alpine &
+          wait
+
+      # Ayni Postgres/Kafka/Redis'i butun moduller paylassin: reactor'da her modul kendi
+      # JVM'ini catallar, konteyner yeniden kullanimi olmadan her biri kendi Postgres'ini
+      # bastan ayaga kaldirir.
+      - name: Testcontainers yeniden kullanimi
+        run: echo 'testcontainers.reuse.enable=true' >> ~/.testcontainers.properties
+
+      # verify = birim testler (surefire, *Test) + entegrasyon testleri (failsafe, *IT).
+      # Butun reactor'u kurar: -pl ile tek modul kurmak vts-common'i yerel depodaki eski
+      # jar'dan cozer ve auto-configuration degisiklikleri sessizce gorunmez kalir.
+      - name: mvn verify
+        run: mvn -B -ntp verify
+
+      - name: Test raporlari
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          retention-days: 7
+
+      - name: Jacoco kapsam raporu
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco
+          path: '**/target/site/jacoco*/**'
+          retention-days: 7
