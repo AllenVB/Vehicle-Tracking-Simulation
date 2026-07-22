@@ -5,6 +5,7 @@ import com.fleet.vts.common.event.ViolationEvent;
 import com.fleet.vts.processing.cache.PositionCache;
 import com.fleet.vts.processing.forward.ProcessedForwarder;
 import com.fleet.vts.processing.persistence.LastPositionWriter;
+import com.fleet.vts.processing.persistence.OdometerWriter;
 import com.fleet.vts.processing.persistence.TelemetryWriter;
 import com.fleet.vts.processing.persistence.ViolationWriter;
 import com.fleet.vts.processing.rules.RuleEngine;
@@ -30,6 +31,7 @@ public class TelemetryProcessor {
 
     private final TelemetryWriter telemetryWriter;
     private final LastPositionWriter lastPositionWriter;
+    private final OdometerWriter odometerWriter;
     private final PositionCache positionCache;
     private final RuleEngine ruleEngine;
     private final ViolationWriter violationWriter;
@@ -51,6 +53,7 @@ public class TelemetryProcessor {
 
     public TelemetryProcessor(TelemetryWriter telemetryWriter,
                               LastPositionWriter lastPositionWriter,
+                              OdometerWriter odometerWriter,
                               PositionCache positionCache,
                               RuleEngine ruleEngine,
                               ViolationWriter violationWriter,
@@ -58,6 +61,7 @@ public class TelemetryProcessor {
                               MeterRegistry registry) {
         this.telemetryWriter = telemetryWriter;
         this.lastPositionWriter = lastPositionWriter;
+        this.odometerWriter = odometerWriter;
         this.positionCache = positionCache;
         this.ruleEngine = ruleEngine;
         this.violationWriter = violationWriter;
@@ -94,6 +98,9 @@ public class TelemetryProcessor {
         // The table's UPSERT refuses to move a row backwards in time on its own; the cache
         // has no such guard, so the filter is applied before it.
         lastPositionWriter.upsertBatch(latest);
+        // Fed from the same newest-per-vehicle set: the vehicle's mileage is what maintenance
+        // is scheduled against, and nothing kept it current before.
+        odometerWriter.updateBatch(latest);
 
         List<TelemetryEvent> current = new ArrayList<>(latest.size());
         for (TelemetryEvent e : latest) {

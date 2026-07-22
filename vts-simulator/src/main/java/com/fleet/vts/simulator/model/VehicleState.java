@@ -57,6 +57,16 @@ public class VehicleState {
 
     private volatile Journey journey;
     private volatile boolean parked;
+
+    /**
+     * Relay cut by an operator command ({@code setdigout 1}).
+     *
+     * <p>Modelled exactly like an empty tank: the vehicle stops where it stands and keeps
+     * reporting. It does NOT lose its journey — an immobilised vehicle is still on its way
+     * somewhere, it just cannot move, and throwing away the destination would make the
+     * unlock command useless.
+     */
+    private volatile boolean immobilized;
     private volatile boolean needsJourney;
     private double parkedSeconds;
     private double dwellSeconds;
@@ -174,6 +184,10 @@ public class VehicleState {
     }
 
     private void tickLoop(double dtSeconds) {
+        if (immobilized) {
+            speedKmh = 0;
+            return;
+        }
         speedKmh = nextSpeed();
         double movedKm = speedKmh * dtSeconds / 3600.0;
         distanceAlongKm += movedKm;
@@ -195,6 +209,12 @@ public class VehicleState {
             return;
         }
         if (journey == null) {        // waiting for a route to be assigned
+            speedKmh = 0;
+            return;
+        }
+        if (immobilized) {
+            // Same shape as the dry-tank case below: the vehicle is stationary and honest
+            // about it, rather than reporting cruise speed while going nowhere.
             speedKmh = 0;
             return;
         }
@@ -272,6 +292,14 @@ public class VehicleState {
 
     public boolean isParked() {
         return parked;
+    }
+
+    public boolean isImmobilized() {
+        return immobilized;
+    }
+
+    public void setImmobilized(boolean immobilized) {
+        this.immobilized = immobilized;
     }
 
     public boolean isFlying() {

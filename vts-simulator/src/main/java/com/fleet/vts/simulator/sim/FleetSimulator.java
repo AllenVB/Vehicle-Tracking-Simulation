@@ -66,6 +66,8 @@ public class FleetSimulator {
 
     private final SimulatorProperties properties;
     private final TelemetryTransport transport;
+    /** Kept alongside {@link #transport}: immobilisation only exists on the device channel. */
+    private final TeltonikaTelemetryTransport deviceTransport;
     private final RoadRoutes roadRoutes;
     private final FuelStations fuelStations;
     private final FuelLevelSource fuelLevelSource;
@@ -87,6 +89,7 @@ public class FleetSimulator {
         // transports are always constructed, and switching is a property, not a redeploy.
         this.transport = properties.getTransport() == SimulatorProperties.Transport.TELTONIKA
                 ? deviceTransport : httpTransport;
+        this.deviceTransport = deviceTransport;
         this.roadRoutes = roadRoutes;
         this.fuelStations = fuelStations;
         this.fuelLevelSource = fuelLevelSource;
@@ -318,6 +321,9 @@ public class FleetSimulator {
             List<Future<TelemetryPayload>> futures = new ArrayList<>(fleet.size());
             for (VehicleState v : fleet) {
                 futures.add(vt.submit(() -> {
+                    // Applied before the tick, so a relay cut takes effect on the very next
+                    // reading rather than one behind it.
+                    v.setImmobilized(deviceTransport.isImmobilized(v.imei()));
                     v.tick(tickSeconds);
                     // A real fuel source, once one is registered, is the authority for the
                     // vehicles it knows: applied after the tick so it overrides the simulated

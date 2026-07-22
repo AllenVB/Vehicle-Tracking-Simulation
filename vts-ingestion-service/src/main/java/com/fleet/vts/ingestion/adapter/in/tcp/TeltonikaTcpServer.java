@@ -47,6 +47,8 @@ public class TeltonikaTcpServer implements SmartLifecycle {
     private final TelemetryInboundPort inbound;
     private final VehicleLookupPort lookup;
     private final TeltonikaMetrics metrics;
+    private final DeviceSessionRegistry sessions;
+    private final com.fleet.vts.ingestion.adapter.out.persistence.DeviceCommandStore commands;
 
     private EventLoopGroup acceptors;
     private EventLoopGroup workers;
@@ -55,11 +57,15 @@ public class TeltonikaTcpServer implements SmartLifecycle {
     private volatile boolean running;
 
     public TeltonikaTcpServer(TeltonikaProperties properties, TelemetryInboundPort inbound,
-                              VehicleLookupPort lookup, TeltonikaMetrics metrics) {
+                              VehicleLookupPort lookup, TeltonikaMetrics metrics,
+                              DeviceSessionRegistry sessions,
+                              com.fleet.vts.ingestion.adapter.out.persistence.DeviceCommandStore commands) {
         this.properties = properties;
         this.inbound = inbound;
         this.lookup = lookup;
         this.metrics = metrics;
+        this.sessions = sessions;
+        this.commands = commands;
     }
 
     @Override
@@ -84,8 +90,8 @@ public class TeltonikaTcpServer implements SmartLifecycle {
                                 .addLast(new ReadTimeoutHandler(
                                         properties.getIdleTimeout().toSeconds(), TimeUnit.SECONDS))
                                 .addLast(new TeltonikaFrameDecoder(properties.getMaxPacketBytes()))
-                                .addLast(sessionExecutors,
-                                        new TeltonikaSessionHandler(inbound, lookup, metrics));
+                                .addLast(sessionExecutors, new TeltonikaSessionHandler(
+                                        inbound, lookup, metrics, sessions, commands));
                     }
                 });
 

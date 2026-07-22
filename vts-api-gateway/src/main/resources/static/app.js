@@ -25,6 +25,11 @@
     let fuelStations = [];
     const messages = new Map();               // vehicleId -> [{category, body, at}]
     let selected = null;
+    let geofenceLayer = null;          // yeniden çizilebilsin diye tutuluyor
+    let commandCatalogue = [];
+    let cmdTimer = null;               // seçili aracın komut geçmişi anketi
+    const replay = { points: [], layer: null, marker: null, idx: 0, timer: null, tripId: null };
+    const draw = { on: false, points: [], layer: null };
     let routeLayer = null;
     let alerts = 0, fineTotal = 0, fitted = false;
 
@@ -100,6 +105,24 @@
         document.getElementById("msgSend").addEventListener("click", sendMessage);
         document.getElementById("msgText").addEventListener("keydown",
             e => { if (e.key === "Enter") sendMessage(); });
+
+        loadCommandCatalogue();
+        document.getElementById("cmdSend").addEventListener("click", sendCommand);
+        document.getElementById("replayBtn").addEventListener("click", () => startReplay(selected));
+        document.getElementById("replayPlay").addEventListener("click", toggleReplayPlay);
+        document.getElementById("replayClose").addEventListener("click", stopReplay);
+        document.getElementById("replayRange").addEventListener("input", e => {
+            pauseReplay();
+            showReplayFrame(Number(e.target.value));
+        });
+
+        document.getElementById("zoneBtn").addEventListener("click", toggleDraw);
+        document.getElementById("zoneSave").addEventListener("click", saveZone);
+        document.getElementById("zoneCancel").addEventListener("click", cancelDraw);
+        ctrl.on("click", onDrawClick);
+
+        loadMaintenance();
+        setInterval(loadMaintenance, 60000);
     }
 
     function initMaps() {
@@ -391,9 +414,24 @@
         const info = document.getElementById("selInfo");
         const v = selected != null ? vehicles.get(selected) : null;
         // Rota Oluştur butonu ve uyarı kutusu yalnızca bir araç seçiliyken.
-        document.getElementById("routeBtn").style.display = v ? "block" : "none";
+        document.getElementById("routeBtn").style.display = v && !draw.on ? "block" : "none";
         document.getElementById("msgBox").style.display = v ? "block" : "none";
+        document.getElementById("cmdBox").style.display = v ? "block" : "none";
         if (changedSelection) closeRoutePicker();
+        if (changedSelection) {
+            // Komut geçmişi araca özel: seçim değişince eski aracın anketini durdur, yoksa
+            // panel bir aracın komutlarını gösterirken başkasınınkiyle güncellenir.
+            if (cmdTimer) { clearInterval(cmdTimer); cmdTimer = null; }
+            if (replay.tripId != null) stopReplay();
+            if (v) {
+                loadCommands(selected);
+                // Komut PENDING -> SENT -> ANSWERED arasında saniyeler içinde geçiyor;
+                // 3 sn'lik anket bunu canlı gösterecek kadar sık, sunucuyu yormayacak kadar seyrek.
+                cmdTimer = setInterval(() => loadCommands(selected), 3000);
+            } else {
+                document.getElementById("cmdList").innerHTML = "";
+            }
+        }
         if (v) {
             const j = journey.get(selected);
             const p = pos.get(selected);
@@ -467,6 +505,8 @@
 
     // ── Kontrol (gateway proxy) ─────────────────────────────────────────────
     async function onCtrlDblClick(e) {
+        // Bölge çizerken çift tık bir köşe koyma jestidir, araç taşıma değil.
+        if (draw.on) return;
         if (selected == null) return;
         const lat = +e.latlng.lat.toFixed(6), lon = +e.latlng.lng.toFixed(6);
         const plate = (vehicles.get(selected) || {}).plate || ("#" + selected);
@@ -691,11 +731,15 @@
         try {
             const res = await fetch("/api/v1/geofences", { headers: auth() });
             if (!res.ok) return;
+            // Tek bir katman grubunda tutuluyor: yeni bölge çizilince hepsi silinip yeniden
+            // çiziliyor. Aksi halde her yenilemede eskisinin üstüne bir kopya daha binerdi.
+            if (geofenceLayer) live.removeLayer(geofenceLayer);
+            geofenceLayer = L.layerGroup().addTo(live);
             (await res.json()).forEach(g => {
                 const ex = g.kind === "EXCLUSION";
                 L.geoJSON(JSON.parse(g.geojson), {
                     style: { color: ex ? "#e24b4a" : "#5dcaa5", weight: 2, fillOpacity: 0.12, dashArray: ex ? null : "4" }
-                }).bindTooltip(`${g.name} (${ex ? "yasak" : "izinli"})`).addTo(live);
+                }).bindTooltip(`${g.name} (${ex ? "yasak" : "izinli"})`).addTo(geofenceLayer);
             });
         } catch (_) { /* yoksay */ }
     }
@@ -782,4 +826,280 @@
         clearTimeout(flashTimer);
         flashTimer = setTimeout(() => { el.textContent = prev; el.style.color = prevColor; }, 3500);
     }
+    // ── Cihaz komutları (Teltonika Codec 12) ────────────────────────────────
+    /**
+     * Komut listesi sunucudan geliyor, arayüzde sabit değil.
+     *
+     * Sebebi güvenlik: gateway zaten yalnızca bu listedeki komutları kabul ediyor. Listeyi
+     * burada da yazsaydık iki yerde tutulan tek bir gerçek olurdu ve ayrıştıkları anda
+     * operatör, sunucunun reddedeceği bir komutu seçebiliyor olurdu.
+     */
+    async function loadCommandCatalogue() {
+        try {
+            const res = await fetch("/api/v1/device-commands/catalogue", { headers: auth() });
+            if (!res.ok) return;
+            commandCatalogue = await res.json();
+            const sel = document.getElementById("cmdSelect");
+            sel.innerHTML = commandCatalogue.map(c =>
+                `<option value="${c.command}">${c.destructive ? "⛔ " : "🛈 "}${c.label}</option>`).join("");
+        } catch (_) { /* yoksay */ }
+    }
+
+    async function sendCommand() {
+        if (selected == null) return;
+        const command = document.getElementById("cmdSelect").value;
+        const option = commandCatalogue.find(c => c.command === command);
+        // Röleyi kesmek aracı yolda durdurur. Geri alınabilir, ama geri alınana kadar sürücü
+        // yolda kalır — o yüzden tek tıkla olmuyor.
+        if (option && option.destructive
+            && !confirm(`"${option.label}" komutu cihaza gönderilecek. Emin misin?`)) {
+            return;
+        }
+        try {
+            const res = await fetch(`/api/v1/vehicles/${selected}/commands`, {
+                method: "POST",
+                headers: { ...auth(), "Content-Type": "application/json" },
+                body: JSON.stringify({ command })
+            });
+            if (res.status === 404) { flash("Bu aracın cihazı yok"); return; }
+            if (!res.ok) { flash("Komut reddedildi"); return; }
+            flash("Komut kuyruğa alındı");
+            loadCommands(selected);
+        } catch (_) { flash("Komut gönderilemedi"); }
+    }
+
+    async function loadCommands(vehicleId) {
+        if (vehicleId == null) return;
+        try {
+            const res = await fetch(`/api/v1/vehicles/${vehicleId}/commands?limit=8`, { headers: auth() });
+            if (!res.ok) return;
+            // Yanıt gecikirken operatör başka araca geçmiş olabilir; geç gelen cevabın
+            // başka bir aracın panelini ezmesini engelliyor.
+            if (vehicleId !== selected) return;
+            renderCommands(await res.json());
+        } catch (_) { /* yoksay */ }
+    }
+
+    const CMD_STATUS = {
+        PENDING: "kuyrukta", SENT: "cihaza yazıldı", ANSWERED: "cevaplandı",
+        TIMEOUT: "cihaz cevap vermedi", NO_SESSION: "cihaz bağlı değil", FAILED: "başarısız"
+    };
+
+    function renderCommands(list) {
+        const box = document.getElementById("cmdList");
+        if (!list.length) { box.innerHTML = ""; return; }
+        box.innerHTML = list.map(c => {
+            const when = c.answeredAt || c.createdAt;
+            return `<div class="cmd-item st-${c.status}">
+                <div class="cc">${esc(c.command)} <span style="font-weight:400;color:var(--muted)">· ${CMD_STATUS[c.status] || c.status}</span></div>
+                ${c.response ? `<div class="cr">${esc(c.response)}</div>` : ""}
+                <div class="cr">${when ? new Date(when).toLocaleTimeString("tr-TR") : ""}</div>
+            </div>`;
+        }).join("");
+    }
+
+    // ── Bakım ───────────────────────────────────────────────────────────────
+    /**
+     * Bakım listesi gerçek kilometre sayacına dayanıyor: cihaz kanalı odometreyi taşıyor,
+     * processing onu vehicle.odometer_km'ye yazıyor. O sütun yazılmadan önce bu liste her
+     * zaman boştu ve gecelik hatırlatma işi her gece sıfır sayıyordu.
+     */
+    async function loadMaintenance() {
+        try {
+            const res = await fetch("/api/v1/maintenance/due", { headers: auth() });
+            if (!res.ok) return;
+            const rows = await res.json();
+            document.getElementById("maintCount").textContent = rows.length ? `(${rows.length})` : "(yok)";
+            document.getElementById("maintList").innerHTML = rows.slice(0, 8).map(m => {
+                const detail = m.remainingKm != null
+                    ? (m.remainingKm <= 0 ? `${-m.remainingKm} km gecikmiş` : `${m.remainingKm} km kaldı`)
+                    : (m.nextDueAt ? new Date(m.nextDueAt).toLocaleDateString("tr-TR") : "");
+                return `<div class="mt-item ${m.overdue ? "overdue" : ""}">
+                    <div>
+                        <div>${esc(m.plate)} · ${esc(m.name)}</div>
+                        <div class="mn">${detail}</div>
+                    </div>
+                    <button class="mt-done" data-plan="${m.planId}">Yapıldı</button>
+                </div>`;
+            }).join("");
+            document.querySelectorAll("#maintList .mt-done").forEach(b =>
+                b.addEventListener("click", () => markServiced(Number(b.dataset.plan))));
+        } catch (_) { /* yoksay */ }
+    }
+
+    async function markServiced(planId) {
+        try {
+            const res = await fetch(`/api/v1/maintenance/${planId}/serviced`, {
+                method: "POST", headers: auth()
+            });
+            if (!res.ok) { flash("Bakım kaydedilemedi"); return; }
+            flash("Bakım kaydedildi");
+            loadMaintenance();
+        } catch (_) { flash("Bakım kaydedilemedi"); }
+    }
+
+    // ── Yolculuk oynatma ────────────────────────────────────────────────────
+    /**
+     * Biten bir seferi kendi zaman damgalarıyla oynatır.
+     *
+     * Kırıntılar 30 saniyede bir örneklendiği için her karede noktanın KENDİ saati
+     * gösteriliyor: aracın beklediği yerde saat atlıyor, hızlandığı yerde noktalar
+     * seyrekleşiyor. Sabit bir sayaç göstermek, aracın hiç sürmediği düzgün bir hızı
+     * anlatırdı.
+     */
+    async function startReplay(vehicleId) {
+        if (vehicleId == null) return;
+        stopReplay();
+        try {
+            const tr = await fetch(`/api/v1/vehicles/${vehicleId}/trips?limit=1`, { headers: auth() });
+            const trips = tr.ok ? await tr.json() : [];
+            if (!trips.length) { flash("Bu aracın tamamlanmış seferi yok"); return; }
+
+            const rt = await fetch(`/api/v1/trips/${trips[0].id}/route`, { headers: auth() });
+            const points = rt.ok ? await rt.json() : [];
+            if (points.length < 2) { flash("Seferin izi yok"); return; }
+
+            replay.tripId = trips[0].id;
+            replay.points = points;
+            replay.idx = 0;
+            replay.layer = L.layerGroup().addTo(live);
+            L.polyline(points.map(p => [p.lat, p.lon]),
+                { color: "#ffd27f", weight: 3, opacity: .55, dashArray: "5 4" }).addTo(replay.layer);
+            replay.marker = L.marker([points[0].lat, points[0].lon], {
+                icon: L.divIcon({ className: "", html: '<div class="replay-mk"></div>', iconSize: [14, 14] }),
+                zIndexOffset: 1200
+            }).addTo(replay.layer);
+
+            const range = document.getElementById("replayRange");
+            range.max = String(points.length - 1);
+            range.value = "0";
+            document.getElementById("replayBar").classList.add("on");
+            live.fitBounds(L.polyline(points.map(p => [p.lat, p.lon])).getBounds(), { padding: [40, 40] });
+            showReplayFrame(0);
+            playReplay();
+        } catch (_) { flash("Sefer yüklenemedi"); }
+    }
+
+    function showReplayFrame(i) {
+        const p = replay.points[i];
+        if (!p) return;
+        replay.idx = i;
+        replay.marker.setLatLng([p.lat, p.lon]);
+        document.getElementById("replayRange").value = String(i);
+        const clock = p.ts ? new Date(p.ts).toLocaleTimeString("tr-TR") : `#${p.seq}`;
+        document.getElementById("replayLabel").textContent =
+            `${clock} · ${p.speedKmh == null ? "-" : p.speedKmh} km/s · ${i + 1}/${replay.points.length}`;
+    }
+
+    function playReplay() {
+        if (replay.timer) return;
+        document.getElementById("replayPlay").textContent = "⏸";
+        // Kırıntılar 30 sn arayla; 200 ms'de bir ilerlemek ~150x gerçek zaman demek, yani
+        // bir saatlik sefer yaklaşık 24 saniyede izleniyor.
+        replay.timer = setInterval(() => {
+            if (replay.idx + 1 >= replay.points.length) { pauseReplay(); return; }
+            showReplayFrame(replay.idx + 1);
+        }, 200);
+    }
+
+    function pauseReplay() {
+        if (replay.timer) { clearInterval(replay.timer); replay.timer = null; }
+        document.getElementById("replayPlay").textContent = "▶";
+    }
+
+    function toggleReplayPlay() {
+        if (replay.timer) pauseReplay();
+        else if (replay.idx + 1 < replay.points.length) playReplay();
+    }
+
+    function stopReplay() {
+        pauseReplay();
+        if (replay.layer) { live.removeLayer(replay.layer); replay.layer = null; }
+        replay.points = []; replay.marker = null; replay.idx = 0; replay.tripId = null;
+        document.getElementById("replayBar").classList.remove("on");
+    }
+
+    // ── Bölge çizimi ────────────────────────────────────────────────────────
+    /**
+     * Operatör haritasına tıklayarak poligon kurar.
+     *
+     * Çizim elle yazıldı, bir Leaflet eklentisi eklenmedi: gereken şey "tıkla, köşe koy,
+     * kapat" ve bunun için sayfaya üçüncü bir CDN bağımlılığı sokmak kazandırdığından
+     * fazlasını maliyet olarak getirirdi.
+     */
+    function toggleDraw() {
+        if (draw.on) { cancelDraw(); return; }
+        draw.on = true;
+        draw.points = [];
+        draw.layer = L.layerGroup().addTo(ctrl);
+        document.getElementById("mapCtrl").classList.add("drawing");
+        document.getElementById("zonePicker").style.display = "block";
+        document.getElementById("zoneBtn").style.display = "none";
+        document.getElementById("routeBtn").style.display = "none";
+        // Çizerken çift tık aracı taşımasın: aynı jestin iki anlamı olurdu.
+        ctrl.doubleClickZoom.disable();
+        updateZoneHint();
+    }
+
+    function onDrawClick(e) {
+        if (!draw.on) return;
+        draw.points.push([e.latlng.lat, e.latlng.lng]);
+        redrawZone();
+        updateZoneHint();
+    }
+
+    function redrawZone() {
+        draw.layer.clearLayers();
+        draw.points.forEach(p => L.circleMarker(p, {
+            radius: 4, color: "#e24b4a", fillColor: "#e24b4a", fillOpacity: 1
+        }).addTo(draw.layer));
+        if (draw.points.length >= 2) {
+            L.polygon(draw.points, { color: "#e24b4a", weight: 2, fillOpacity: .15 }).addTo(draw.layer);
+        }
+    }
+
+    function updateZoneHint() {
+        const n = draw.points.length;
+        document.getElementById("zoneHint").textContent = n < 3
+            ? `Haritaya tıklayarak köşeleri koy — en az 3 (${n})`
+            : `${n} köşe · kaydetmeye hazır`;
+    }
+
+    async function saveZone() {
+        if (draw.points.length < 3) { flash("En az 3 köşe gerekli"); return; }
+        const name = document.getElementById("zoneName").value.trim() || "Yeni bölge";
+        const kind = document.getElementById("zoneKind").value;
+        try {
+            const res = await fetch("/api/v1/geofences", {
+                method: "POST",
+                headers: { ...auth(), "Content-Type": "application/json" },
+                body: JSON.stringify({ name, kind, points: draw.points })
+            });
+            if (!res.ok) { flash("Bölge kaydedilemedi"); return; }
+            cancelDraw();
+            document.getElementById("zoneName").value = "";
+            await loadGeofences();
+            // Kural motoru bölgeleri dakikada bir yeniliyor, yani ihlal üretmesi bir dakikayı
+            // bulabilir. Bunu söylemek, operatörün "kaydettim ama bir şey olmuyor" demesinden iyi.
+            showToast('<span class="tt">Bölge kaydedildi</span><br/>Kural motoru en geç 1 dakika içinde devreye alır.');
+        } catch (_) { flash("Bölge kaydedilemedi"); }
+    }
+
+    function cancelDraw() {
+        draw.on = false;
+        draw.points = [];
+        if (draw.layer) { ctrl.removeLayer(draw.layer); draw.layer = null; }
+        document.getElementById("mapCtrl").classList.remove("drawing");
+        document.getElementById("zonePicker").style.display = "none";
+        document.getElementById("zoneBtn").style.display = "block";
+        document.getElementById("routeBtn").style.display = selected != null ? "block" : "none";
+        if (selected != null) ctrl.doubleClickZoom.disable(); else ctrl.doubleClickZoom.enable();
+    }
+
+    /** Sunucudan gelen metni HTML'e koymadan önce kaçır. */
+    function esc(text) {
+        return String(text == null ? "" : text).replace(/[&<>"]/g, c =>
+            ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
 })();

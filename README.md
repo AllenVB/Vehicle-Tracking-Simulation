@@ -33,6 +33,14 @@ TimescaleDB + PostGIS · Redis · Leaflet · çok modüllü Maven monorepo.**
   Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
 - **İhlaller** Türkçe adı ve **TL cinsinden cezasıyla** listelenir; toplam ceza barın üstünde
   görünür. Araçların çoğu limitlere uyduğu için akış seyrektir (saniyeler içinde sel değil).
+- **Cihaza komut** (⛔): seçili araca Codec 12 komutu gönderilir — konum sorgula, cihaz
+  bilgisi al, **röleyi kes**. Komutun durumu panelde canlı ilerler.
+- **Bölge çiz** (⬡): operatör haritasına tıklayarak yasak bölge poligonu kurulur ve kaydedilir.
+  Kural motoru en geç bir dakika içinde devreye alır — yani ihlal üretmeye başlar.
+- **Seferi oynat** (▶): biten bir yolculuk, kırıntılarının **kendi zaman damgalarıyla**
+  haritada oynatılır; zaman çubuğuyla ileri geri sarılır.
+- **Bakım**: gerçek kilometre sayacına göre yaklaşan/geçmiş bakımlar barın altında listelenir,
+  "Yapıldı" ile kayda geçer ve bir sonraki periyoda yuvarlanır.
 
 ### Operatör: rota oluşturma ve araç uyarıları
 
@@ -131,10 +139,10 @@ Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında
 
 | Modül | Port | Sorumluluk |
 |---|---|---|
-| `vts-common` | — | Event modelleri, topic sabitleri, enum'lar, TenantContext, ortak Kafka tüketici desteği (deserialization + retry/DLQ politikası), **Teltonika Codec 8/8E kodek'i** |
+| `vts-common` | — | Event modelleri, topic sabitleri, enum'lar, TenantContext, ortak Kafka tüketici desteği (deserialization + retry/DLQ politikası), **Teltonika Codec 8/8E + Codec 12 kodek'i** |
 | `vts-test-support` | — | Testcontainers yardımcıları: migrasyonlu TimescaleDB, Kafka, Redis. Yalnızca test bağımlılığı |
 | `vts-simulator` | 8085 | Filo simülatörü (Virtual Threads), OSRM yol rotaları, **cihaz emülatörü** (ikili TCP + tampon), konum override API'si (UI sunmaz) |
-| `vts-ingestion-service` | 8081 · **5027** | İki giriş: HTTP/JSON ve **ham TCP (Teltonika Codec 8/8E)**; imei→vehicle lookup (Caffeine→Redis→DB), Kafka publish, DLQ |
+| `vts-ingestion-service` | 8081 · **5027** | İki giriş: HTTP/JSON ve **ham TCP (Codec 8/8E)**; imei→vehicle lookup (Caffeine→Redis→DB), Kafka publish, DLQ, **cihaz oturumları + Codec 12 komut teslimi** |
 | `vts-processing-service` | 8082 | Batch consumer; JDBC batch insert, durumsuz kurallar **+ ihlal cooldown**, outbox |
 | `vts-stream-analytics` | 8083 | Kafka Streams; durumlu kurallar (sert fren, sürekli hız, rölanti, geofence, trip) |
 | `vts-notification-service` | 8084 | Strategy sender'lar, cooldown (Redis), quiet hours |
@@ -277,10 +285,24 @@ balon aynı sayıyı gösterir.
 > kötüdür. Operatör 9/10 alkışlanan bir seferi görüp ertesi gün aynı sürüş için sürücünün
 > 62/100 aldığını fark ederse iki sayıya da güvenmez.
 
-**Bilinen boşluk:** formül hız / sert fren / rölanti sayar. `GEOFENCE_ENTER`,
-`SUSTAINED_SPEEDING`, `LOW_FUEL` ve `LOW_BATTERY` puana **girmiyor** — yani yasak bölgeye
-giren bir araç (CRITICAL) hâlâ 10/10 alabilir. Eski gecelik formülden miras kalan bu
-kapsam, tek puan artık bu olduğu için genişletilmeyi bekliyor.
+**Yedi tür de sayılıyor.** Formül uzun süre yalnızca hız / sert fren / rölanti sayıyordu —
+eski gecelik formülden kalan bir kapsam. Sonucu şuydu: yasak bölgeye giren bir araç (sistemin
+CRITICAL saydığı tek ihlal) **10/10 alabiliyordu**, yani bu puanın kendi tanımına göre
+"hiçbir şey ters gitmedi". Kalan dört tür artık dahil:
+
+| Tür | Ağırlık | Neden |
+|---|---|---|
+| `GEOFENCE_ENTER` | **4.0** | Diğerleri aracın *nasıl* sürüldüğünü anlatır; bu, *nereye* götürüldüğünü. Bölgeyi yasaklayan biri bunu kastederek yaptı. Ayrıca nadir — günde birkaç tane — yani ağır olması her puanı aşağı çekmez, hak edeni işaretler. |
+| `SUSTAINED_SPEEDING` | **2.5** | Bir an değil, beş dakika boyunca orada kalma tercihi. |
+| `HARSH_BRAKING` | 5/3 | Kütle ve sürüş tarzı: tek bir tepki. |
+| `SPEED_LIMIT` | 1.0 | Referans. |
+| `IDLING` | 2/3 | |
+| `LOW_FUEL` / `LOW_BATTERY` | **1/3** | En hafifi ve bilinçli: bu bir planlama hatası, tehlike değil — ve en az sürücü kadar aracı yola çıkarana ait. |
+
+2.5'in 2.0 yerine seçilmesinin bir sebebi var ve yazmaya değer: puan tam sayıya
+yuvarlanıyor, yani birbirine %20'den yakın iki ağırlık her gerçekçi ihlal sayısında **aynı
+sayıya** düşer. Çıktının ifade edemediği bir ayrım, ayrım değildir — ya ağırlıklar ayrışır ya
+da eşit olmalıdır. `TripScoreTest` bu sıralamayı yuvarlamadan sonra da kontrol ediyor.
 
 ---
 
@@ -316,6 +338,52 @@ hatası gibi görünürdü. Çözücü **Teltonika'nın kendi belgelenmiş örne
 doğrulanıyor — yalnızca kendi üreticimize karşı değil; yoksa iki taraf aynı yanlışta anlaşır
 ve test bunu göremez.
 
+### Komut kanalı: Codec 12 (sunucudan cihaza)
+
+Kanal artık **iki yönlü**. Aynı soket, aynı çerçeve — yalnızca veri alanı farklı:
+
+```
+sunucu → cihaz   [0000][uzunluk][0C][1][05][komut boyu][ascii komut][1][CRC]
+cihaz  → sunucu  [0000][uzunluk][0C][1][06][cevap boyu][ascii cevap][1][CRC]
+```
+
+Operatör serbest metin gönderemiyor; komut sabit bir **izin listesinden** seçiliyor
+(`GET /api/v1/device-commands/catalogue`). Cihazlar yüzlerce yapılandırma komutu kabul eder
+ve kendisine verilen her şeyi ileten bir uç, operatör girişi olan herkese sahadaki donanımı
+yeniden yapılandırma yetkisi verirdi.
+
+| Komut | Ne yapar |
+|---|---|
+| `getgps` · `getinfo` · `getver` · `getstatus` | Cihazı sorgular |
+| **`setdigout 1`** | Röleyi keser — **araç yolda durur** |
+| `setdigout 0` | Röleyi açar, araç kaldığı yerden devam eder |
+| `cpureset` | Cihazı yeniden başlatır |
+
+**Komut Kafka üzerinden yayınlanıyor**, doğrudan HTTP ile değil. Sebep mimari: bir cihazın
+TCP oturumu **tek bir** ingestion örneğinde yaşar ve dışarıdan hiçbir şey hangisinde olduğunu
+bilmez. Her örnek her komutu okuyor (kendine özel grup kimliğiyle, yani yayın) ve yalnızca
+soketini tuttuğu cihazınkine davranıyor — bir WebSocket kümesinin kullandığı fan-out'un
+aynısı. Alternatif, yeniden bağlanmalarda doğru kalması gereken bir servis kaydı olurdu.
+
+**Durum, `device_command` tablosunda takip ediliyor** ve iki başarısızlık ayrı tutuluyor:
+
+| Durum | Anlamı |
+|---|---|
+| `PENDING` → `SENT` → `ANSWERED` | Mutlu yol |
+| `TIMEOUT` | Cihaz komutu aldı, **cevap vermedi** |
+| `NO_SESSION` | Hiçbir örnekte oturum yoktu — **cihaz çevrimdışı** |
+| `FAILED` | Soket yazımı başarısız / oturum kapandı |
+
+İkisini tek bir "başarısız"da toplamak operatöre yanlış aksiyon aldırırdı: biri cihazın
+kendisiyle, diğeri kapsamayla ilgili bir sorun.
+
+> Tablo yeni değil: `device_command` **V3'ten beri** vardı — `command_type`, JSONB `payload`,
+> `app_user` FK'si — ve hiç kullanılmamıştı. Şema, henüz var olmayan bir yeteneği tarif
+> ediyordu. V32 yanına ikinci bir tablo koymak yerine mevcut olanı Codec 12'nin gerçekten
+> taşıdığı şeye göre evriltti. Bu yeniden adlandırmayı ilk yakalayan şey `GatewayContextIT`
+> oldu: JPA entity'si hâlâ `command_type` bekliyordu ve `ddl-auto=validate` derhal kırmızı
+> yandı.
+
 ### Simülatör artık bir cihaz filosu
 
 Her araç kendi TCP oturumunu ve kendi **flash tamponunu** taşıyan bir emülatör. Gönderemediği
@@ -331,8 +399,14 @@ docker run --rm --network vehicle-tracking-simulation_default curlimages/curl:8.
 docker run --rm --network vehicle-tracking-simulation_default curlimages/curl:8.11.1   -s http://simulator:8085/api/device/status
 ```
 
+Emülatör komutlara da cevap veriyor ve cevapları FMB'nin gerçek çıktılarına benziyor
+(`DOUT1:1`, `Ver:03.27.07_08 GPS:AXN_5.10 Hw:FMB920 …`). Asıl mesele **yan etki**: röle
+kesilince araç bir tick içinde haritada duruyor. Yalnızca metin döndüren bir komut protokolü
+gösterirdi, başka bir şey değil.
+
 Ölçüm için: `device.record.lateness` (ölçümün alındığı an ile kaydedildiği an arasındaki
-fark), `device.emulator.buffered`, `device.packets.malformed`.
+fark), `device.emulator.buffered`, `device.packets.malformed`, `device.commands.sent`,
+`device.commands.answered`, `device.sessions.open`.
 
 ---
 
@@ -373,6 +447,44 @@ gün, 3 gün → 7 gün). Genişletmek ucuz: TimescaleDB yalnızca geçersizlene
 
 ---
 
+## Bakım: bir sütunu ilk kez doldurmanın bedeli
+
+Bakım tabloları (`maintenance_plan`, `maintenance_record`) **V9'dan beri** vardı ve boştu.
+Her gece 08:00'de koşan bir hatırlatma işi de vardı — ve her gece **sıfır** sayıyordu. Yeşil
+bir iş, boş bir tabloyu ölçüyordu.
+
+İki eksik vardı, ikisi de kapandı:
+
+1. **Plan yoktu.** V33 her kara aracına iki plan koyuyor: km tabanlı periyodik servis
+   (15 000 km) ve tarih tabanlı muayene (365 gün).
+2. **Kilometre sayacı sahteydi.** `vehicle.odometer_km` V3'ten beri duruyordu ve **hiçbir şey
+   onu yazmıyordu**. Cihaz kanalı Teltonika IO 16'yı (toplam odometre) zaten taşıyordu;
+   processing artık onu araç satırına yazıyor — monoton olarak, çünkü kapsama boşluğundan
+   dönen bir cihazın saatler öncesine ait ölçümü filonun kilometresini geri sarardı ve her
+   servis tarihini ileri iterdi.
+
+### Ve burada bir ders çıktı
+
+İkisi **aynı deploy'da** gitti, ve biri diğerinin altını oydu: V33 planları o anda hâlâ kurgu
+olan odometreye göre kurdu (685 km), sonra aynı sürümde odometre gerçeğe atladı (94 570 km).
+Sonuç, filonun **%76'sı "78 000 km gecikmiş"**. Hiçbir hata yok; veri tutarlı; anlamı sıfır.
+
+> **Bir sütunu ilk kez doldurmaya başlayan deploy, o sütunun eski değerine dayanan her şeyi
+> aynı anda geçersiz kılar.**
+
+Düzeltme (V34–V36) tahmin etmiyor, aynı kaynağa gidiyor: taban çizgisi `telemetry`deki son
+cihaz odometresinden alınıyor — `vehicle.odometer_km`'nin bundan sonra taşıyacağı değerin ta
+kendisi. Temiz kurulumda `telemetry` boştur, `COALESCE` seed'e düşer ve migration hiçbir şeyi
+değiştirmez; yani hem bu kurulum hem sıfırdan kurulum için doğru.
+
+Planlar ayrıca **interval boyunca yayılıyor** — km'de araç kimliğinden türeyen sabit bir
+kaydırmayla, tarihte yıla. Hepsi aynı noktada dursaydı liste ya tamamen boş ya tamamen kırmızı
+olurdu; ikisi de operatöre öncelik sırası vermez. **Ölçülen:** kalan mesafe 1 298–14 862 km
+arasına yayıldı, muayeneler 2026-07-23 ile 2027-06-07 arasına; "yaklaşan" penceresinde her an
+**16 plan** duruyor.
+
+---
+
 ## Ölçek kısıtları (baştan doğru kurulan kararlar)
 
 1. **Telemetri tekil `save()` ile yazılmaz** — batch Kafka consumer + `JdbcTemplate.batchUpdate()` + `ON CONFLICT DO NOTHING`; telemetri için JPA entity yok; `reWriteBatchedInserts=true`.
@@ -399,6 +511,9 @@ Flyway `V1`–`V15` ile **38 iş tablosu**. Öne çıkanlar:
 - `telemetry` **hypertable**: `by_range(ts)` + `by_hash(vehicle_id, 8)`, PK `(vehicle_id, ts)`, FK'siz (batch insert hızı).
 - `violation` **hypertable**.
 - `vehicle_driver_assignment`: ihlali doğru şoföre atfetmek için zamansal kayıt.
+- `geofence`: artık **salt okunur değil** — operatör haritadan poligon çizip kaydeder
+  (`POST /api/v1/geofences`), silmek yerine `active=false` yapılır (ihlal geçmişi o
+  bölgeye referans veriyor). Kural motoru listeyi 60 sn'de bir yeniliyor.
 - `rule` + `rule_assignment`: eşikler asla kodda değil; TENANT/GROUP kapsamında override edilir (tip bazlı hız sınırları buradan gelir).
 - Continuous aggregate'ler: `telemetry_1min`, `telemetry_hourly`, `violation_daily_summary`.
 - Kompresyon + retention politikaları, GIST/BRIN/partial index'ler.

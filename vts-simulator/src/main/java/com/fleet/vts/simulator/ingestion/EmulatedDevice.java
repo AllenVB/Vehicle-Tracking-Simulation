@@ -1,6 +1,7 @@
 package com.fleet.vts.simulator.ingestion;
 
 import com.fleet.vts.common.teltonika.AvlRecord;
+import com.fleet.vts.common.teltonika.Codec12Codec;
 import com.fleet.vts.common.teltonika.Codec8Codec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,7 +11,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.function.UnaryOperator;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -41,6 +44,9 @@ class EmulatedDevice {
     private final int maxRecordsPerPacket;
     private final int timeoutMillis;
 
+    /** Turns a Codec 12 command into what this device would answer, and applies its effect. */
+    private final UnaryOperator<String> commandHandler;
+
     private final Deque<AvlRecord> buffer = new ArrayDeque<>();
 
     private Socket socket;
@@ -51,9 +57,12 @@ class EmulatedDevice {
     private volatile Instant silentUntil = Instant.EPOCH;
 
     private long droppedRecords;
+    private volatile AvlRecord lastRecorded;
 
     EmulatedDevice(String imei, String host, int port, int codecId,
-                   int bufferSize, int maxRecordsPerPacket, int timeoutMillis) {
+                   int bufferSize, int maxRecordsPerPacket, int timeoutMillis,
+                   UnaryOperator<String> commandHandler) {
+        this.commandHandler = commandHandler;
         this.imei = imei;
         this.host = host;
         this.port = port;
@@ -70,6 +79,12 @@ class EmulatedDevice {
             droppedRecords++;
         }
         buffer.addLast(record);
+        this.lastRecorded = record;
+    }
+
+    /** The most recent reading this device took — what {@code getgps} reports. */
+    AvlRecord lastRecorded() {
+        return lastRecorded;
     }
 
     /** Stop transmitting for {@code seconds} while continuing to record. */
@@ -115,7 +130,7 @@ class EmulatedDevice {
                 out.write(Codec8Codec.encode(batch, codecId));
                 out.flush();
 
-                int acknowledged = in.readInt();
+                int acknowledged = readAck();
                 if (acknowledged != batch.size()) {
                     // The server took a different number than was sent. Keep everything and
                     // retry: over-trusting the ACK is how records disappear silently.
@@ -135,6 +150,50 @@ class EmulatedDevice {
             closeQuietly();
         }
         return delivered;
+    }
+
+    /**
+     * Read the server's answer to a packet, handling anything it sends in the meantime.
+     *
+     * <p>The socket is no longer one-way: the server may push a Codec 12 command at any moment,
+     * including between a packet and its acknowledgement. The two are told apart by their first
+     * four bytes — a command packet opens with the zero preamble, an ACK is a record count and
+     * is never zero, because a packet with no records is never sent in the first place.
+     *
+     * <p>Answering inline is also what a real device does: it has one socket and one thread,
+     * and the reply goes back the way the command came.
+     */
+    private int readAck() throws IOException {
+        while (true) {
+            int first = in.readInt();
+            if (first != 0) {
+                return first;
+            }
+            int dataLength = in.readInt();
+            if (dataLength <= 0 || dataLength > 64 * 1024) {
+                throw new IOException("Implausible inbound packet length " + dataLength);
+            }
+            byte[] packet = new byte[8 + dataLength + 4];
+            ByteBuffer.wrap(packet).putInt(0).putInt(dataLength);
+            in.readFully(packet, 8, dataLength + 4);
+            answerCommand(packet);
+        }
+    }
+
+    private void answerCommand(byte[] packet) throws IOException {
+        String command;
+        try {
+            command = Codec12Codec.decodeCommand(packet);
+        } catch (RuntimeException e) {
+            // A device that cannot parse a command says nothing; the server times it out. That
+            // is more honest than replying with a guess about what was asked.
+            log.warn("Device {} could not read an inbound command: {}", imei, e.getMessage());
+            return;
+        }
+        String response = commandHandler.apply(command);
+        log.info("Device {} answering command '{}' -> {}", imei, command, response);
+        out.write(Codec12Codec.encodeResponse(response));
+        out.flush();
     }
 
     private void connectIfNeeded() throws IOException {

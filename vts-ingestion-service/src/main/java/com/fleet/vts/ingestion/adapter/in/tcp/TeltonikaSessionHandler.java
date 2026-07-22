@@ -1,8 +1,10 @@
 package com.fleet.vts.ingestion.adapter.in.tcp;
 
 import com.fleet.vts.common.teltonika.AvlRecord;
+import com.fleet.vts.common.teltonika.Codec12Codec;
 import com.fleet.vts.common.teltonika.Codec8Codec;
 import com.fleet.vts.common.teltonika.TeltonikaProtocolException;
+import com.fleet.vts.ingestion.adapter.out.persistence.DeviceCommandStore;
 import com.fleet.vts.ingestion.adapter.in.web.TelemetryRequest;
 import com.fleet.vts.ingestion.port.in.BatchIngestResult;
 import com.fleet.vts.ingestion.port.in.TelemetryInboundPort;
@@ -46,14 +48,19 @@ class TeltonikaSessionHandler extends SimpleChannelInboundHandler<Object> {
     private final TelemetryInboundPort inbound;
     private final VehicleLookupPort lookup;
     private final TeltonikaMetrics metrics;
+    private final DeviceSessionRegistry sessions;
+    private final DeviceCommandStore commands;
 
     private String imei;
 
     TeltonikaSessionHandler(TelemetryInboundPort inbound, VehicleLookupPort lookup,
-                            TeltonikaMetrics metrics) {
+                            TeltonikaMetrics metrics, DeviceSessionRegistry sessions,
+                            DeviceCommandStore commands) {
         this.inbound = inbound;
         this.lookup = lookup;
         this.metrics = metrics;
+        this.sessions = sessions;
+        this.commands = commands;
     }
 
     @Override
@@ -62,11 +69,30 @@ class TeltonikaSessionHandler extends SimpleChannelInboundHandler<Object> {
     }
 
     @Override
+    public void channelInactive(ChannelHandlerContext ctx) {
+        if (imei == null) {
+            return;
+        }
+        // Drain before unregistering: anything written to this socket and not yet answered
+        // never will be, and an operator watching a command sit on SENT forever learns nothing.
+        sessions.find(imei)
+                .filter(s -> s.channel() == ctx.channel())
+                .ifPresent(s -> {
+                    Long id;
+                    while ((id = s.awaitingResponse().poll()) != null) {
+                        commands.markFailed(id, "SESSION_CLOSED");
+                    }
+                });
+        sessions.unregister(imei, ctx.channel());
+        log.info("Device {} disconnected", imei);
+    }
+
+    @Override
     protected void channelRead0(ChannelHandlerContext ctx, Object frame) {
         if (frame instanceof TeltonikaFrames.Imei(String announced)) {
             handleHandshake(ctx, announced);
         } else if (frame instanceof TeltonikaFrames.Avl(byte[] packet)) {
-            handleAvl(ctx, packet);
+            handlePacket(ctx, packet);
         }
     }
 
@@ -81,8 +107,61 @@ class TeltonikaSessionHandler extends SimpleChannelInboundHandler<Object> {
             return;
         }
         this.imei = announced;
+        sessions.register(announced, ctx.channel());
         log.info("Device {} connected from {}", announced, ctx.channel().remoteAddress());
         ctx.writeAndFlush(Unpooled.wrappedBuffer(new byte[]{HANDSHAKE_ACCEPT}));
+    }
+
+    /**
+     * A framed packet is not necessarily telemetry any more: the same socket now carries a
+     * device's answer to a command. The frame is identical either way, so the codec id decides.
+     */
+    private void handlePacket(ChannelHandlerContext ctx, byte[] packet) {
+        int codecId;
+        try {
+            codecId = Codec12Codec.codecIdOf(packet);
+        } catch (TeltonikaProtocolException e) {
+            metrics.malformedPackets().increment();
+            log.warn("Unreadable packet from {}: {}", imei, e.getMessage());
+            return;
+        }
+        if (codecId == Codec12Codec.CODEC_12) {
+            handleCommandResponse(packet);
+        } else {
+            handleAvl(ctx, packet);
+        }
+    }
+
+    /**
+     * Match a response to the command it answers.
+     *
+     * <p>Codec 12 carries no correlation id — the device simply replies on the socket it was
+     * asked on. Matching is therefore positional: commands are queued in the order they were
+     * written and answered in that same order. This is why one device's commands are never
+     * sent concurrently.
+     */
+    private void handleCommandResponse(byte[] packet) {
+        String response;
+        try {
+            response = Codec12Codec.decodeResponse(packet);
+        } catch (TeltonikaProtocolException e) {
+            metrics.malformedPackets().increment();
+            log.warn("Unreadable command response from {}: {}", imei, e.getMessage());
+            return;
+        }
+        Long commandId = sessions.find(imei)
+                .map(s -> s.awaitingResponse().poll())
+                .orElse(null);
+        if (commandId == null) {
+            // The command already timed out, or the device volunteered something nobody asked
+            // for. Recorded, not applied: overwriting a closed command would rewrite history.
+            log.warn("Unmatched response from {}: {}", imei, response);
+            metrics.unmatchedResponses().increment();
+            return;
+        }
+        commands.markAnswered(commandId, response);
+        metrics.commandResponses().increment();
+        log.info("Device {} answered command {}: {}", imei, commandId, response);
     }
 
     private void handleAvl(ChannelHandlerContext ctx, byte[] packet) {

@@ -1,6 +1,7 @@
 package com.fleet.vts.analytics.geofence;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
@@ -16,9 +17,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * In-memory registry of active geofence polygons for point-in-polygon tests
- * (JTS). Loaded once from the database at startup. This stands in for the
- * GlobalKTable design until geofences are streamed via CDC (phase 2).
+ * In-memory registry of active geofence polygons for point-in-polygon tests (JTS). Stands in
+ * for the GlobalKTable design until geofences are streamed via CDC (phase 2).
+ *
+ * <p>Reloaded on a timer, not only at startup. Zones used to arrive by migration, so "loaded
+ * once" was the same as "always current". Now an operator draws one on the map, and a registry
+ * that only reads at boot would leave the rule engine enforcing yesterday's zones until the
+ * next deploy — with no error anywhere to say so.
  */
 @Component
 public class GeofenceRegistry {
@@ -46,7 +51,8 @@ public class GeofenceRegistry {
     }
 
     @PostConstruct
-    void load() {
+    @Scheduled(fixedDelay = 60_000)
+    public void load() {
         if (jdbc == null) {
             return;
         }
@@ -63,8 +69,13 @@ public class GeofenceRegistry {
                         rs.getLong("id"), e.getMessage());
             }
         });
+        // Swapped wholesale rather than mutated: the rule reads this list on the stream thread
+        // and a half-updated list would be a zone that briefly does not exist.
+        List<Area> previous = this.areas;
         this.areas = List.copyOf(loaded);
-        log.info("Loaded {} active geofences", areas.size());
+        if (previous.size() != areas.size()) {
+            log.info("Active geofences: {} (was {})", areas.size(), previous.size());
+        }
     }
 
     public java.util.Optional<Area> find(Long id) {

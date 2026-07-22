@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -38,6 +39,15 @@ public class TeltonikaTelemetryTransport implements TelemetryTransport {
     private final SimulatorProperties.Teltonika config;
     private final int codecId;
     private final Map<String, EmulatedDevice> devices = new ConcurrentHashMap<>();
+
+    /**
+     * Devices whose relay an operator has cut ({@code setdigout 1}).
+     *
+     * <p>Held here rather than on the vehicle because the command arrives on the device
+     * channel and the fleet reads it — the dependency already runs that way, so this needs no
+     * new wiring and creates no cycle.
+     */
+    private final Set<String> immobilized = ConcurrentHashMap.newKeySet();
     private final Counter delivered;
     private final Counter recorded;
 
@@ -82,7 +92,8 @@ public class TeltonikaTelemetryTransport implements TelemetryTransport {
         return devices.computeIfAbsent(imei, id -> new EmulatedDevice(
                 id, config.getHost(), config.getPort(), codecId,
                 config.getBufferSize(), config.getMaxRecordsPerPacket(),
-                (int) config.getTimeout().toMillis()));
+                (int) config.getTimeout().toMillis(),
+                command -> answer(id, command)));
     }
 
     /**
@@ -126,6 +137,52 @@ public class TeltonikaTelemetryTransport implements TelemetryTransport {
 
     private double totalBuffered() {
         return devices.values().stream().mapToInt(EmulatedDevice::buffered).sum();
+    }
+
+    /** Whether this device's relay is currently cut. Read by the fleet on every tick. */
+    public boolean isImmobilized(String imei) {
+        return immobilized.contains(imei);
+    }
+
+    /**
+     * What a device answers, and what the answer actually does.
+     *
+     * <p>The response strings mirror an FMB's real replies closely enough to be recognisable,
+     * but the point is the side effect: {@code setdigout 1} cuts the relay and the vehicle
+     * stops on the map within a tick. A command that only produced a string back would
+     * demonstrate the protocol and nothing else.
+     */
+    private String answer(String imei, String command) {
+        return switch (command) {
+            case "setdigout 1" -> {
+                immobilized.add(imei);
+                yield "DOUT1:1";
+            }
+            case "setdigout 0" -> {
+                immobilized.remove(imei);
+                yield "DOUT1:0";
+            }
+            case "getgps" -> gpsAnswer(imei);
+            case "getver" -> "Ver:03.27.07_08 GPS:AXN_5.10 Hw:FMB920 Mod:11 IMEI:" + imei;
+            case "getinfo" -> "INI:2026/7/22 RTC:2026/7/22 RST:1 ERR:0 SR:0 BR:0 CF:0 FG:0 "
+                    + "FL:0 UT:0 SMS:0 NOGPS:0:00 GPS:3 SAT:9 RS:3";
+            case "getstatus" -> "Data Link: 1 GPRS: 1 Phone: 0 SIM: OK OP: 28601 Signal: 4 "
+                    + "NewSMS: 0 Roaming: 0 SMSFull: 0 LAC: 1 Cell ID: 1";
+            case "cpureset" -> "CPU reset performed";
+            default -> "Unknown command: " + command;
+        };
+    }
+
+    /** The device's last recorded fix, which is what a real one reports for {@code getgps}. */
+    private String gpsAnswer(String imei) {
+        EmulatedDevice device = devices.get(imei);
+        AvlRecord last = device == null ? null : device.lastRecorded();
+        if (last == null) {
+            return "GPS:0 Sat:0 - no fix";
+        }
+        return String.format(java.util.Locale.ROOT,
+                "GPS:1 Sat:%d Lat:%.6f Long:%.6f Alt:%d Speed:%d",
+                last.satellites(), last.lat(), last.lon(), last.altitudeMeters(), last.speedKmh());
     }
 
     private AvlRecord toAvl(TelemetryPayload p) {

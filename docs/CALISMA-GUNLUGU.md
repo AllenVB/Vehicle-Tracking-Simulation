@@ -5,6 +5,128 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 22 Temmuz 2026 (akşam) — dört işlevsel özellik
+
+Kullanıcı "işlevsel bir şeyler ekleyelim" dedi ve dördünü birden istedi. Dördü de kodlandı,
+**tek seferde** derlenip deploy edildi — her özellik için ayrı bir imaj derlemesi 35 dakika
+sürüyor ve dördü iki buçuk saat ederdi; doğrulamanın çoğu Testcontainers testleriyle
+build'den önce yapıldı.
+
+### 1. Cihaza komut — Codec 12
+
+Kanal tek yönlüydü: cihaz konuşuyor, biz dinliyorduk. Codec 12 aynı soketi ters yöne açıyor.
+Çerçeve birebir aynı — sıfır önek, uzunluk, veri, CRC — yalnızca veri alanı farklı, bu yüzden
+TCP çerçeveleme koduna **hiç dokunulmadı**; codec id'ye bakan üç satırlık bir dallanma yetti.
+
+**Komut Kafka üzerinden yayınlanıyor.** Sebep, tembellik değil topoloji: bir cihazın soketi
+tek bir ingestion örneğinde yaşıyor ve dışarıdan hiçbir şey hangisinde olduğunu bilmiyor. Her
+örnek kendi grup kimliğiyle her komutu okuyor ve yalnızca tuttuğu cihazınkine davranıyor.
+Alternatif, yeniden bağlanmalarda doğru kalması gereken bir servis kaydıydı — yani sürekli
+yanlış olabilecek bir şey.
+
+**ACK'ten sonraki en önemli karar, iki başarısızlığı ayırmak oldu.** `TIMEOUT` "cihaz aldı,
+cevap vermedi"; `NO_SESSION` "hiçbir örnekte oturum yoktu". Tek bir "başarısız"da toplamak
+operatöre yanlış aksiyon aldırırdı: biri cihazla, diğeri kapsamayla ilgili.
+
+**Komutun görünür bir etkisi olması şart koşuldu.** `setdigout 1` yalnızca `DOUT1:1` dönseydi
+protokolü gösterirdi, başka bir şeyi değil. Emülatör röleyi kesiyor ve araç bir tick içinde
+duruyor. **Ölçülen:** komut `PENDING → SENT → ANSWERED`, araç 7 `0 0 0 0 0 0` km/s'ye düştü,
+aynı anda araç 8 `52 52 48 53 54 52` ile sürmeye devam etti; `setdigout 0` sonrası araç 7
+`87 88 90 83 89`.
+
+**Tablo yeni değildi.** `device_command` V3'ten beri duruyordu — `command_type`, JSONB
+`payload`, `app_user` FK'si — ve hiç kullanılmamıştı. Şema, henüz var olmayan bir yeteneği
+tarif ediyordu. Yanına ikinci bir tablo koymak aynı kavramın iki kaydı olurdu; V32 mevcut
+olanı Codec 12'nin gerçekten taşıdığı şeye göre evriltti. Bunu ilk yakalayan `FlywayMigrationIT`
+oldu (*relation "device_command" already exists*), ikincisini `GatewayContextIT`: JPA entity'si
+hâlâ `command_type` bekliyordu ve `ddl-auto=validate` derhal kırmızı yandı. Sabah kurulan
+zemin, aynı gün akşam iki kez işe yaradı.
+
+### 2. Haritadan geofence çizme
+
+Bölgeler SQL'e gömülüydü; yeni bir tane eklemek migration yazmak demekti — yani operasyonel
+bir araç değil, bir deploy artefaktı. Artık operatör poligonu çiziyor.
+
+Üç küçük karar: poligon **sunucuda** WKT'ye çevriliyor (halkanın kapanması ve sarım yönü
+`ST_MakePolygon`'ın umurunda, ayrıca istemcinin gönderdiği metni sorguya sokmak enjeksiyon
+demek); silme **`active=false`** (ihlal geçmişi o bölgeye referans veriyor, satırı silmek ya
+FK'de patlar ya da açıklanamayan bir olay geçmişi bırakır); ve `GeofenceRegistry` artık
+**60 saniyede bir** yenileniyor — "bir kez yükle" ile "her zaman güncel" aynı şeydi, artık
+değil.
+
+Çizim eklenti olmadan, elle yazıldı. Gereken şey "tıkla, köşe koy, kapat"tı; bunun için
+sayfaya üçüncü bir CDN bağımlılığı sokmak kazandırdığından fazlasını maliyet olarak getirirdi.
+
+### 3. Yolculuk oynatma
+
+Backend zaten vardı: `GET /api/v1/trips/{id}/route`, `trip_point`'ten kırıntıları döndürüyor.
+Ama sorgu `tp.ts`'yi **seçiyor ve DTO'ya hiç koymuyordu** — üç yıllık bir sütun, aradaki
+haritalamada düşürülmüş. Bu yüzden rota yalnızca statik bir çizgi olarak çizilebiliyordu.
+
+`ts` eklenince oynatma anlamlı oldu: her karede noktanın **kendi saati** gösteriliyor. Sabit
+bir sayaç, aracın hiç sürmediği düzgün bir hızı anlatırdı; kırıntılar 30 saniyede bir, yani
+aracın beklediği yerde saat atlıyor.
+
+### 4. Bakım — ve günün asıl dersi
+
+Bakım tabloları V9'dan beri boştu ve gecelik hatırlatma işi her gece sıfır sayıyordu. İki
+eksik vardı: plan yoktu, ve **kilometre sayacı sahteydi** — `vehicle.odometer_km` V3'ten beri
+duruyor, hiçbir şey yazmıyordu. Cihaz kanalı odometreyi zaten taşıyordu; processing artık onu
+araç satırına yazıyor, monoton olarak (kapsama boşluğundan dönen bir ölçüm filonun
+kilometresini geri sarardı).
+
+Ve sonra plan seed'i patladı. V33 taban çizgisini o anda hâlâ kurgu olan odometreye göre kurdu
+(685 km); aynı sürümde odometre gerçeğe atladı (94 570 km). Sonuç: filonun **%76'sı "78 000 km
+gecikmiş"**. Hiçbir hata yok, veri tutarlı, anlamı sıfır.
+
+> **Bir sütunu ilk kez doldurmaya başlayan deploy, o sütunun eski değerine dayanan her şeyi
+> aynı anda geçersiz kılar.**
+
+İlk düzeltme denemesi (V34) yalnızca yarısını çözdü: yayma adımı çıpayı yine `last_service_km`
+almıştı ve o sütun düzeltilmemiş planlarda hâlâ kurguydu — 23 plan 25 000 km "gecikmiş" kaldı.
+Yani aynı hatanın daha küçük bir kopyasını yazdım. V35 çıpayı tek doğru şeye bağladı: aracın
+**şu anki** kilometresi, `telemetry`den okunarak. V36 aynısını tarihler için yaptı; V33 bütün
+muayeneleri aynı güne kurmuştu, üstelik 30 günlük pencereyi **bir gün** ıskalayarak — özellik
+doğru çalışıyor, gösterecek hiçbir şeyi yok.
+
+V36 ayrıca `make_interval(days => bigint)` ile düştü (`vehicle_id` BIGINT). Flyway temiz
+şekilde geri aldı, gateway açılmadı — yani bu da sessizce geçmedi.
+
+**Ölçülen (düzeltmeden sonra):** gecikmiş 0, kalan mesafe 1 298–14 862 km'ye yayılmış,
+muayeneler 2026-07-23 ile 2027-06-07 arasında, "yaklaşan" penceresinde her an 16 plan.
+
+### Puan boşluğu kapandı
+
+Formül yedi türün üçünü sayıyordu. Dördü eklendi; ağırlık sırası bir karar:
+bölge ihlali (4.0) > sürekli hız (2.5) > sert fren (5/3) > hız (1.0) > rölanti (2/3) >
+yakıt/batarya (1/3).
+
+2.5'in 2.0 yerine seçilmesini **kendi testim dayattı**: puan tam sayıya yuvarlanıyor, yani
+birbirine %20'den yakın iki ağırlık her gerçekçi ihlal sayısında aynı sayıya düşüyor.
+Çıktının ifade edemediği bir ayrım, ayrım değildir.
+
+**Ölçülen etki:** 30 dakikada kapanan 26 seferin puan dağılımı 1·5, 5·2, 7·1, 8·8, 9·6, 10·4
+— ortalama **8.86 → 6.96**. 1 alan seferler gerçekten kötü: 200 km'de 28 sürekli-hız ihlali,
+100 km'de 22 sert fren. Artık 10 gerçekten "hiçbir şey ters gitmedi" demek.
+
+### Sağlık taraması
+
+| Ne | Ölçülen |
+|---|---|
+| Konteyner | 15/15, restart 0, OOM 0 |
+| Servis context'i | 7/7 |
+| Prometheus | **8/8 up** (sabah 5/8 idi) |
+| Cihaz oturumu | 105 |
+| Telemetri | 60 sn'de 6300 ölçüm / 105 araç |
+| İhlal (10 dk) | SPEED_LIMIT 26, HARSH_BRAKING 16, LOW_FUEL 11, LOW_BATTERY 2 |
+| Helikopterde yeni yol ihlali | 0 |
+| Trip (30 dk) | 27 kapandı, ortalama puan 6.96 |
+| Flyway | 36/36 |
+| DLQ | 5 topic + `vehicle.command.dlq`, hepsi 0 |
+| Kafka lag | processing 0, gateway 0, notification 0, stream-analytics 1935 |
+
+---
+
 ## 22 Temmuz 2026
 
 Üç commit. Konu: testin ve CI'ın hiç olmaması, cihazın gerçekte ne konuştuğu, ikincisinin

@@ -94,7 +94,8 @@ public class StreamOutputPersister {
         Long driverId = e.driverId() != null ? e.driverId() : driverAt(e.vehicleId(), e.startedAt());
         Violations counts = violationsDuring(e);
         double distanceKm = e.distanceKm() == null ? 0 : e.distanceKm();
-        int score = TripScore.of(distanceKm, counts.speeding(), counts.harsh(), counts.idling());
+        int score = TripScore.of(distanceKm, counts.speeding(), counts.harsh(), counts.idling(),
+                counts.geofence(), counts.sustained(), counts.supply());
 
         Long tripId = jdbc.queryForObject("""
                 INSERT INTO trip
@@ -119,9 +120,10 @@ public class StreamOutputPersister {
     }
 
     /** Violation tally for one journey, by the kinds the score weighs. */
-    private record Violations(int total, int speeding, int harsh, int idling) {
+    private record Violations(int total, int speeding, int harsh, int idling,
+                              int geofence, int sustained, int supply) {
 
-        static final Violations NONE = new Violations(0, 0, 0, 0);
+        static final Violations NONE = new Violations(0, 0, 0, 0, 0, 0, 0);
     }
 
     /**
@@ -142,16 +144,21 @@ public class StreamOutputPersister {
             return Violations.NONE;
         }
         return jdbc.query("""
-                SELECT count(*)                                            AS total,
-                       count(*) FILTER (WHERE rule_code = 'SPEED_LIMIT')   AS speeding,
-                       count(*) FILTER (WHERE rule_code = 'HARSH_BRAKING') AS harsh,
-                       count(*) FILTER (WHERE rule_code = 'IDLING')        AS idling
+                SELECT count(*)                                                  AS total,
+                       count(*) FILTER (WHERE rule_code = 'SPEED_LIMIT')         AS speeding,
+                       count(*) FILTER (WHERE rule_code = 'HARSH_BRAKING')       AS harsh,
+                       count(*) FILTER (WHERE rule_code = 'IDLING')              AS idling,
+                       count(*) FILTER (WHERE rule_code = 'GEOFENCE_ENTER')      AS geofence,
+                       count(*) FILTER (WHERE rule_code = 'SUSTAINED_SPEEDING')  AS sustained,
+                       count(*) FILTER (WHERE rule_code IN ('LOW_FUEL', 'LOW_BATTERY')) AS supply
                 FROM violation
                 WHERE vehicle_id = ? AND occurred_at >= ? AND occurred_at <= ?
                 """,
                 (ResultSetExtractor<Violations>) rs -> rs.next()
                         ? new Violations(rs.getInt("total"), rs.getInt("speeding"),
-                                         rs.getInt("harsh"), rs.getInt("idling"))
+                                         rs.getInt("harsh"), rs.getInt("idling"),
+                                         rs.getInt("geofence"), rs.getInt("sustained"),
+                                         rs.getInt("supply"))
                         : Violations.NONE,
                 e.vehicleId(), ts(e.startedAt()), ts(e.endedAt()));
     }

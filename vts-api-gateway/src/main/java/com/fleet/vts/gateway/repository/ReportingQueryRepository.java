@@ -211,10 +211,15 @@ public class ReportingQueryRepository {
                 """,
                 (rs, n) -> new TripPointDto(
                         rs.getInt("seq"),
+                        toInstant(rs.getObject("ts", OffsetDateTime.class)),
                         rs.getDouble("lat"),
                         rs.getDouble("lon"),
                         rs.getObject("speed_kmh", Integer.class)),
                 tripId, tenantId);
+    }
+
+    private static Instant toInstant(OffsetDateTime value) {
+        return value == null ? null : value.toInstant();
     }
 
     private static OffsetDateTime atUtc(Instant instant) {

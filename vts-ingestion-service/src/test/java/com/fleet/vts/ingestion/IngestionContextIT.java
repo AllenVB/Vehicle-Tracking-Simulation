@@ -13,7 +13,13 @@ import org.springframework.test.context.DynamicPropertySource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Boots ingestion against real Postgres, Kafka and Redis; every port must have an adapter. */
-@SpringBootTest(properties = "management.tracing.sampling.probability=0.0")
+@SpringBootTest(properties = {
+        // The device listener binds a real socket. On the configured port it collides with a
+        // running stack — the test would then fail for a reason that has nothing to do with
+        // the code, which is the least useful kind of red build.
+        "vts.ingestion.teltonika.port=0",
+        "management.tracing.sampling.probability=0.0"
+})
 class IngestionContextIT {
 
     @DynamicPropertySource

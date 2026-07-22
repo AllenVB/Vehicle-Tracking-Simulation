@@ -155,6 +155,58 @@
         #login button { width: 100%; margin-top: 16px; padding: 10px; border: 0; border-radius: 7px;
                         background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; cursor: pointer; }
         #loginErr { color: var(--alert); font-size: 12px; margin-top: 8px; min-height: 14px; }
+
+        /* ── Cihaz komutları (Codec 12) ── */
+        #cmdBox { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+        #cmdSelect { width: 100%; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line);
+                     background: var(--panel); color: var(--text); font-size: 12.5px; }
+        #cmdList { margin-top: 8px; max-height: 132px; overflow-y: auto; }
+        .cmd-item { font-size: 11px; padding: 5px 8px; border-radius: 6px; background: var(--panel);
+                    border-left: 3px solid var(--muted); margin-bottom: 4px; }
+        .cmd-item .cc { font-weight: 700; }
+        .cmd-item .cr { color: var(--muted); font-size: 9.5px; margin-top: 2px; word-break: break-all; }
+        /* Durum rengi tek bakışta ayırt edilebilsin: bekleyen gri, cevaplanan yeşil,
+           cevapsız kalan sarı, cihaz yoksa kırmızı. */
+        .cmd-item.st-PENDING   { border-left-color: #64748b; }
+        .cmd-item.st-SENT      { border-left-color: #38bdf8; }
+        .cmd-item.st-ANSWERED  { border-left-color: #34d399; }
+        .cmd-item.st-TIMEOUT   { border-left-color: #fbbf24; }
+        .cmd-item.st-NO_SESSION,
+        .cmd-item.st-FAILED    { border-left-color: var(--alert); }
+        .cmd-danger { color: #ff9b9b; }
+
+        /* ── Bakım ── */
+        #maintList { max-height: 150px; overflow-y: auto; }
+        .mt-item { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+                   font-size: 11.5px; padding: 5px 8px; border-radius: 6px; background: var(--panel);
+                   margin-bottom: 4px; border-left: 3px solid #38bdf8; }
+        .mt-item.overdue { border-left-color: var(--alert); }
+        .mt-item .mn { color: var(--muted); font-size: 9.5px; }
+        .mt-done { padding: 3px 7px; font-size: 10px; border: 1px solid var(--line); border-radius: 5px;
+                   background: transparent; color: var(--text); cursor: pointer; }
+
+        /* ── Yolculuk oynatma ── */
+        #replayBar { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 700;
+                     display: none; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 10px;
+                     background: rgba(15,23,32,.92); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+        #replayBar.on { display: flex; }
+        #replayRange { flex: 1; accent-color: var(--accent); }
+        #replayPlay { padding: 4px 10px; border: 0; border-radius: 6px; background: var(--accent);
+                      color: #201607; font-weight: 700; cursor: pointer; }
+        #replayClose { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
+                       background: transparent; color: var(--text); cursor: pointer; }
+        #replayLabel { font-size: 11px; color: var(--muted); min-width: 132px; }
+        .replay-mk { width: 14px; height: 14px; border-radius: 50%; background: #ffd27f;
+                     border: 2px solid #201607; box-shadow: 0 0 10px #ffd27f; }
+
+        /* ── Bölge çizimi ── */
+        #zoneBtn { right: 150px; }
+        #zonePicker { position: absolute; right: 12px; bottom: 14px; z-index: 601; width: 240px; padding: 12px;
+                   border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.55); }
+        #zoneName, #zoneKind { width: 100%; margin-top: 6px; padding: 6px 9px; border-radius: 6px;
+                   border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12.5px; }
+        #zoneHint { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+        #mapCtrl.drawing { cursor: cell; }
     </style>
 </head>
 <body>
@@ -203,18 +255,49 @@
             <button id="msgSend" class="btn-send">Uyarı Gönder</button>
             <div id="msgList"></div>
         </div>
+
+        <div id="cmdBox" style="display:none">
+            <div class="msg-title">Cihaza komut gönder</div>
+            <select id="cmdSelect"></select>
+            <button id="cmdSend" class="btn-send">Komutu Gönder</button>
+            <button id="replayBtn" class="btn-ghost" style="width:100%;margin-top:6px">▶ Son seferi oynat</button>
+            <div id="cmdList"></div>
+        </div>
     </div>
+
+    <div class="sect">Bakım <span id="maintCount" style="text-transform:none;color:var(--muted)"></span></div>
+    <div id="maintList"></div>
 </aside>
 
 <div class="mapWrap">
     <div class="maplabel">CANLI FİLO · OpenStreetMap</div>
     <div id="mapLive" class="map"></div>
+    <div id="replayBar">
+        <button id="replayPlay">⏸</button>
+        <input id="replayRange" type="range" min="0" max="0" value="0"/>
+        <span id="replayLabel"></span>
+        <button id="replayClose">✕</button>
+    </div>
 </div>
 
 <div class="mapWrap">
     <div class="maplabel">OPERATÖR · konum değiştir (çift tık)</div>
     <div id="mapCtrl" class="map"></div>
     <button id="routeBtn" class="map-fab" style="display:none">🗺️ Rota Oluştur</button>
+    <button id="zoneBtn" class="map-fab">⬡ Bölge Çiz</button>
+    <div id="zonePicker" style="display:none">
+        <div class="rp-title">Yasak bölge tanımla</div>
+        <input id="zoneName" maxlength="120" placeholder="Bölge adı"/>
+        <select id="zoneKind">
+            <option value="EXCLUSION">Yasak bölge (girişte uyar)</option>
+            <option value="INCLUSION">İzinli bölge (çıkışta uyar)</option>
+        </select>
+        <div id="zoneHint">Haritaya tıklayarak köşeleri koy — en az 3.</div>
+        <div class="rp-actions">
+            <button id="zoneSave" class="btn-send">Kaydet</button>
+            <button id="zoneCancel" class="btn-ghost">İptal</button>
+        </div>
+    </div>
     <div id="routePicker" style="display:none">
         <div class="rp-title">Hedef il seç</div>
         <select id="provinceSelect"></select>

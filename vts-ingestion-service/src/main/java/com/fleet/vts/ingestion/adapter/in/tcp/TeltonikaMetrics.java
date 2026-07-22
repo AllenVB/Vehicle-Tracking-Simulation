@@ -25,6 +25,9 @@ public class TeltonikaMetrics {
     private final Counter malformedPackets;
     private final Counter badClockRecords;
     private final Counter protocolErrors;
+    private final Counter commandsSent;
+    private final Counter commandResponses;
+    private final Counter unmatchedResponses;
     private final Timer lateness;
 
     public TeltonikaMetrics(MeterRegistry registry) {
@@ -42,6 +45,13 @@ public class TeltonikaMetrics {
                 .description("Records dropped: timestamp implausibly far from now").register(registry);
         this.protocolErrors = Counter.builder("device.protocol.errors")
                 .description("Sessions closed on a protocol error").register(registry);
+        this.commandsSent = Counter.builder("device.commands.sent")
+                .description("Codec 12 commands written to a device socket").register(registry);
+        this.commandResponses = Counter.builder("device.commands.answered")
+                .description("Command responses matched to the command that asked").register(registry);
+        this.unmatchedResponses = Counter.builder("device.commands.unmatched")
+                .description("Responses with no outstanding command (usually a timed-out one)")
+                .register(registry);
         this.lateness = Timer.builder("device.record.lateness")
                 .description("Age of the oldest record in a packet when it arrived")
                 .publishPercentiles(0.5, 0.95, 0.99)
@@ -74,6 +84,18 @@ public class TeltonikaMetrics {
 
     public Counter protocolErrors() {
         return protocolErrors;
+    }
+
+    public Counter commandsSent() {
+        return commandsSent;
+    }
+
+    public Counter commandResponses() {
+        return commandResponses;
+    }
+
+    public Counter unmatchedResponses() {
+        return unmatchedResponses;
     }
 
     public void recordLateness(Duration age) {

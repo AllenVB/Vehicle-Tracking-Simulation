@@ -59,6 +59,11 @@ services:
         create vehicle.trip
         create vehicle.notification
         create vehicle.rule.cache-invalidation 1
+        # Operatörden cihaza komut. Az partition, çünkü bu iş dağıtımı değil YAYIN:
+        # her ingestion örneği kendi grup kimliğiyle hepsini okur ve yalnızca soketini
+        # tuttuğu cihazınkine davranır. Anahtar imei -> bir cihazın komutları sıralı kalır.
+        create vehicle.command 3
+        create vehicle.command.dlq 3
         # Dead-letter topic per consumed topic, named by Topics.dlqFor(). Same partition
         # count: a dead letter keeps its original partition, so per-vehicle ordering
         # survives a replay. vehicle.telemetry.raw is the exception -- its dead letters

@@ -45,6 +45,15 @@ public final class Topics {
     public static final String RULE_CACHE_INVALIDATION = "vehicle.rule.cache-invalidation";
 
     /**
+     * Operator instructions for devices (Codec 12), consumed by every ingestion instance.
+     *
+     * <p>Broadcast, not partitioned work: only the instance holding that device's TCP session
+     * can act, and it is the only one that knows it. Consumers therefore use a per-instance
+     * group id rather than sharing one.
+     */
+    public static final String DEVICE_COMMAND = "vehicle.command";
+
+    /**
      * The dead-letter topic a record is routed to once its retries are exhausted.
      *
      * <p>The convention is {@code <topic>.dlq}. {@link #TELEMETRY_RAW} is the one
