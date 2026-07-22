@@ -5,6 +5,58 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 22 Temmuz 2026 (gece) — filo barı bir dizin olmaktan çıktı
+
+Kırk dakikalık bir kutu içinde, yalnızca arayüz. Backend'e hiç dokunulmadı — kullanılan
+verinin tamamı zaten istemcide duruyordu, yalnızca gösterilmiyordu. Yeni uç yok, yeni istek
+yok, tek imaj derlemesi.
+
+Sorun şuydu: liste bir **dizin** gibiydi. Her satır plaka + model metniydi ve 105 aracın
+hangisinin yolda, hangisinin park hâlinde, hangisinin sürücüsünün kötü puanlı olduğunu görmek
+için tek tek tıklamak gerekiyordu. Oysa `pos`, `journey` ve `driverScores` üçü de bellekteydi.
+
+Kararların birkaçı yazmaya değer:
+
+- **"durdu" ayrı bir durum.** Rotası var ama hızı sıfır olan araç durduruldu (röle kesildi),
+  deposu bitti ya da henüz kalkmadı. Üçü de "yolda" değil, ve üçünü "park" saymak da yanlış
+  olurdu — park bir varış, bu bir kesinti.
+- **Zaman "2 dk önce" oldu.** `14:07:33`, okunup şimdiki zamanla karşılaştırılacak bir sayıdır;
+  operatörün sorduğu soru "bu ne kadar yeni". Liste zaten en yeniden eskiye sıralı olduğu için
+  mutlak saat ikinci bir bilgi vermiyordu.
+- **Skorda çubuk var, çünkü sayı sıralamayı verir, çubuk ARAYI verir** — 9.4 ile 6.1
+  arasındaki fark iki basamağa bakmadan görünsün.
+- **Bakım KPI'si gecikmiş varsa kırmızı.** "16 bakım yaklaşıyor" ile "3'ü gecikmiş" aynı
+  aciliyet değil ve tek bir sayı ikisini birden söyleyemez.
+- **Lejant renkleri `TYPE_COLOR` ile birebir.** İlk yazdığımda yaklaşık renkler koymuştum;
+  yaklaşık renk, lejantı yanlış yapar — açıklamak için var olduğu şeyi yanlış açıklar.
+- Bu arada bir açık kapandı: sunucudan gelen metinler (plaka, sürücü adı, kural adı) artık
+  `esc()`'ten geçiyor. Önceden doğrudan `innerHTML`'e gidiyorlardı.
+
+**Ölçülen (DOM'dan, tarayıcıda):** KPI şeridi `105 / 105 / 1 / 8.0 / 16`; 105 satır, durum
+dağılımı 103 yolda + 2 park; örnek satır `VTS-001-Otomobil · → Malatya 186 km · 90 km/s · 8.5`
+ve tip noktası `#2b7fff` (= `TYPE_COLOR.CAR`); lejant 7 öğe; 5 skor çubuğu; 8 bakım satırı;
+ihlal satırları `sev-HIGH` sınıfı almış ve `0 sn önce` etiketi çalışıyor.
+
+### Ortam: buildkit iki kez daemon'ı düşürdü
+
+`docker compose up -d --build api-gateway` iki denemede de derlemenin ortasında koptu
+(`failed to receive status: rpc error: code = Unavailable desc = ... EOF`). Aradaki 22 dakika
+boyunca Docker API'si her isteğe 500 döndü.
+
+Üçüncü denemede beklemek yerine buildkit atlandı: jar yerelde derlendi
+(`mvn -pl vts-api-gateway package -DskipTests`), `docker cp` ile konteynere kondu, konteyner
+yeniden başlatıldı. Doğrulama bunun üzerinde yapıldı.
+
+> ⚠️ **Devralan için:** çalışan konteyner doğru kodu çalıştırıyor ama **imaj hâlâ eski**.
+> Kaynak commit'li (`4855bf5`), yani kalıcı bir sapma yok — ama konteyner bir kez yeniden
+> yaratılırsa (`docker compose up -d`, makine yeniden başlatma) arayüz eski hâline döner.
+> Docker toparladığında `docker compose up -d --build api-gateway` bunu kapatır.
+
+**Doğrulanamayan:** ekran görüntüsü. 527 markörle tarayıcı otomasyonu 30 saniyede zaman
+aşımına uğruyor. Yukarıdaki her şey DOM'dan okundu; pikseller insan gözüyle görülmedi.
+
+---
+
 ## 22 Temmuz 2026 (akşam) — dört işlevsel özellik
 
 Kullanıcı "işlevsel bir şeyler ekleyelim" dedi ve dördünü birden istedi. Dördü de kodlandı,
