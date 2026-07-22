@@ -207,6 +207,52 @@
                    border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12.5px; }
         #zoneHint { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
         #mapCtrl.drawing { cursor: cell; }
+
+        /* ── Filo barı: satırlar artık tek bakışta okunuyor ──
+           Önceki hâlinde her satır plaka + model metniydi; 105 aracın hangisinin yolda,
+           hangisinin park hâlinde, hangisinin sürücüsünün kötü puanlı olduğunu görmek için
+           tek tek tıklamak gerekiyordu. Şimdi bunlar satırın kendisinde. */
+        #vehicleList .row { display: flex; align-items: center; gap: 8px; }
+        .tdot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, #64748b);
+                box-shadow: 0 0 0 2px color-mix(in srgb, var(--c, #64748b) 28%, transparent);
+                flex: 0 0 auto; }
+        .vinfo { flex: 1; min-width: 0; }
+        .vinfo b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .vstate { font-size: 9px; padding: 2px 6px; border-radius: 8px; white-space: nowrap;
+                  background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+        .vstate.moving { color: #7fd4b4; border-color: rgba(93,202,165,.35); }
+        .vstate.parked { color: #f0c078; border-color: rgba(240,192,120,.35); }
+        .vstate.waiting { color: #9aa7b4; }
+        .vstate.stopped { color: #ff9b9b; border-color: rgba(226,75,74,.45); }
+        .vscore { font-weight: 700; font-size: 12px; min-width: 26px; text-align: right; }
+
+        /* Sürücü skorunda çubuk: sayı sıralamayı verir, çubuk ARAYI verir --
+           9.4 ile 6.1 arasındaki fark iki basamağa bakmadan görünsün. */
+        .scoreRow .nm { position: relative; }
+        .scbar { height: 3px; border-radius: 2px; background: var(--line); margin-top: 4px; overflow: hidden; }
+        .scbar i { display: block; height: 100%; border-radius: 2px; background: #5dcaa5; }
+        .scbar i.mid { background: #f0997b; }
+        .scbar i.bad { background: var(--alert); }
+
+        /* İhlal satırı: şiddet soldaki şeritte, zaman "kaç dakika önce" olarak.
+           Saat 14:07:33 okunup şimdiki zamanla karşılaştırılacak bir şey; "2 dk önce" değil. */
+        .alertRow.sev-CRITICAL { border-left-color: #ff4d4d; }
+        .alertRow.sev-HIGH { border-left-color: #ff8c42; }
+        .alertRow.sev-MEDIUM { border-left-color: #f5c518; }
+        .alertRow.sev-LOW { border-left-color: #7aa7c7; }
+
+        /* Boş durumlar: boş bir kutu "veri yok" ile "bozuk" arasında ayrım yapmaz. */
+        .empty { padding: 12px 14px; color: var(--muted); font-size: 11px; font-style: italic; }
+
+        /* Harita lejantı: renklerin ne anlama geldiği haritanın üstünde yazsın,
+           README'de değil. */
+        #legend { position: absolute; left: 10px; bottom: 10px; z-index: 600; display: flex;
+                  flex-wrap: wrap; gap: 4px 10px; max-width: 320px; padding: 7px 10px;
+                  border-radius: 8px; background: rgba(15,23,32,.85); border: 1px solid var(--line);
+                  font-size: 10px; color: #cfd8e3; }
+        #legend span { display: flex; align-items: center; gap: 4px; }
+        #legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); display: block; }
+        #legend i.sq { border-radius: 2px; }
     </style>
 </head>
 <body>
@@ -221,16 +267,18 @@
         <div class="stat"><b id="statTotal">0</b><span>Araç</span></div>
         <div class="stat"><b id="statLive">0</b><span>Canlı</span></div>
         <div class="stat"><b id="statAlerts">0</b><span>İhlal</span></div>
+        <div class="stat"><b id="statScore">–</b><span>Ort. puan</span></div>
+        <div class="stat"><b id="statMaint">–</b><span>Bakım</span></div>
     </div>
 
     <div class="sect">Araçlar</div>
     <div id="vehicleList"></div>
 
     <div class="sect">Sürücü skorları <span style="text-transform:none;color:var(--muted)">(30 gün)</span></div>
-    <div id="scoreList"></div>
+    <div id="scoreList"><div class="empty">Puanlanmış sefer bekleniyor…</div></div>
 
     <div class="sect">Canlı ihlaller · toplam ceza <span id="fineTotal">0 ₺</span></div>
-    <div id="alertList"></div>
+    <div id="alertList"><div class="empty">Henüz ihlal yok — filo limitler içinde.</div></div>
 
     <div id="ctrl">
         <div class="hint">
@@ -266,12 +314,21 @@
     </div>
 
     <div class="sect">Bakım <span id="maintCount" style="text-transform:none;color:var(--muted)"></span></div>
-    <div id="maintList"></div>
+    <div id="maintList"><div class="empty">Yaklaşan bakım yok.</div></div>
 </aside>
 
 <div class="mapWrap">
     <div class="maplabel">CANLI FİLO · OpenStreetMap</div>
     <div id="mapLive" class="map"></div>
+    <div id="legend">
+        <span><i style="--c:#2b7fff"></i>Otomobil</span>
+        <span><i style="--c:#f5b301"></i>Tır</span>
+        <span><i style="--c:#f8fafc"></i>Motor</span>
+        <span><i style="--c:#a855f7"></i>Helikopter</span>
+        <span><i class="sq" style="--c:#e24b4a"></i>Yasak bölge</span>
+        <span><i class="sq" style="--c:#5dcaa5"></i>İzinli bölge</span>
+        <span><i style="--c:#ffd27f"></i>Oynatılan sefer</span>
+    </div>
     <div id="replayBar">
         <button id="replayPlay">⏸</button>
         <input id="replayRange" type="range" min="0" max="0" value="0"/>

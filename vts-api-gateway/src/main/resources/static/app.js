@@ -123,6 +123,7 @@
 
         loadMaintenance();
         setInterval(loadMaintenance, 60000);
+        setInterval(refreshAgoLabels, 20000);
     }
 
     function initMaps() {
@@ -153,7 +154,12 @@
             const row = document.createElement("div");
             row.className = "row";
             row.dataset.vid = v.id;
-            row.innerHTML = `<b>${v.plate}</b><div class="meta" data-model="${vehicles.get(v.id).model}">${vehicles.get(v.id).model}</div>`;
+            const model = vehicles.get(v.id).model;
+            row.innerHTML =
+                `<span class="tdot" style="--c:${TYPE_COLOR[v.type] || "#64748b"}"></span>` +
+                `<span class="vinfo"><b>${esc(v.plate)}</b>` +
+                `<div class="meta" data-model="${esc(model)}">${esc(model)}</div></span>` +
+                `<span class="vstate"></span><span class="vscore"></span>`;
             row.addEventListener("click", () => { document.getElementById("plateNo").value = no; select(v.id); });
             el.appendChild(row);
         });
@@ -679,11 +685,49 @@
         } catch (_) { /* yoksay */ }
     }
 
+    /**
+     * Filo barındaki satırları tazeler: hedef metni, durum rozeti ve sürücü puanı.
+     *
+     * Üç saniyede bir 105 satır dolaşılıyor. Bunu haklı çıkaran şey, aynı bilgiyi görmek
+     * için önceden araç araç tıklamak gerekmesiydi — liste bir dizin değil, filonun
+     * durumuydu ve öyle görünmüyordu.
+     */
     function renderJourneyMeta() {
         document.querySelectorAll("#vehicleList .row").forEach(row => {
-            const j = journey.get(Number(row.dataset.vid));
+            const id = Number(row.dataset.vid);
+            const j = journey.get(id);
             const meta = row.querySelector(".meta");
             if (meta) meta.textContent = journeyText(j) || meta.dataset.model || "";
+
+            const state = row.querySelector(".vstate");
+            if (state) {
+                const p = pos.get(id);
+                const speed = p && p.speedKmh != null ? p.speedKmh : null;
+                let cls = "waiting", text = "rota bekliyor";
+                if (j && j.parked) {
+                    cls = "parked"; text = "park";
+                } else if (speed != null && speed > 0) {
+                    cls = "moving"; text = speed + " km/s";
+                } else if (speed === 0) {
+                    // Rotası var ama hızı sıfır: durduruldu, deposu bitti ya da henüz
+                    // kalkmadı. Hangi olursa olsun "yolda" demek yanlış olurdu.
+                    cls = "stopped"; text = "durdu";
+                }
+                state.className = "vstate " + cls;
+                state.textContent = text;
+            }
+
+            const score = row.querySelector(".vscore");
+            if (score) {
+                const veh = vehicles.get(id);
+                const d = veh && veh.driverId != null ? driverScores.get(veh.driverId) : null;
+                if (d && Number.isFinite(d.score)) {
+                    score.textContent = d.score.toFixed(1);
+                    score.style.color = d.score >= 8 ? "#5dcaa5" : d.score >= 6 ? "#f0997b" : "#e24b4a";
+                } else {
+                    score.textContent = "";
+                }
+            }
         });
     }
 
@@ -762,17 +806,35 @@
             refreshOpenPopups();
 
             const el = document.getElementById("scoreList");
-            el.innerHTML = "";
-            all.slice(0, 5).forEach((d, i) => {
-                const s = Number(d.score);
-                const cls = s >= 8 ? "good" : s >= 6 ? "mid" : "bad";
-                const row = document.createElement("div");
-                row.className = "row scoreRow";
-                row.innerHTML = `<span class="rank">${i + 1}</span>` +
-                    `<span class="nm">${d.name}<div class="meta">${d.distanceKm} km · ${d.violationCount} ihlal</div></span>` +
-                    `<span class="sc ${cls}">${s.toFixed(1)}</span>`;
-                el.appendChild(row);
-            });
+            if (!all.length) {
+                el.innerHTML = '<div class="empty">Puanlanmış sefer bekleniyor…</div>';
+            } else {
+                el.innerHTML = "";
+                all.slice(0, 5).forEach((d, i) => {
+                    const s = Number(d.score);
+                    const cls = s >= 8 ? "good" : s >= 6 ? "mid" : "bad";
+                    const row = document.createElement("div");
+                    row.className = "row scoreRow";
+                    row.innerHTML = `<span class="rank">${i + 1}</span>` +
+                        `<span class="nm">${esc(d.name)}` +
+                        `<div class="meta">${d.distanceKm} km · ${d.violationCount} ihlal</div>` +
+                        `<div class="scbar"><i class="${cls === "good" ? "" : cls}" style="width:${s * 10}%"></i></div>` +
+                        `</span>` +
+                        `<span class="sc ${cls}">${s.toFixed(1)}</span>`;
+                    el.appendChild(row);
+                });
+            }
+
+            // Filo ortalaması. Tabloda ilk beş görünüyor, ama "filo nasıl gidiyor"
+            // sorusunun cevabı ilk beş değil hepsi.
+            const avg = all.length
+                ? all.reduce((sum, d) => sum + Number(d.score), 0) / all.length : null;
+            const kpi = document.getElementById("statScore");
+            if (kpi) {
+                kpi.textContent = avg == null ? "–" : avg.toFixed(1);
+                kpi.style.color = avg == null ? "" : avg >= 8 ? "#5dcaa5" : avg >= 6 ? "#f0997b" : "#e24b4a";
+            }
+            renderJourneyMeta();
         } catch (_) { /* yoksay */ }
     }
 
@@ -802,12 +864,16 @@
         }
         const veh = vehicles.get(v.vehicleId);
         const el = document.getElementById("alertList");
+        const placeholder = el.querySelector(".empty");
+        if (placeholder) placeholder.remove();
+
         const row = document.createElement("div");
-        row.className = "row alertRow";
-        const time = v.occurredAt ? new Date(v.occurredAt).toLocaleTimeString("tr-TR") : "";
+        row.className = "row alertRow sev-" + (v.severity || "MEDIUM");
         row.innerHTML =
-            `<div class="ar-top"><span class="code">${rule.tr || v.ruleCode}</span><span class="fine">${tl(rule.fine)}</span></div>` +
-            `<div class="meta">${v.ruleCode} · ${veh ? veh.plate : "#" + v.vehicleId} · ${time}</div>`;
+            `<div class="ar-top"><span class="code">${esc(rule.tr || v.ruleCode)}</span>` +
+            `<span class="fine">${tl(rule.fine)}</span></div>` +
+            `<div class="meta">${esc(veh ? veh.plate : "#" + v.vehicleId)} · ` +
+            `<span class="ago" data-at="${v.occurredAt || ""}">${ago(v.occurredAt)}</span></div>`;
         row.addEventListener("click", () => select(v.vehicleId));
         el.prepend(row);
         while (el.children.length > 40) el.removeChild(el.lastChild);
@@ -910,6 +976,19 @@
             if (!res.ok) return;
             const rows = await res.json();
             document.getElementById("maintCount").textContent = rows.length ? `(${rows.length})` : "(yok)";
+            const overdue = rows.filter(m => m.overdue).length;
+            const kpi = document.getElementById("statMaint");
+            if (kpi) {
+                kpi.textContent = rows.length;
+                // Gecikmiş varsa sayı kırmızı: "16 bakım yaklaşıyor" ile "3'ü gecikmiş"
+                // aynı aciliyet değil.
+                kpi.style.color = overdue > 0 ? "#e24b4a" : rows.length ? "#f0997b" : "";
+            }
+            if (!rows.length) {
+                document.getElementById("maintList").innerHTML =
+                    '<div class="empty">Yaklaşan bakım yok.</div>';
+                return;
+            }
             document.getElementById("maintList").innerHTML = rows.slice(0, 8).map(m => {
                 const detail = m.remainingKm != null
                     ? (m.remainingKm <= 0 ? `${-m.remainingKm} km gecikmiş` : `${m.remainingKm} km kaldı`)
@@ -1094,6 +1173,29 @@
         document.getElementById("zoneBtn").style.display = "block";
         document.getElementById("routeBtn").style.display = selected != null ? "block" : "none";
         if (selected != null) ctrl.doubleClickZoom.disable(); else ctrl.doubleClickZoom.enable();
+    }
+
+    /**
+     * "2 dk önce" — mutlak saat yerine.
+     *
+     * 14:07:33 okunup şimdiki zamanla karşılaştırılacak bir sayıdır; operatörün sorduğu
+     * soru ise "bu ne kadar yeni". Liste zaten en yeniden eskiye sıralı, yani mutlak saat
+     * ikinci bir bilgi vermiyordu.
+     */
+    function ago(iso) {
+        if (!iso) return "";
+        const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+        if (sec < 60) return sec + " sn önce";
+        const min = Math.round(sec / 60);
+        if (min < 60) return min + " dk önce";
+        return Math.round(min / 60) + " sa önce";
+    }
+
+    /** Açık ihlal satırlarının "önce" etiketlerini tazeler. */
+    function refreshAgoLabels() {
+        document.querySelectorAll("#alertList .ago").forEach(el => {
+            el.textContent = ago(el.dataset.at);
+        });
     }
 
     /** Sunucudan gelen metni HTML'e koymadan önce kaçır. */
