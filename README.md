@@ -60,11 +60,11 @@ UI'ın tamamı tek serviste (gateway) barınır — ikinci bir frontend servisi 
 ```mermaid
 flowchart TB
     subgraph KAYNAK["1 - Kaynak"]
-        SIM["vts-simulator :8085<br/>100 araç · 81 il<br/>OSRM gerçek yol rotaları<br/>Virtual Threads<br/>(konumların TEK kaynağı)"]
+        SIM["vts-simulator :8085<br/>100 araç · 81 il<br/>OSRM gerçek yol rotaları<br/>Virtual Threads · cihaz emülatörü<br/>(konumların TEK kaynağı)"]
     end
 
     subgraph GIRIS["2 - Giriş"]
-        ING["vts-ingestion :8081<br/>imei→vehicle lookup<br/>stateless · DLQ"]
+        ING["vts-ingestion :8081 + tcp/5027<br/>Codec 8/8E ayrıştırma · IMEI el sıkışması<br/>imei→vehicle lookup<br/>stateless · DLQ"]
     end
 
     K{{"Apache Kafka · 24 partition<br/>key = vehicleId"}}
@@ -89,7 +89,7 @@ flowchart TB
 
     UI -.->|"araç konumunu ez<br/>(vehicleId)"| GW
     GW -.->|"proxy: /api/control<br/>(imei index'e çevirir)"| SIM
-    SIM -->|"POST /telemetry/batch"| ING
+    SIM -->|"ikili AVL paketi (TCP)<br/>· HTTP yolu da açık"| ING
     ING -->|"vehicle.telemetry.raw"| K
     K --> PROC
     K --> STR
@@ -131,9 +131,10 @@ Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında
 
 | Modül | Port | Sorumluluk |
 |---|---|---|
-| `vts-common` | — | Event modelleri, topic sabitleri, enum'lar, TenantContext, ortak Kafka tüketici desteği (deserialization + retry/DLQ politikası) |
-| `vts-simulator` | 8085 | Filo simülatörü (Virtual Threads), OSRM yol rotaları, konum override API'si (UI sunmaz) |
-| `vts-ingestion-service` | 8081 | Stateless HTTP giriş; imei→vehicle lookup (Caffeine→Redis→DB), Kafka publish, DLQ |
+| `vts-common` | — | Event modelleri, topic sabitleri, enum'lar, TenantContext, ortak Kafka tüketici desteği (deserialization + retry/DLQ politikası), **Teltonika Codec 8/8E kodek'i** |
+| `vts-test-support` | — | Testcontainers yardımcıları: migrasyonlu TimescaleDB, Kafka, Redis. Yalnızca test bağımlılığı |
+| `vts-simulator` | 8085 | Filo simülatörü (Virtual Threads), OSRM yol rotaları, **cihaz emülatörü** (ikili TCP + tampon), konum override API'si (UI sunmaz) |
+| `vts-ingestion-service` | 8081 · **5027** | İki giriş: HTTP/JSON ve **ham TCP (Teltonika Codec 8/8E)**; imei→vehicle lookup (Caffeine→Redis→DB), Kafka publish, DLQ |
 | `vts-processing-service` | 8082 | Batch consumer; JDBC batch insert, durumsuz kurallar **+ ihlal cooldown**, outbox |
 | `vts-stream-analytics` | 8083 | Kafka Streams; durumlu kurallar (sert fren, sürekli hız, rölanti, geofence, trip) |
 | `vts-notification-service` | 8084 | Strategy sender'lar, cooldown (Redis), quiet hours |
@@ -283,6 +284,95 @@ kapsam, tek puan artık bu olduğu için genişletilmeyi bekliyor.
 
 ---
 
+## Cihaz protokolü (Teltonika Codec 8 / 8E)
+
+Sistem uzun süre dört varsayımla yaşadı: **cihaz HTTP konuşur, veri JSON'dur, cihaz hep
+çevrimiçidir, veri sıralı gelir.** Dördü de yanlıştı; dördü de doğru göründü, çünkü tek
+kaynak ölçümü yaptığı anda gönderen bir simülatördü. Gerçek bir tracker ham TCP konuşur,
+ikili paket basar, kapsama dışında kalır ve döndüğünde saatlik geçmişini tek seferde boşaltır.
+
+Artık ingestion'ın **iki kapısı** var ve ikisi de aynı uygulama çekirdeğine giriyor:
+
+| Kanal | Ne için |
+|---|---|
+| `POST :8081/api/v1/telemetry/batch` (JSON) | Yazılım olan her şeyin sözleşmesi — değişmedi |
+| **`tcp/5027`** (ikili Codec 8/8E) | Donanımın konuştuğu dil |
+
+```
+cihaz → [uzunluk][IMEI ascii]        →  sunucu → 0x01 kabul / 0x00 ret
+cihaz → [0000][uzunluk][codec][n][kayıtlar][n][CRC16]
+                                     →  sunucu → 4 bayt: alınan kayıt sayısı
+```
+
+**ACK protokolün tamamıdır.** Cihaz, sunucu sayıyı onaylayana kadar hiçbir kaydı silmez;
+onaylanmayanı yeniden gönderir. Bu yüzden ACK **ayrıştırılan** kayıt sayısını bildirir, iş
+kabulünü değil: bilinmeyen bir araca ait kaydı "almadım" saymak, cihazı aynı kaydı emekli
+olana kadar yeniden göndermeye zorlardı. Buna karşılık CRC'si tutmayan paket **hiç
+onaylanmaz** — bozuk bir iletimi almış gibi yapmak kayıtları temelli kaybettirir.
+
+Kodek `vts-common`'da, çünkü iki modülün aynı tel biçimine ters yönlerden ihtiyacı var:
+ingestion çözer, simülatör üretir. İki yerde yazılsa birbirinden kayardı ve kayma bir cihaz
+hatası gibi görünürdü. Çözücü **Teltonika'nın kendi belgelenmiş örnek paketine** karşı
+doğrulanıyor — yalnızca kendi üreticimize karşı değil; yoksa iki taraf aynı yanlışta anlaşır
+ve test bunu göremez.
+
+### Simülatör artık bir cihaz filosu
+
+Her araç kendi TCP oturumunu ve kendi **flash tamponunu** taşıyan bir emülatör. Gönderemediği
+ölçümü kaybetmez, biriktirir (varsayılan 3600 kayıt ≈ 1 saat) ve bağlantı dönünce tek pakette
+boşaltır. Böylece "simülatör ayakta" ile "platform o araçtan veri alıyor" aynı cümle olmaktan
+çıkar.
+
+```bash
+# Bir cihazı 10 dakika sustur: kaydetmeye devam eder, göndermez
+docker run --rm --network vehicle-tracking-simulation_default curlimages/curl:8.11.1   -s -X POST "http://simulator:8085/api/device/000000000000007/silence?seconds=600"
+
+# Tampon derinliği
+docker run --rm --network vehicle-tracking-simulation_default curlimages/curl:8.11.1   -s http://simulator:8085/api/device/status
+```
+
+Ölçüm için: `device.record.lateness` (ölçümün alındığı an ile kaydedildiği an arasındaki
+fark), `device.emulator.buffered`, `device.packets.malformed`.
+
+---
+
+## Olay zamanı (event time)
+
+Cihaz kanalı olmadan bu bölüm gereksizdi; cihaz kanalıyla birlikte **zorunlu** oldu. B'yi
+yapıp bunu yapmamak, sistemi gerçekçi veriyle **sessizce yanlış** çalıştırmaktı.
+
+Kafka'nın kayıt zaman damgasını üretici yazar — bu hatta ingestion zamanı. Tamponunu boşaltan
+bir cihazın iki saatlik geçmişi, varsayılan çıkarıcıyla "şimdi olmuş" sayılır. Sonucu üç
+cümlede: yolculuk **ortasından kapanır**, 09:00 penceresi 11:00 kayıtlarıyla dolar, salı günü
+işlenen ihlal **çarşambaya** yazılır. Hiçbiri hata vermez.
+
+`EventTimeExtractor` akış zamanını olayın kendi anına bağlar. Bunun üstüne iki ayar:
+
+| Ayar | Değer | Neden |
+|---|---|---|
+| `vts.analytics.event-time.grace` | 15 dk | Pencere kapandıktan sonra gelen ölçüme tanınan süre. **Bedeli:** bastırılmış pencere tam bu kadar geç yayınlanır. |
+| `vts.analytics.event-time.trip-close-grace` | 15 dk | Akış zamanı bütün araçların ölçümüyle ilerler; kapsama boşluğundaki bir cihazın sessizliği park etmiş araçtan ayırt edilemez. Punctuator bu kadar bekler. |
+
+**Ölçülen fark (`EventTimeTopologyTest`):** 10 dakika susup sonra tamponunu boşaltan bir
+cihazın yolculuğu, grace ile **tek trip**; grace olmadan `ONGOING → CLOSED → ONGOING`. Yani
+bir sefer ikiye bölünür, mesafe ikiye ayrılır ve iki puan birden yanlış çıkar.
+
+Grace'ten geç gelen ölçüm kaybolmaz: veritabanına, trip'e ve panolara girer; **yalnızca
+pencereli kuralı** kaçırır.
+
+Üç yer daha zamanı geriye almayı reddediyor:
+- `vehicle_last_position` UPSERT'i (`WHERE ts <= EXCLUDED.ts`) — zaten vardı.
+- **Canlı harita** (`LiveMapState`): eski bir ölçüm işareti geri taşımaz. Aksi halde dönen
+  cihazın markörü bir saat öncesine sıçrayıp yeniden sürünürdü.
+- **Konum önbelleği**: 1 dakikadan eski ölçüm "şimdiki konum" sayılmaz (`telemetry.late`).
+
+`telemetry_1min` ve `telemetry_hourly` zaten olay zamanıyla (`ts`) kovalanıyordu; eksik olan,
+geç gelen satırın kovayı **yeniden hesaplatabileceği** refresh penceresiydi (V31: 3 saat → 1
+gün, 3 gün → 7 gün). Genişletmek ucuz: TimescaleDB yalnızca geçersizlenen aralığı yeniden
+üretir.
+
+---
+
 ## Ölçek kısıtları (baştan doğru kurulan kararlar)
 
 1. **Telemetri tekil `save()` ile yazılmaz** — batch Kafka consumer + `JdbcTemplate.batchUpdate()` + `ON CONFLICT DO NOTHING`; telemetri için JPA entity yok; `reWriteBatchedInserts=true`.
@@ -349,8 +439,8 @@ Ardından tarayıcıdan:
 | Grafana | http://localhost:3000 | `admin` / `admin` |
 | Jaeger (dağıtık izleme) | http://localhost:16686 | — |
 
-Diğer portlar: ingestion 8081, processing 8082, stream-analytics 8083,
-notification 8084, scheduler 8086, **Postgres 5433**, Redis 6379.
+Diğer portlar: ingestion 8081 (**+ cihaz kanalı tcp/5027**), processing 8082,
+stream-analytics 8083, notification 8084, scheduler 8086, **Postgres 5433**, Redis 6379.
 
 > Postgres host portu **5433**'tür (5432'de çalışan yerel bir PostgreSQL ile
 > çakışmasın diye). Servisler kendi aralarında `postgres:5432` kullanmaya devam eder.
@@ -423,16 +513,54 @@ Gateway, `vehicleId`'yi imei üzerinden simülatörün cihaz index'ine çevirir;
 
 ---
 
-## Test
-
-- **Kafka Streams:** `TopologyTestDriver` (harsh braking, idling, geofence enter/exit, trip).
-- **Birim testler:** kural motoru **+ ihlal cooldown penceresi**, ingestion routing, notification cooldown/quiet-hours, JWT, live-map delta+viewport, simülatör hareketi ve hız modeli.
-- **Şema doğrulama:** JPA entity'ler canlı TimescaleDB'ye karşı `ddl-auto=validate` (Testcontainers).
-- **Uçtan uca:** simulator → Kafka → DB akışı gerçek konteynerlerde doğrulandı (telemetri, last position, ihlaller, tip bazlı eşik override'ı, şoför atfı, operatör override'ının ana haritaya yansıması).
+## Test ve CI
 
 ```bash
-mvn test
+mvn test      # yalnızca birim testler, Docker gerekmez
+mvn verify    # + entegrasyon testleri (Testcontainers), CI'ın çalıştırdığı komut
 ```
+
+Her push'ta GitHub Actions `mvn verify` koşar (`.github/workflows/ci.yml`). jacoco rapor
+üretir; **eşik dayatmaz** — sıfıra yakın başlayan bir kod tabanında kapsam kapısı ya her
+build'i kırar ya da hiçbir şey söylemeyecek kadar düşük tutulur.
+
+### Neden bu zemin kuruldu
+
+Son dönemde iki gerçek hata üretime kadar gitti ve **yalnızca elle deploy edilip loglara
+bakıldığı için** yakalandı. İkisi de derlemeden ve birim testlerden geçmişti:
+
+| Hata | Neden görünmedi | Şimdi ne yakalıyor |
+|---|---|---|
+| Scheduler 57 kez çöktü — `vts-common`'ın ortak error handler'ı `KafkaTemplate<String, Object>` istiyordu; scheduler yalnızca üretici ve `<String, String>` tutuyor | **Hiçbir test Spring context'i açmıyordu** | `SchedulerContextIT` |
+| V22 migration'ı patladı — `scope_type` VARCHAR(10) iken 12 karakterlik `VEHICLE_TYPE` yazılıyordu | Geliştirme veritabanında sütun zaten genişletilmişti; hata **yalnızca temiz şemada** görünüyor | `FlywayMigrationIT` |
+
+**Kanıtlandı:** iki hata kasten geri konduğunda build kırmızı oluyor —
+`SchedulerContextIT` → `No qualifying bean of type KafkaTemplate<String, Object>`,
+`FlywayMigrationIT` → `V22 ... value too long for type character varying(10)`. Sonra geri alındı.
+
+### Ne var
+
+- **Context testi (7 servis):** her servisin bean grafiği gerçek Postgres/Kafka/Redis'e karşı
+  açılıyor. `mvn verify` süresi ~5 dk.
+- **`FlywayMigrationIT`:** 31 migration, migrasyonu **hiç görmemiş** bir TimescaleDB'ye.
+  Yeniden kullanılmayan konteyner bilinçli: migrasyonlu bir veritabanı "0 uygulandı" deyip
+  hiçbir şey kanıtlamadan geçerdi.
+- **`Codec8CodecTest`:** çözücü, Teltonika'nın **belgelenmiş örnek paketine** karşı.
+- **`TeltonikaTcpIT`:** soketten Codec 8E → Kafka. 2 saat gecikmeli, sırasız kayıtların zaman
+  damgaları korunuyor.
+- **`EventTimeTopologyTest`:** grace'li ve grace'siz aynı girdi — fark iddia değil, assertion.
+- **`GatewayContextIT`:** `ddl-auto=validate` ile şema doğrulaması (eski `SchemaValidationTest`
+  aynı soruyu soruyordu ama yalnızca biri elle veritabanı başlatıp `-Dvts.itest=true`
+  verdiğinde çalışıyordu — yani hiç).
+- **Kafka Streams:** `TopologyTestDriver` (sert fren, rölanti, geofence, trip).
+- **Birim testler:** kural motoru + ihlal cooldown'ı, ingestion routing, notification
+  cooldown/quiet-hours, JWT, live-map delta+viewport, simülatör hareket ve hız modeli.
+
+> **Windows/Docker tuzağı:** Docker Engine 29, API 1.44'ün altını reddediyor; Testcontainers'ın
+> içindeki docker-java hâlâ 1.32 istiyor ve el sıkışma çıplak bir HTTP 400 ile düşüyor —
+> Testcontainers bunu "no valid Docker environment" diye raporluyor, yani gerçek sebebin
+> yanından bile geçmiyor. Kök pom `api.version`'ı 1.44'e sabitliyor (`-Ddocker.api.version=...`
+> ile değiştirilebilir).
 
 ---
 
@@ -440,8 +568,18 @@ mvn test
 
 Micrometer + Prometheus + Grafana. Metrikler: `telemetry.ingested`,
 `telemetry.persisted`, `violation.produced`, `notification.sent`, consumer lag,
-DLQ oranı. Grafana'da hazır **"VTS — Fleet Telematics Overview"** dashboard'u
-otomatik yüklenir. Her olayda `correlationId` ile yapılandırılmış JSON log.
+DLQ oranı; cihaz kanalı için `device.connections`, `device.records`,
+`device.record.lateness`, `device.packets.malformed`, `device.emulator.buffered`.
+Grafana'da hazır **"VTS — Fleet Telematics Overview"** dashboard'u otomatik yüklenir.
+Her olayda `correlationId` ile yapılandırılmış JSON log.
+
+> **Dürüst sınır — üç servisin metriği toplanmıyor.** Prometheus hedeflerinden üçü `down`:
+> `vts-processing-service:8082`, `vts-stream-analytics:8083`, `vts-scheduler-service:8086`.
+> Bu üçünde `spring-boot-starter-web` yok, dolayısıyla actuator'ın asacağı bir HTTP sunucusu
+> da yok — port eşlemesi compose'da duruyor ama arkasında dinleyen bir şey yok. Yani
+> `telemetry.persisted`, `violation.produced`, `telemetry.late` ve `telemetry.lateness`
+> **üretiliyor ama okunamıyor.** Ölçülen: `/api/v1/targets` → 5 up, 3 down.
+> Ayakta olanlar: ingestion, notification, gateway, simulator.
 
 ### Dağıtık izleme (Jaeger)
 

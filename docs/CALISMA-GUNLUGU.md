@@ -5,6 +5,165 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 22 Temmuz 2026
+
+İki commit. Konu: testin ve CI'ın hiç olmaması, cihazın gerçekte ne konuştuğu, ve ikincisinin
+birincisi olmadan sistemi **sessizce yanlış** hale getirmesi.
+
+### 1. Test zemini ve CI — `4796efb`
+
+225 ana dosyaya karşı 10 test dosyası vardı, CI yoktu ve **hiçbir test Spring context'i ayağa
+kaldırmıyordu**. Bu son cümle diğer ikisinden daha önemliydi.
+
+Geçen hafta üretime iki hata gitti; ikisi de yalnızca elle deploy edilip loglara bakıldığı
+için yakalandı. İkisi de derlemeden ve birim testlerden **geçmişti**:
+
+- `vts-common`'a konan ortak error handler `KafkaTemplate<String, Object>` istiyordu.
+  Scheduler yalnızca üretici ve `<String, String>` tutuyor. `@ConditionalOnBean` ham tipe
+  bakıp geçti, jenerik enjeksiyon uymadı, servis **57 kez** yeniden başlayıp çöktü.
+- V22 migration'ı `scope_type` VARCHAR(10) iken 12 karakterlik `VEHICLE_TYPE` yazıyordu.
+  Geliştirme veritabanında sütun daha önceki bir denemede zaten genişletilmişti; hata
+  **yalnızca temiz bir şemada** görünüyor.
+
+Ortak yanları: bir tanesi bile "bean grafiğini bir kez aç" ya da "migration'ları boş bir
+veritabanına uygula" diyen bir testle yakalanırdı. Yazılan tam olarak bu ikisi.
+
+**Migrasyonlar kopyalanmadı.** Şemanın sahibi gateway, ama şemayı okuyan her servisin
+testinde ona ihtiyacı var. SQL'i kopyalamak, kopyalanması unutulan ilk migration'da kayardı;
+`vts-test-support` onları gateway modülünden **diskten** okuyor. Bu yalnızca bir monorepo'da
+mümkün — ki burası öyle.
+
+**Postgres imajı compose'unkiyle aynı** (`timescale/timescaledb-ha:pg16`). Farklı bir
+Postgres'e karşı geçen bir context testi, üretimin sorduğundan daha kolay bir soruya cevap
+vermiş olurdu: PostGIS ve TimescaleDB burada taşıyıcı, tesadüfi değil.
+
+**Flyway testi bilinçli olarak yeniden kullanılmayan bir konteyner alıyor.** Paylaşılan,
+migrasyonlu bir veritabanı "0 migration uygulandı" deyip yeşil yanar ve hiçbir şey kanıtlamaz.
+
+`SchemaValidationTest` silindi. Aynı soruyu soruyordu ama `@EnabledIfSystemProperty` ile
+korunuyordu: yalnızca birisi elle veritabanı başlatıp `-Dvts.itest=true` verdiğinde. Yani hiç.
+
+**Kanıt.** İki hata kasten geri konup build çalıştırıldı:
+
+| Geri konan hata | Build çıktısı |
+|---|---|
+| `KafkaTemplate<?, ?>` → `<String, Object>` | `SchedulerContextIT`: *No qualifying bean of type `KafkaTemplate<String, Object>`* — üretimdeki hatanın aynısı |
+| V22'deki `ALTER COLUMN ... VARCHAR(20)` satırı silindi | `FlywayMigrationIT`: *Migration V22 failed — value too long for type character varying(10)*, satır 64 |
+
+Sonra ikisi de geri alındı. **Ölçülen:** `mvn verify` 4 dk 50 sn, tam reactor yeşil.
+
+Bir ortam tuzağı buradan çıktı: Docker Engine 29 API 1.44'ün altını reddediyor, docker-java
+hâlâ 1.32 istiyor, el sıkışma çıplak bir HTTP 400 ile düşüyor — ve Testcontainers bunu "no
+valid Docker environment" diye raporluyor, yani gerçek sebebin yanından bile geçmiyor. Kök pom
+`api.version`'ı sabitliyor.
+
+İkinci tuzak daha öğreticiydi: `mvn -pl vts-scheduler-service verify`, `vts-common`'ı **yerel
+depodaki 9 gün eski jar'dan** çözüyordu; auto-configuration hiç yüklenmiyordu ve test yanlış
+sebeple kırmızıydı. CI tam reactor'u kuruyor.
+
+### 2. Cihaz protokolü ve olay zamanı — `1115f36`
+
+Sistem dört varsayımla yaşıyordu: cihaz HTTP konuşur, veri JSON'dur, cihaz hep çevrimiçidir,
+veri sıralı gelir. Dördü de yanlış; dördü de doğru göründü, çünkü tek kaynak ölçümü yaptığı
+anda gönderen bir simülatördü.
+
+**Kodek `vts-common`'a kondu**, çünkü iki modülün aynı tel biçimine ters yönlerden ihtiyacı
+var: ingestion çözer, simülatör üretir. İki yerde yazılsaydı birbirinden kayardı ve kayma bir
+cihaz hatası gibi görünürdü. Çözücü **Teltonika'nın kendi belgelenmiş örnek paketine** karşı
+doğrulanıyor; yalnızca kendi üreticimize karşı test etmek, iki tarafın aynı yanlışta anlaşması
+ihtimalini test dışında bırakırdı.
+
+**ACK'in anlamı bir karar.** Cihaz, sunucu onaylayana kadar hiçbir kaydı silmez. ACK
+*ayrıştırılan* kayıt sayısını bildiriyor, iş kabulünü değil: bilinmeyen bir araca ait kaydı
+"almadım" saymak, cihazı aynı kaydı emekli olana kadar yeniden göndermeye zorlardı. Buna
+karşılık CRC'si tutmayan paket **hiç onaylanmıyor** — bozuk bir iletimi almış gibi yapmak
+kayıtları temelli kaybettirir.
+
+**Asıl iş buradan sonrası.** Cihaz kanalı tek başına sistemi çalışır hale getirmiyor,
+**sessizce yanlış** hale getiriyor. Tamponunu boşaltan bir cihazın iki saatlik geçmişi,
+Kafka'nın kayıt zaman damgasıyla "şimdi olmuş" sayılır: yolculuk ortasından kapanır, 09:00
+penceresi 11:00 kayıtlarıyla dolar, salı işlenen ihlal çarşambaya yazılır. Hiçbiri hata vermez.
+
+`EventTimeExtractor` akış zamanını olayın kendi anına bağlıyor. Üstüne iki grace:
+
+- **Pencere grace'i 15 dk.** Bedeli açık ve ölçülebilir: bastırılmış pencere tam bu kadar geç
+  yayınlanır. 15 dakika, emülatörün 1 saatlik tamponuna göre değil, "bundan uzun bir boşluk
+  artık bir kesintidir ve kayıtları uyarıya değil geçmişe aittir" kararına göre seçildi.
+- **Trip kapatma grace'i 15 dk.** Akış zamanı bütün araçların ölçümüyle ilerler; kapsama
+  boşluğundaki bir cihazın sessizliği park etmiş araçtan **ayırt edilemez**. Punctuator bu
+  kadar bekliyor. Not: bu yalnızca punctuator yolunu geciktiriyor — park edip hız 0 göndermeye
+  devam eden araç trip'ini yine 90 saniyede kapatıyor.
+
+**Ölçülen fark** (`EventTimeTopologyTest`, aynı girdi iki kez): 10 dk susup tamponunu
+boşaltan cihazın yolculuğu, grace ile **tek trip**; grace olmadan `ONGOING → CLOSED →
+ONGOING`. Bir sefer ikiye bölünür, mesafe ikiye ayrılır ve iki puan birden yanlış çıkar.
+
+Üç yer daha zamanı geriye almayı reddediyor. `vehicle_last_position`'ın UPSERT'inde zaten
+vardı; **canlı harita** ve **konum önbelleğine** eklendi. Aksi halde dönen cihazın markörü bir
+saat öncesine sıçrayıp yeniden sürünürdü — bu, ölçümlerin sahte olduğu anlamına gelmez;
+yalnızca "şimdiki konum" sorusuna geçmişle cevap verilmiş olurdu.
+
+Continuous aggregate'ler zaten olay zamanıyla (`ts`) kovalanıyordu; eksik olan, geç gelen
+satırın kovayı **yeniden hesaplatabileceği** refresh penceresiydi (V31). `materialized_only =
+false` bunu kurtarmıyor: gerçek zamanlı toplama, materyalizasyon işaretinden **sonraki** ham
+satırları birleştirir; işaretin gerisindeki delik delik kalır.
+
+### Ölçüm — yeniden derlenmiş yığın
+
+| Ne | Ölçülen |
+|---|---|
+| Konteyner | 15/15 ayakta, restart 0, OOM 0 |
+| Servis context'i | 7/7 `Started ...Application` |
+| Cihaz oturumu | **105 cihaz** ikili TCP ile bağlı (`tcp/5027`) |
+| Telemetri | son 60 sn'de **6195 ölçüm / 105 araç** |
+| İhlal (10 dk) | SPEED_LIMIT 26, HARSH_BRAKING 14, LOW_BATTERY 2 |
+| Helikopterde yol ihlali | Yeni **0**. Tablodaki 10 kayıt 16 Temmuz'dan, yani V22'den önce |
+| Trip | yeniden başlatmadan sonra 9 trip kapandı ve puanlandı |
+| Kafka lag | processing 74, gateway 29, notification 0, **stream-analytics 1337** |
+| DLQ | 5 topic, hepsi **0** |
+| Flyway | 31/31 başarılı |
+| Arayüz | Giriş sonrası "Bağlı · canlı", 105 ARAÇ / 105 CANLI; DOM'da 2 Leaflet haritası, 527 markör, 5 rota çizgisi |
+
+**Store-and-forward, ölçülmüş hâliyle:** cihaz 7 on dakika susturuldu.
+
+```
+08:31:12  sustur          → tampon 0
+08:33:34  tampon 141      → DB'deki son ölçüm 08:31:11'de donmuş, filo akmaya devam ediyor
+08:41:12  bağlantı döndü  → 5 paket × 120 kayıt, en eskisi 600 sn geç
+08:47:43  toplam          → sessizlik penceresine ait 604 kayıt, kendi zaman damgalarıyla
+          vehicle_last_position = 08:47:43 (şimdiki an) — geç yığın konumu geriye çekmedi
+          araç 7 için o pencerede kapanan trip: 0 (yolculuk bölünmedi)
+```
+
+### Sağlık taramasında çıkan, düzeltilmeyen sorun
+
+**Üç servisin metriği hiç toplanmıyor.** Prometheus hedeflerinin üçü `down`:
+`vts-processing-service:8082`, `vts-stream-analytics:8083`, `vts-scheduler-service:8086`.
+Sebep basit — bu üçünde `spring-boot-starter-web` yok, dolayısıyla actuator'ın asacağı bir HTTP
+sunucusu da yok. README'nin "Metrikler: `telemetry.persisted`, `violation.produced`…" cümlesi
+bu üçü için **hiçbir zaman doğru olmamış**.
+
+Bu turda düzeltilmedi: analytics'in belleği zaten 896 MB limitinin %87'sinde ve oraya bir
+Tomcat eklemek ölçmeden yapılacak bir şey değil. Bugün eklenen `telemetry.late` /
+`telemetry.lateness` sayaçları da aynı sebeple okunamıyor — bunu bilerek bırakıyorum, çünkü
+"metrik var" ile "metrik görülebiliyor" aynı şey değil.
+
+### Günün açık bıraktıkları
+
+- Yukarıdaki metrik boşluğu.
+- **stream-analytics lag'i** üç ölçümde 1798 → 1337 → 1532. Büyümüyor, sıfıra da inmiyor.
+  Beklenen davranış: Kafka Streams `at_least_once` ile 30 saniyede bir commit ediyor, saniyede
+  ~103 ölçümde bu tek başına ~3100'lük bir testere dişi demek. Yani gözlenen aralık bir birikme
+  değil, commit aralığının kendisi. Yine de değişiklik öncesi bir taban ölçümüm yok, bu yüzden
+  "aynı kaldı" değil "bu seviyede ve büyümüyor" diyebiliyorum.
+- Puana girmeyen ihlal türleri (`GEOFENCE_ENTER`, `SUSTAINED_SPEEDING`, `LOW_FUEL`,
+  `LOW_BATTERY`) — dünden devrediyor.
+- Batch dinleyicide kopan iz zinciri — dünden devrediyor.
+- Grace'ten (15 dk) daha geç gelen ölçüm pencereli kuralı kaçırıyor. Veritabanına, trip'e ve
+  panolara giriyor; kaybolmuyor. Ama bu bir seçim, kusursuzluk değil.
+
+---
+
 ## 21 Temmuz 2026
 
 Beş commit. Konu: yolculuk puanlaması, operatör taşıma davranışı ve dağıtık izleme.

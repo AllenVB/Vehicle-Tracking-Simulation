@@ -6,6 +6,9 @@ WORKDIR /app
 # Copy the POMs first so dependency resolution is cached across code changes.
 COPY pom.xml .
 COPY vts-common/pom.xml vts-common/
+# Testcontainers helpers: no runtime code, but it is a reactor module, so the reactor
+# refuses to resolve without its pom.
+COPY vts-test-support/pom.xml vts-test-support/
 COPY vts-simulator/pom.xml vts-simulator/
 COPY vts-ingestion-service/pom.xml vts-ingestion-service/
 COPY vts-processing-service/pom.xml vts-processing-service/
