@@ -31,6 +31,19 @@ spring:
 server:
   port: 8081
 
+vts:
+  ingestion:
+    # Gerçek cihaz kanalı: ham TCP, ikili Codec 8/8E, paket başına ACK.
+    # HTTP ucu kalıyor -- ikisi de aynı uygulama çekirdeğine giriyor.
+    teltonika:
+      enabled: ${TELTONIKA_ENABLED:true}
+      port: ${TELTONIKA_PORT:5027}
+      # Kapsama boşluğundan dönen cihaz tek pakette yüzlerce kayıt basar.
+      max-packet-bytes: 262144
+      # Tampon boşaltan cihaz boşluk boyunca susar; erken kapatmak
+      # store-and-forward'ı yeniden bağlanma fırtınasına çevirir.
+      idle-timeout: 30m
+
 management:
   endpoints:
     web:

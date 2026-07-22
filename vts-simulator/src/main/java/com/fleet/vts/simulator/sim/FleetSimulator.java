@@ -3,8 +3,10 @@ package com.fleet.vts.simulator.sim;
 import com.fleet.vts.simulator.config.SimulatorProperties;
 import com.fleet.vts.simulator.fuel.FuelLevelSource;
 import com.fleet.vts.simulator.fuel.FuelStations;
-import com.fleet.vts.simulator.ingestion.IngestionClient;
+import com.fleet.vts.simulator.ingestion.HttpTelemetryTransport;
 import com.fleet.vts.simulator.ingestion.TelemetryPayload;
+import com.fleet.vts.simulator.ingestion.TelemetryTransport;
+import com.fleet.vts.simulator.ingestion.TeltonikaTelemetryTransport;
 import com.fleet.vts.simulator.model.BehaviorProfile;
 import com.fleet.vts.simulator.model.GeoPoint;
 import com.fleet.vts.simulator.model.Journey;
@@ -63,7 +65,7 @@ public class FleetSimulator {
     private static final double GEOFENCE_ZONE_LON = 28.970;
 
     private final SimulatorProperties properties;
-    private final IngestionClient ingestionClient;
+    private final TelemetryTransport transport;
     private final RoadRoutes roadRoutes;
     private final FuelStations fuelStations;
     private final FuelLevelSource fuelLevelSource;
@@ -75,11 +77,16 @@ public class FleetSimulator {
     private double tickSeconds;
     private ScheduledExecutorService assigner;
 
-    public FleetSimulator(SimulatorProperties properties, IngestionClient ingestionClient,
+    public FleetSimulator(SimulatorProperties properties,
+                          HttpTelemetryTransport httpTransport,
+                          TeltonikaTelemetryTransport deviceTransport,
                           RoadRoutes roadRoutes, FuelStations fuelStations,
                           FuelLevelSource fuelLevelSource, MeterRegistry registry) {
         this.properties = properties;
-        this.ingestionClient = ingestionClient;
+        // Chosen here rather than by a conditional bean so the alternative is visible: both
+        // transports are always constructed, and switching is a property, not a redeploy.
+        this.transport = properties.getTransport() == SimulatorProperties.Transport.TELTONIKA
+                ? deviceTransport : httpTransport;
         this.roadRoutes = roadRoutes;
         this.fuelStations = fuelStations;
         this.fuelLevelSource = fuelLevelSource;
@@ -162,8 +169,8 @@ public class FleetSimulator {
         });
         this.assigner.scheduleWithFixedDelay(this::assignPending, 3, 3, TimeUnit.SECONDS);
 
-        log.info("Fleet initialised: {} vehicles across {} provinces, tick {}s",
-                vehicles.size(), TurkeyProvinces.ALL.size(), tickSeconds);
+        log.info("Fleet initialised: {} vehicles across {} provinces, tick {}s, transport {}",
+                vehicles.size(), TurkeyProvinces.ALL.size(), tickSeconds, transport.name());
     }
 
     @PreDestroy
@@ -327,7 +334,7 @@ public class FleetSimulator {
                 }
             }
         }
-        ingestionClient.sendBatch(readings);
+        transport.send(readings);
         sent.increment(readings.size());
     }
 
@@ -442,7 +449,7 @@ public class FleetSimulator {
         // Publish straight away instead of waiting for the next tick: otherwise the move
         // takes up to a full tick to enter the pipeline — most of the perceived latency.
         v.tick(0);
-        ingestionClient.sendBatch(List.of(toPayload(v)));
+        transport.send(List.of(toPayload(v)));
         sent.increment();
 
         result.put("moved", true);

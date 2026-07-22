@@ -36,6 +36,16 @@ management:
 vts:
   simulator:
     ingestion-base-url: http://localhost:8081
+    # HTTP mu, cihazın konuştuğu ikili protokol mü. Varsayılan HTTP: eski davranış
+    # kazara değişmesin. compose TELTONIKA seçer.
+    transport: ${VTS_SIMULATOR_TRANSPORT:HTTP}
+    teltonika:
+      host: ${VTS_SIMULATOR_TELTONIKA_HOST:localhost}
+      port: ${VTS_SIMULATOR_TELTONIKA_PORT:5027}
+      codec: "8E"
+      # Bir saatlik kapsama boşluğu (1 sn tick) tamponda tutulabilsin.
+      buffer-size: 3600
+      max-records-per-packet: 120
   # Fleet size and tick interval come ONLY from the active profile below,
   # never hard-coded in Java.
 

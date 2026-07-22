@@ -1,6 +1,7 @@
 package com.fleet.vts.analytics.topology;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fleet.vts.analytics.config.AnalyticsProperties;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
 import com.fleet.vts.analytics.rules.GeofenceRule;
 import com.fleet.vts.analytics.rules.HarshBrakingRule;
@@ -48,6 +49,7 @@ public class AnalyticsTopology {
     private static final double SUSTAINED_RATIO = 0.8;
 
     private final GeofenceRegistry geofenceRegistry;
+    private final AnalyticsProperties.EventTime eventTime;
     private final VehicleRuleRegistry rules;
     private final Serde<TelemetryEvent> telemetrySerde;
     private final Serde<ViolationEvent> violationSerde;
@@ -58,9 +60,10 @@ public class AnalyticsTopology {
     private final Serde<TripState> tripStateSerde;
 
     public AnalyticsTopology(GeofenceRegistry geofenceRegistry, VehicleRuleRegistry rules,
-                            ObjectMapper mapper) {
+                            ObjectMapper mapper, AnalyticsProperties properties) {
         this.geofenceRegistry = geofenceRegistry;
         this.rules = rules;
+        this.eventTime = properties.getEventTime();
         this.telemetrySerde = json(TelemetryEvent.class, mapper);
         this.violationSerde = json(ViolationEvent.class, mapper);
         this.geofenceSerde = json(GeofenceEvent.class, mapper);
@@ -99,7 +102,7 @@ public class AnalyticsTopology {
                 .to(Topics.GEOFENCE_EVENT, Produced.with(Serdes.String(), geofenceSerde));
 
         // Trips stay on the full stream: a flight is a trip, and a trip is not a violation.
-        raw.process(new TripRule(tripStateSerde))
+        raw.process(new TripRule(tripStateSerde, eventTime.getTripCloseGrace()))
                 .to(Topics.TRIP, Produced.with(Serdes.String(), tripSerde));
 
         // SUSTAINED_SPEEDING: 5-min TUMBLING window; fire once per window when
@@ -112,7 +115,11 @@ public class AnalyticsTopology {
         // 5 minutes per vehicle, matching the rule's cooldown_seconds (300).
         sustainedSpeeding.filter((k, e) -> e != null && e.speedKmh() != null)
                 .groupByKey(Grouped.with(Serdes.String(), telemetrySerde))
-                .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(5), Duration.ZERO))
+                // Grace was zero, which was correct only while event time and arrival time were
+                // the same thing. With a device channel they are not: a reading recorded at 09:58
+                // can arrive at 10:07, and with no grace it is silently dropped from the 09:55
+                // window it belongs to. The cost is that the window now emits that much later.
+                .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofMinutes(5), eventTime.getGrace()))
                 .aggregate(SpeedWindowAgg::empty,
                         (k, e, agg) -> agg.add(e, rules.speedLimit(k)),
                         Materialized.<String, SpeedWindowAgg, org.apache.kafka.streams.state.WindowStore<org.apache.kafka.common.utils.Bytes, byte[]>>

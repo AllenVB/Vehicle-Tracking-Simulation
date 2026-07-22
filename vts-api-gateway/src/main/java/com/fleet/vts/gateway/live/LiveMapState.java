@@ -21,7 +21,21 @@ public class LiveMapState {
     private final Set<Long> changed = ConcurrentHashMap.newKeySet();
     private final Map<String, Bbox> viewports = new ConcurrentHashMap<>();
 
+    /**
+     * Record a position, unless a newer one is already known.
+     *
+     * <p>The guard is what keeps the map honest now that readings can be old. A device back
+     * from a coverage gap delivers an hour of history at once; every one of those readings
+     * flows through the pipeline and reaches here, and without the check the marker would
+     * jump back to where the vehicle was an hour ago and then crawl forward again. The
+     * history is real and belongs in the database — it just is not "where the vehicle is".
+     */
     public void update(Position position) {
+        Position previous = latest.get(position.vehicleId());
+        if (previous != null && previous.ts() != null && position.ts() != null
+                && position.ts().isBefore(previous.ts())) {
+            return;
+        }
         latest.put(position.vehicleId(), position);
         changed.add(position.vehicleId());
     }

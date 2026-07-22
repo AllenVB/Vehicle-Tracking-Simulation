@@ -42,6 +42,12 @@
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
         </dependency>
+
+        <!-- Gercek cihazlar HTTP degil ham TCP konusur; ikili protokol icin Netty. -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
+        </dependency>
         <!-- DB fallback (read-only) for the imei -> vehicle lookup -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

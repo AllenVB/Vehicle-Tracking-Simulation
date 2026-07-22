@@ -96,4 +96,50 @@ public class SimulatorProperties {
      * refusing there is correct.
      */
     private double roadClickToleranceMeters = 50.0;
+
+    /**
+     * Which wire the fleet talks over: JSON/HTTP, or the binary Teltonika protocol a real
+     * tracker speaks. Defaults to HTTP so nothing that depended on it changes by accident;
+     * docker-compose selects TELTONIKA.
+     */
+    private Transport transport = Transport.HTTP;
+
+    /** Device-emulator settings, used only when {@link #transport} is TELTONIKA. */
+    private Teltonika teltonika = new Teltonika();
+
+    public enum Transport {
+        HTTP, TELTONIKA
+    }
+
+    @Getter
+    @Setter
+    public static class Teltonika {
+
+        /** Ingestion's TCP listener. */
+        private String host = "localhost";
+
+        private int port = 5027;
+
+        /** {@code 8} or {@code 8E}. Extended carries two-byte IO ids and is what newer FMBs use. */
+        private String codec = "8E";
+
+        /**
+         * How many readings a device holds while it cannot transmit.
+         *
+         * <p>This is what makes the emulator a device rather than a client: a real tracker
+         * out of coverage keeps recording to flash and empties it on reconnect. 3600 at one
+         * reading a second is an hour of silence — past that the oldest are dropped, which is
+         * also what the hardware does.
+         */
+        private int bufferSize = 3600;
+
+        /**
+         * Records per packet. The protocol allows 255; devices usually send fewer so that a
+         * failed packet costs less to resend.
+         */
+        private int maxRecordsPerPacket = 120;
+
+        /** Socket connect and read timeout. The ACK is the only thing ever read. */
+        private Duration timeout = Duration.ofSeconds(10);
+    }
 }

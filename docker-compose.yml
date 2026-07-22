@@ -284,7 +284,9 @@ services:
     mem_limit: 448m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
     environment: *db-kafka-redis
-    ports: ["8081:8081"]
+    # 8081 HTTP girisi, 5027 gercek cihaz kanali (ham TCP, Teltonika Codec 8/8E).
+    # Ikisi de ayni uygulama cekirdegine giriyor; biri digerinin yerini almiyor.
+    ports: ["8081:8081", "5027:5027"]
     restart: unless-stopped
 
   processing-service:
@@ -345,6 +347,11 @@ services:
       OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       VTS_SIMULATOR_INGESTION_BASE_URL: http://ingestion-service:8081
       VTS_SIMULATOR_OSRM_BASE_URL: http://osrm:5000
+      # Filo artik cihaz gibi konusuyor: her arac icin kalici bir TCP oturumu,
+      # ikili AVL paketleri, paket basina ACK ve gonderemedigini tamponlama.
+      VTS_SIMULATOR_TRANSPORT: TELTONIKA
+      VTS_SIMULATOR_TELTONIKA_HOST: ingestion-service
+      VTS_SIMULATOR_TELTONIKA_PORT: "5027"
     # Kontrol API'si iç ağda kalır; UI ona gateway proxy'si üzerinden erişir.
     # Dışarı açmak, kimliksiz bir "aracı ışınla" ucunu herkese açmak demekti.
     expose: ["8085"]

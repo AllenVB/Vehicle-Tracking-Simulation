@@ -42,7 +42,6 @@
         <shedlock.version>5.16.0</shedlock.version>
         <hibernate-spatial.version>6.5.3.Final</hibernate-spatial.version>
         <jts.version>1.20.0</jts.version>
-        <netty.version>4.1.115.Final</netty.version>
 
         <!-- Ahead of the Boot BOM (1.19.x): org.testcontainers.kafka.KafkaContainer, which runs
              the same apache/kafka image as docker-compose, only exists from 1.20.0 on. -->

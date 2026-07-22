@@ -23,4 +23,10 @@ public class TripState {
     private int maxSpeed;
     private double speedSum;
     private int sampleCount;
+
+    /**
+     * Readings that arrived behind ones already folded in. Counted rather than silently
+     * ignored: a trip whose distance looks short is worth being able to explain.
+     */
+    private int outOfOrderSamples;
 }

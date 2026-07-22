@@ -35,6 +35,26 @@ class LiveMapStateTest {
         assertEquals(1L, second.get(0).vehicleId());
     }
 
+    /**
+     * A device back from a coverage gap delivers an hour of history through the pipeline, and
+     * all of it reaches here. Without the check the marker would jump to where the vehicle was
+     * an hour ago and crawl forward again — the readings are real, they are just not "now".
+     */
+    @Test
+    void anOlderReadingDoesNotMoveTheMarkerBackwards() {
+        Position current = new Position(1L, 41.0, 29.0, 50, 90, 80,
+                Instant.parse("2026-07-22T10:00:00Z"));
+        Position buffered = new Position(1L, 39.0, 32.0, 60, 180, 75,
+                Instant.parse("2026-07-22T08:00:00Z"));
+
+        state.update(current);
+        state.drainChanged();
+        state.update(buffered);
+
+        assertTrue(state.drainChanged().isEmpty(), "a stale reading is not a change");
+        assertEquals(41.0, state.snapshot().get(0).lat());
+    }
+
     @Test
     void viewportFilterKeepsOnlyInBoundsVehicles() {
         Bbox bbox = new Bbox(40.9, 28.9, 41.05, 29.05);

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fleet.vts.analytics.config.Serdes;
+import com.fleet.vts.analytics.config.AnalyticsProperties;
+import com.fleet.vts.analytics.config.EventTimeExtractor;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
 import com.fleet.vts.analytics.rules.VehicleRuleRegistry;
 import com.fleet.vts.analytics.topology.AnalyticsTopology;
@@ -66,11 +68,14 @@ class AnalyticsTopologyTest {
 
     private void start(GeofenceRegistry registry, Map<String, Double> applicableRules) {
         StreamsBuilder builder = new StreamsBuilder();
-        new AnalyticsTopology(registry, new VehicleRuleRegistry(applicableRules), mapper)
-                .buildPipeline(builder);
+        new AnalyticsTopology(registry, new VehicleRuleRegistry(applicableRules), mapper,
+                new AnalyticsProperties()).buildPipeline(builder);
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, "analytics-test");
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:9092");
+        // The same extractor production uses: stream time follows the reading's own instant,
+        // so these tests exercise the ordering the pipeline actually sees.
+        props.put(StreamsConfig.DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG, EventTimeExtractor.class);
         driver = new TopologyTestDriver(builder.build(), props);
         input = driver.createInputTopic(Topics.TELEMETRY_RAW,
                 new StringSerializer(), Serdes.json(TelemetryEvent.class, mapper).serializer());

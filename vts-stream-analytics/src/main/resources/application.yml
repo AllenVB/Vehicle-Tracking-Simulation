@@ -19,8 +19,24 @@ spring:
         num.stream.threads: 4
         processing.guarantee: at_least_once
         default.deserialization.exception.handler: org.apache.kafka.streams.errors.LogAndContinueExceptionHandler
+        # Akış zamanı "aracın oradaki anı"nı ifade etsin, "haberi aldığımız anı"nı değil.
+        # Kafka'nın kayıt zaman damgası üreticinin yazdığı andır; bu hatta ingestion zamanıdır.
+        # Gerçek bir cihaz kapsama boşluğunda tamponlar ve saatlik geçmişi tek seferde basar --
+        # varsayılan çıkarıcıyla o kayıtlar "şimdi olmuş" sayılır ve hiçbir hata vermeden
+        # yolculuk ortadan kapanır, ihlal yanlış güne yazılır.
+        default.timestamp.extractor: com.fleet.vts.analytics.config.EventTimeExtractor
         rocksdb.config.setter: com.fleet.vts.analytics.config.BoundedRocksDBConfig
         statestore.cache.max.bytes: 16777216
+
+vts:
+  analytics:
+    event-time:
+      # Pencere kapandıktan sonra geç gelen ölçüme tanınan süre. Bedeli açık:
+      # bastırılmış pencere tam bu kadar geç yayınlanır.
+      grace: 15m
+      # Kapsama boşluğundaki cihazın sessizliği, park etmiş araçtan ayırt edilemez.
+      # Punctuator bu kadar bekler; dönen cihaz yolculuğu ikiye bölünmeden devam eder.
+      trip-close-grace: 15m
 
 server:
   port: 8083

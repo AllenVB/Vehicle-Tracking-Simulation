@@ -60,8 +60,15 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
 
     private final Serde<TripState> stateSerde;
 
-    public TripRule(Serde<TripState> stateSerde) {
+    /**
+     * How long past {@link #STOP_MILLIS} the punctuator waits before closing a quiet trip.
+     * See {@code AnalyticsProperties.EventTime.tripCloseGrace} for why it exists.
+     */
+    private final long closeGraceMillis;
+
+    public TripRule(Serde<TripState> stateSerde, Duration closeGrace) {
         this.stateSerde = stateSerde;
+        this.closeGraceMillis = closeGrace.toMillis();
     }
 
     @Override
@@ -93,6 +100,11 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                         st = openTrip(e, ts);
                         context.forward(new Record<>(record.key(),
                                 ongoing(st, e.vehicleId()), record.timestamp()));
+                    } else if (ts < st.getLastMoveTs()) {
+                        // Out of order: a buffered reading arriving behind live ones. Its speed
+                        // still belongs to the trip, but walking the position backwards would
+                        // add the same stretch of road to the distance a second time.
+                        st.setOutOfOrderSamples(st.getOutOfOrderSamples() + 1);
                     } else {
                         double step = GeoUtils.haversineKm(
                                 st.getLastLat(), st.getLastLon(), e.lat(), e.lon());
@@ -118,19 +130,31 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                 }
             }
 
-            /** Close trips that stopped receiving movement (stream time advanced). */
-            private void closeStale(long now) {
+            /**
+             * Close trips that stopped receiving movement.
+             *
+             * <p>{@code now} is stream time, which since the switch to event time is the newest
+             * reading the partition has seen — from any vehicle. A device out of coverage is
+             * therefore indistinguishable here from a vehicle that parked, so the punctuator
+             * waits an extra grace before acting. The trip is still recorded as ending when the
+             * vehicle last moved, not when the punctuator got around to it: the grace decides
+             * when to look, not what to write.
+             */
+            private void closeStale(long streamTime) {
                 List<KeyValue<String, TripState>> toClose = new ArrayList<>();
                 try (KeyValueIterator<String, TripState> it = store.all()) {
                     while (it.hasNext()) {
                         KeyValue<String, TripState> kv = it.next();
-                        if (kv.value.isOpen() && now - kv.value.getLastMoveTs() >= STOP_MILLIS) {
+                        if (kv.value.isOpen()
+                                && streamTime - kv.value.getLastMoveTs() >= STOP_MILLIS + closeGraceMillis) {
                             toClose.add(kv);
                         }
                     }
                 }
                 for (KeyValue<String, TripState> kv : toClose) {
-                    context.forward(new Record<>(kv.key, closed(kv.value, now, vehicleId(kv.key)), now));
+                    long endTs = kv.value.getLastMoveTs() + STOP_MILLIS;
+                    context.forward(new Record<>(kv.key,
+                            closed(kv.value, endTs, vehicleId(kv.key)), endTs));
                     store.delete(kv.key);
                 }
             }
