@@ -52,6 +52,13 @@ korunuyordu: yalnızca birisi elle veritabanı başlatıp `-Dvts.itest=true` ver
 
 Sonra ikisi de geri alındı. **Ölçülen:** `mvn verify` 4 dk 50 sn, tam reactor yeşil.
 
+**GitHub tarafında koşamadı.** Üç push, üç workflow run, üçü de 4–5 saniyede `Failure`.
+Sebep kodda değil: *"The job was not started because your account is locked due to a billing
+issue."* Yani `ci.yml` GitHub tarafından ayrıştırıldı, iş oluşturuldu, ama runner
+zamanlanamadı. Dolayısıyla **"CI yeşil" diyemiyorum**; diyebildiğim, CI'ın çalıştıracağı
+komutun (`mvn -B -ntp verify`) yerelde yeşil olduğu ve iki hata geri konduğunda kırmızıya
+döndüğü. Faturalandırma çözüldüğünde ilk push bunu GitHub'da da gösterecek.
+
 Bir ortam tuzağı buradan çıktı: Docker Engine 29 API 1.44'ün altını reddediyor, docker-java
 hâlâ 1.32 istiyor, el sıkışma çıplak bir HTTP 400 ile düşüyor — ve Testcontainers bunu "no
 valid Docker environment" diye raporluyor, yani gerçek sebebin yanından bile geçmiyor. Kök pom

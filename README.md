@@ -520,7 +520,14 @@ mvn test      # yalnızca birim testler, Docker gerekmez
 mvn verify    # + entegrasyon testleri (Testcontainers), CI'ın çalıştırdığı komut
 ```
 
-Her push'ta GitHub Actions `mvn verify` koşar (`.github/workflows/ci.yml`). jacoco rapor
+Her push'ta GitHub Actions `mvn verify` koşar (`.github/workflows/ci.yml`).
+
+> **Şu an koşmuyor.** Üç push'un üçünde de iş 4–5 saniyede düştü ve sebep depoda değil:
+> *"The job was not started because your account is locked due to a billing issue."*
+> Workflow ayrıştırılıyor ve iş oluşturuluyor, yalnızca runner zamanlanamıyor. Aşağıdaki
+> kanıtların hepsi CI'ın çalıştıracağı komutla (`mvn -B -ntp verify`) **yerelde** ölçüldü.
+
+jacoco rapor
 üretir; **eşik dayatmaz** — sıfıra yakın başlayan bir kod tabanında kapsam kapısı ya her
 build'i kırar ya da hiçbir şey söylemeyecek kadar düşük tutulur.
 
