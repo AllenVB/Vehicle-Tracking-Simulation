@@ -102,7 +102,8 @@ public class AnalyticsTopology {
                 .to(Topics.GEOFENCE_EVENT, Produced.with(Serdes.String(), geofenceSerde));
 
         // Trips stay on the full stream: a flight is a trip, and a trip is not a violation.
-        raw.process(new TripRule(tripStateSerde, eventTime.getTripCloseGrace()))
+        raw.process(new TripRule(tripStateSerde, eventTime.getTripCloseGrace(),
+                        eventTime.getMaxTripDuration()))
                 .to(Topics.TRIP, Produced.with(Serdes.String(), tripSerde));
 
         // SUSTAINED_SPEEDING: 5-min TUMBLING window; fire once per window when

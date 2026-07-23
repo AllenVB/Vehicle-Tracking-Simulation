@@ -26,9 +26,21 @@ import java.util.Set;
 
 /**
  * TRIP_DETECTION: a trip opens when the vehicle starts moving with ignition on
- * and closes after a stretch without movement (detected on a later reading or by
- * a stream-time punctuator). Emits ONGOING on open and CLOSED with distance,
+ * and closes on any of three things. Emits ONGOING on open and CLOSED with distance,
  * avg/max speed on close.
+ *
+ * <ul>
+ *   <li><b>A stop</b> — a stretch without movement (detected on a later reading or by a
+ *       stream-time punctuator). This is the ordinary close: an arrival park ends the trip.</li>
+ *   <li><b>A teleport</b> — a single-tick position jump too large to be driving is an operator
+ *       moving or re-dispatching the vehicle, which ends the run it was on. The trip closes at
+ *       the last real position and a new one opens where the vehicle now stands, so a re-routed
+ *       journey is recorded and scored rather than merged into the next.</li>
+ *   <li><b>Old age</b> — a trip that has run past {@code maxTripMillis} is a vehicle that never
+ *       parks (the geofence lap car, a fuel-hopper). Left open it swallows many journeys into
+ *       one and every km-normalised score built on it is meaningless, so it is force-closed and
+ *       a fresh trip opened in its place.</li>
+ * </ul>
  */
 public class TripRule implements ProcessorSupplier<String, TelemetryEvent, String, TripEvent> {
 
@@ -53,8 +65,9 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
      * Consecutive readings that are further apart than this are a jump, not driving:
      * a real GPS glitch, an operator teleport, or a restart repositioning the vehicle.
      * At a 1-second tick even 120 km/h covers ~33 m, so 2 km is far beyond any legitimate
-     * step. Counting jumps as distance inflates trip length — and with it every
-     * km-normalised driver score, which is how a scoreboard quietly becomes nonsense.
+     * step. A jump does not add distance — counting it would inflate trip length and every
+     * km-normalised driver score with it — and it also ends the current trip: a vehicle that
+     * teleported is not the same run it was a reading ago.
      */
     private static final double MAX_STEP_KM = 2.0;
 
@@ -66,9 +79,17 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
      */
     private final long closeGraceMillis;
 
-    public TripRule(Serde<TripState> stateSerde, Duration closeGrace) {
+    /**
+     * Hard ceiling on a single trip's age before it is force-closed and reopened.
+     * See {@code AnalyticsProperties.EventTime.maxTripDuration} for why it exists and how
+     * the value is chosen.
+     */
+    private final long maxTripMillis;
+
+    public TripRule(Serde<TripState> stateSerde, Duration closeGrace, Duration maxTripDuration) {
         this.stateSerde = stateSerde;
         this.closeGraceMillis = closeGrace.toMillis();
+        this.maxTripMillis = maxTripDuration.toMillis();
     }
 
     @Override
@@ -105,15 +126,25 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                         // still belongs to the trip, but walking the position backwards would
                         // add the same stretch of road to the distance a second time.
                         st.setOutOfOrderSamples(st.getOutOfOrderSamples() + 1);
+                    } else if (ts - st.getStartTs() >= maxTripMillis) {
+                        // Old age: this trip has run past the ceiling without ever parking. End it
+                        // here and start a fresh one from this reading, so the vehicle keeps being
+                        // measured instead of piling every journey onto one endless trip.
+                        st = closeAndReopen(record, st, ts, e, ts);
                     } else {
                         double step = GeoUtils.haversineKm(
                                 st.getLastLat(), st.getLastLon(), e.lat(), e.lon());
-                        if (step <= MAX_STEP_KM) {   // a jump is repositioning, not distance driven
+                        if (step > MAX_STEP_KM) {
+                            // A teleport, not driving: an operator moved or re-dispatched the
+                            // vehicle. That ends the run it was on — close the trip at the last
+                            // real position and open a new one where it now stands.
+                            st = closeAndReopen(record, st, st.getLastMoveTs(), e, ts);
+                        } else {
                             st.setDistanceKm(st.getDistanceKm() + step);
+                            st.setLastLat(e.lat());
+                            st.setLastLon(e.lon());
+                            st.setLastMoveTs(ts);
                         }
-                        st.setLastLat(e.lat());
-                        st.setLastLon(e.lon());
-                        st.setLastMoveTs(ts);
                     }
                     st.setMaxSpeed(Math.max(st.getMaxSpeed(), e.speedKmh()));
                     st.setSpeedSum(st.getSpeedSum() + e.speedKmh());
@@ -157,6 +188,21 @@ public class TripRule implements ProcessorSupplier<String, TelemetryEvent, Strin
                             closed(kv.value, endTs, vehicleId(kv.key)), endTs));
                     store.delete(kv.key);
                 }
+            }
+
+            /**
+             * Close the open trip (ending at {@code endTs}, at the position it last held) and
+             * open a fresh one from this reading. Used by the teleport and old-age paths, which
+             * both end one run and begin another on the same reading.
+             */
+            private TripState closeAndReopen(Record<String, TelemetryEvent> record, TripState old,
+                                             long endTs, TelemetryEvent e, long newStartTs) {
+                context.forward(new Record<>(record.key(),
+                        closed(old, endTs, vehicleId(record.key())), record.timestamp()));
+                TripState fresh = openTrip(e, newStartTs);
+                context.forward(new Record<>(record.key(),
+                        ongoing(fresh, e.vehicleId()), record.timestamp()));
+                return fresh;
             }
 
             private TripState openTrip(TelemetryEvent e, long ts) {

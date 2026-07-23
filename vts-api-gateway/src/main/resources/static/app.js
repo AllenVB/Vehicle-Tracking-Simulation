@@ -56,6 +56,53 @@
     };
     const tl = n => n.toLocaleString("tr-TR") + " ₺";
 
+    // ── Küçük animasyon yardımcıları ─────────────────────────────────────────
+    // KPI sayıları değişince yumuşak sayaç + hafif nabız. Sayaç YALNIZCA değer
+    // gerçekten değiştiğinde oynar (canlı sayaç her saniye WS ile gelir ama çoğu
+    // tık sabittir), böylece boşuna iş yapılmaz; nabız transform tabanlıdır.
+    const REDUCED = window.matchMedia
+        && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function countUp(el, to, opts) {
+        if (!el) return;
+        opts = opts || {};
+        const dec = opts.decimals || 0;
+        const fmt = v => dec ? v.toFixed(dec) : String(Math.round(v));
+        const prev = el.__kpi;
+        el.__kpi = to;
+        // İlk gösterim (henüz değer yok) ya da değişmedi: yalnızca yaz, oynatma.
+        if (prev == null || prev === to) { el.textContent = fmt(to); return; }
+        // Gizli sekmede rAF durur; azaltılmış harekette hareket istenmez. İkisinde de
+        // değeri ANINDA yaz — sayaç görsel bir süstür, KPI asla bayat kalmamalı.
+        if (REDUCED || document.hidden) { el.textContent = fmt(to); return; }
+        pulse(el);
+        if (el.__raf) cancelAnimationFrame(el.__raf);
+        const from = prev, t0 = performance.now(), dur = 480;
+        const tick = t => {
+            const k = Math.min(1, (t - t0) / dur);
+            const e = 1 - Math.pow(1 - k, 3);            // easeOutCubic
+            el.textContent = fmt(from + (to - from) * e);
+            if (k < 1) el.__raf = requestAnimationFrame(tick);
+            else { el.textContent = fmt(to); el.__raf = 0; }
+        };
+        el.__raf = requestAnimationFrame(tick);
+    }
+
+    /** Sayısal olmayan KPI (ör. "–"): sayaç yok, metni yaz ve bir nabız at. */
+    function setKpiText(el, text) {
+        if (!el) return;
+        el.__kpi = null;
+        el.textContent = text;
+        pulse(el);
+    }
+
+    function pulse(el) {
+        if (REDUCED || !el) return;
+        el.classList.remove("pulse");
+        void el.offsetWidth;                             // reflow: animasyonu yeniden tetikle
+        el.classList.add("pulse");
+    }
+
     // ── Giriş ───────────────────────────────────────────────────────────────
     const loginBtn = document.getElementById("loginBtn");
     loginBtn.addEventListener("click", doLogin);
@@ -182,7 +229,7 @@
             row.addEventListener("click", () => { document.getElementById("plateNo").value = no; select(v.id); });
             el.appendChild(row);
         });
-        document.getElementById("statTotal").textContent = list.length;
+        countUp(document.getElementById("statTotal"), list.length);
     }
 
     // Araç numarası artık plakadan değil VIN'den (VIN00000001 -> 1): plaka gerçek Türk
@@ -218,7 +265,7 @@
             drawLive(p);
             drawCtrl(p);
         });
-        document.getElementById("statLive").textContent = pos.size;
+        countUp(document.getElementById("statLive"), pos.size);
         if (!fitted && pos.size > 0) {
             fitted = true;
             const b = L.latLngBounds([...pos.values()].map(p => [p.lat, p.lon])).pad(0.15);
@@ -869,8 +916,8 @@
                 ? all.reduce((sum, d) => sum + Number(d.score), 0) / all.length : null;
             const kpi = document.getElementById("statScore");
             if (kpi) {
-                kpi.textContent = avg == null ? "–" : avg.toFixed(1);
                 kpi.style.color = avg == null ? "" : avg >= 8 ? "#5dcaa5" : avg >= 6 ? "#f0997b" : "#e24b4a";
+                if (avg == null) setKpiText(kpi, "–"); else countUp(kpi, avg, { decimals: 1 });
             }
             renderJourneyMeta();
         } catch (_) { /* yoksay */ }
@@ -881,7 +928,7 @@
         const rule = RULES[v.ruleCode] || { tr: "", fine: 0 };
         alerts++;
         fineTotal += rule.fine;
-        document.getElementById("statAlerts").textContent = alerts;
+        countUp(document.getElementById("statAlerts"), alerts);
         const ft = document.getElementById("fineTotal");
         if (ft) ft.textContent = tl(fineTotal);
 
@@ -1018,10 +1065,13 @@
             const overdue = rows.filter(m => m.overdue).length;
             const kpi = document.getElementById("statMaint");
             if (kpi) {
-                kpi.textContent = rows.length;
                 // Gecikmiş varsa sayı kırmızı: "16 bakım yaklaşıyor" ile "3'ü gecikmiş"
                 // aynı aciliyet değil.
                 kpi.style.color = overdue > 0 ? "#e24b4a" : rows.length ? "#f0997b" : "";
+                countUp(kpi, rows.length);
+                // Gecikmiş bakımda kartın kendisi kırmızı vurgu + yavaş nabız alsın.
+                const card = kpi.closest(".stat");
+                if (card) card.classList.toggle("maint-overdue", overdue > 0);
             }
             if (!rows.length) {
                 document.getElementById("maintList").innerHTML =

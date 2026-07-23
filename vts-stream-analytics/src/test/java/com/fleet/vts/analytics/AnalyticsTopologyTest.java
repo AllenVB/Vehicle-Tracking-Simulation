@@ -30,6 +30,7 @@ import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Polygon;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -67,9 +68,14 @@ class AnalyticsTopologyTest {
     }
 
     private void start(GeofenceRegistry registry, Map<String, Double> applicableRules) {
+        start(registry, applicableRules, new AnalyticsProperties());
+    }
+
+    private void start(GeofenceRegistry registry, Map<String, Double> applicableRules,
+                       AnalyticsProperties properties) {
         StreamsBuilder builder = new StreamsBuilder();
         new AnalyticsTopology(registry, new VehicleRuleRegistry(applicableRules), mapper,
-                new AnalyticsProperties()).buildPipeline(builder);
+                properties).buildPipeline(builder);
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, "analytics-test");
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:9092");
@@ -273,5 +279,60 @@ class AnalyticsTopologyTest {
         assertTrue(out.stream().anyMatch(tp -> tp.status() == TripStatus.ONGOING));
         assertTrue(out.stream().anyMatch(tp -> tp.status() == TripStatus.CLOSED
                 && tp.distanceKm() != null && tp.distanceKm() > 0), "expected a closed trip with distance");
+    }
+
+    @Test
+    void operatorTeleportClosesTheTripAndOpensAFreshOne() {
+        // Dragging a vehicle across the map (or re-dispatching it) is a jump no drive could make.
+        // It ends the run the vehicle was on: that journey is recorded, and a new trip begins
+        // where it was dropped — instead of one trip absorbing both.
+        start(emptyRegistry());
+        TestOutputTopic<String, TripEvent> trips = tripTopic();
+
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+        input.pipeInput("42", event(42, 50, true, true, 41.00, 29.00, t), t);                    // open
+        input.pipeInput("42", event(42, 50, true, true, 41.01, 29.01, t.plusSeconds(60)),
+                t.plusSeconds(60));                                                               // drives ~1.4 km
+        input.pipeInput("42", event(42, 50, true, true, 42.50, 30.50, t.plusSeconds(120)),
+                t.plusSeconds(120));                                                              // teleport ~200 km
+        input.pipeInput("42", event(42, 0, true, true, 42.50, 30.50, t.plusSeconds(400)),
+                t.plusSeconds(400));                                                              // stop
+
+        List<TripEvent> out = trips.readValuesToList();
+        long closed = out.stream().filter(tp -> tp.status() == TripStatus.CLOSED).count();
+        assertEquals(2, closed, "the teleport closes the first run and the stop closes the second");
+        assertTrue(out.stream().anyMatch(tp -> tp.status() == TripStatus.CLOSED
+                        && tp.distanceKm() != null && tp.distanceKm() > 0),
+                "the first run keeps the distance it drove before the teleport");
+    }
+
+    @Test
+    void tripForceClosesWhenItRunsPastTheMaxDuration() {
+        // A vehicle that never stops — the geofence lap car is the real one — would otherwise
+        // hold a single trip open for days. The ceiling force-closes it and opens a fresh trip,
+        // without the vehicle ever sending a stopped reading.
+        AnalyticsProperties props = new AnalyticsProperties();
+        props.getEventTime().setMaxTripDuration(Duration.ofHours(4));
+        props.getEventTime().setTripCloseGrace(Duration.ofHours(6));   // keep the punctuator out of it
+        start(emptyRegistry(), LAND_VEHICLE_42, props);
+        TestOutputTopic<String, TripEvent> trips = tripTopic();
+
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+        // Moving from the same spot every hour for six hours: always moving, never a stop.
+        for (int h = 0; h <= 6; h++) {
+            Instant at = t.plusSeconds(h * 3600L);
+            input.pipeInput("42", event(42, 60, true, true, 41.0, 29.0, at), at);
+        }
+
+        List<TripEvent> out = trips.readValuesToList();
+        assertTrue(out.stream().anyMatch(tp -> tp.status() == TripStatus.CLOSED),
+                "a trip past the ceiling is force-closed though the vehicle never stopped");
+        assertTrue(out.stream().filter(tp -> tp.status() == TripStatus.ONGOING).count() >= 2,
+                "a fresh trip opens to keep measuring the vehicle after the force-close");
+    }
+
+    private TestOutputTopic<String, TripEvent> tripTopic() {
+        return driver.createOutputTopic(Topics.TRIP, new StringDeserializer(),
+                Serdes.json(TripEvent.class, mapper).deserializer());
     }
 }

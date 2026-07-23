@@ -5,6 +5,67 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 23 Temmuz 2026 (akşam) — 18 saatlik trip'in kökü ve animasyonlu arayüz
+
+### Bir trip neden 171 saat sürer?
+
+**Belirti (kullanıcı):** "Sürücü rotayı tamamlayınca son puan kayıt olsun; rota değişikliğinde
+kayıt olmuyor, puan sürekli düşüyor." **Ölçüm:** trip süreleri çift-modlu — bir yığın 0-8 saat
+(normal), bir yığın 16 saat+ (patolojik), **8-16 saat arası tamamen boş**. En uzunları: araç 54
+= 167 sa / 13.635 km, araç 74 = 171 sa / 6.089 km. Tek bir "trip" günlerce sürüp onlarca
+yolculuğu yutuyor. Son 4 saatte 45 trip 16 saat+ kapandı — canlı, tarihsel değil.
+
+**Kök sebep:** `TripRule` bir trip'i YALNIZCA ≥90 sn hareketsizlik penceresinde kapatıyor.
+"Yolculuk bitti / rota değişti" analytics'e hiç söylenmiyor — hareketsizlikten çıkarsanıyor
+(varış park'ı 120 sn > 90 sn olduğu için). Bir aracı bir yolculuktan diğerine ≥90 sn durmadan
+geçiren HER yol bunu kırıyor: (a) geofence loop aracı hiç park etmez; (b) yakıt-zıplayan araç
+yalnızca 60 sn'lik ikmal molası verir (90 sn'nin altında, kasıtlı); (c) operatör re-dispatch'i
+(`dispatchTo`/`moveVehicle` → `startJourney`) hareket eden aracı park etmeden yeni rotaya
+sokar — kullanıcının şikâyeti tam bu. Bir de günlük restart: telemetri boşluğunda punctuator
+toplu kapatıp herkes yeniden açıyor (günlük ~14:00 UTC'de kümeleniyor).
+
+**Neden analytics-only:** doğru çözüm "trip = yolculuk" için telemetriye açık bir *trip-sınırı*
+alanı eklemekti. Ama canlı taşıma **Teltonika Codec 8E ikili kanal** — JSON alanı codec'e
+dokunmadan geçmez, iki tarafta codec cerrahisi gerekir. Fazla invaziv. Bunun yerine iki kapanış
+tetikleyicisini analytics'e ekledim (tek servis, en düşük risk):
+
+**Düzeltme:** (1) **Max-süre tavanı 10 saat** — bir trip bu yaşı geçince zorla kapatılıp
+yerine taze bir trip açılır. 10 saat, ölçülen boş bantta (8-16) oturuyor: en uzun meşru tek
+yolculuk (en yavaş hız, en uzak 8 komşu il) ~8 saat, yani hiçbir gerçek yolculuk bölünmez ama
+her kaçak trip sınırlanır. Sürekli çalışan araç için standart telematik davranışı. (2)
+**Teleport-sınırı** — tek-tık >2 km sıçrama (bu sim'de her zaman operatör taşıma/re-dispatch,
+rotalar sürekli) trip'i son gerçek konumda kapatıp yeni konumda açar; böylece operatör rota
+değiştirince trip anında kapanıp puanlanır. İkisi de aynı `closeAndReopen` yardımcısını
+kullanıyor. **Doğrulama:** 2 yeni birim testi + mevcut 12 = 14/14 geçti; canlı olarak heli 101'i
+"taşı" API'siyle 15 km ışınladım → açık trip'i o an kapandı+puanlandı (32.9 dk / 112 km / 10),
+yenisi açıldı. Max-süre'nin tam etkisi doğası gereği 10 saat gerektirir; birim testi + paylaşılan
+yol + yeni monster oluşmaması kanıtlıyor.
+
+### Arayüz düz duruyordu — animasyon, ama bedelini bilerek
+
+**İstek:** modern, animasyonlu, ama kütüphanesiz (CDN eklemeden) ve 105 araç · 1 sn tık · 400+
+marker altında akıcı. **Kural olarak koydum:** yalnızca `transform`/`opacity` ya da nadir değişen
+küçük öğeler; hiçbir animasyon her karede layout tetiklemeyecek. Çubuklar (skor/bakım/genel bakış)
+`scaleX` ile soldan dolar (`growX` — derleyicide, genişlik değil); KPI sayıları değişince
+yumuşak sayaç + nabız; kart hover-lift; bakım-gecikmesi kırmızı glow; modal girişi; hepsi
+`prefers-reduced-motion` ile kapanır.
+
+**"Derlendi" doğrulama değil — ölçünce bug çıktı:** CSS'in hepsi ilk seferde çalıştı, ama KPI
+count-up'ı DOM'dan ölçünce `__kpi` hiç set olmuyordu. `countUp`'ta mantık hatası: ilk çağrıda
+`prev`, hedefe eşitleniyor, erken dönüyor, `__kpi` set edilmiyordu → sayaç/nabız asla ateşlenmez
+(değerler yine doğruydu, sadece hareket yoktu). Düzeltme: `prev = el.__kpi` doğrudan; ilk gösterim
+ve değişmedi durumları ayrı. Bir de gizli sekmede `requestAnimationFrame` durduğunu ölçtüm
+(`document.hidden`) — bu yüzden gizli/azaltılmış modda değeri anında yazıyorum ki KPI asla bayat
+kalmasın. Tarayıcı panosu gizli sekme olduğundan animasyonu gözle göremedim; mantığı standalone
+test + CSS varlığı + değer doğruluğuyla doğruladım.
+
+**Ortam bedeli:** buildkit `mvn package` adımında iki kez öldü (`rpc error: EOF`) — 7.95 GB
+Docker belleği, çalışan yığın ~5.5 GB, reaktör derlemesine yer kalmıyor. Çözüm: derleme
+sırasında gözlemlenebilirlik + OSRM'yi geçici durdurup belleği boşaltmak, sonra `up -d` ile geri
+getirmek. Docker Desktop'ı yeniden başlatmaya gerek kalmadı.
+
+---
+
 ## 23 Temmuz 2026 (öğleden sonra) — üç bulgu, iki kök sebep
 
 Kullanıcı beş şey bildirdi. Tahmin etmeden veriye baktım; ikisi tek bir kök sebepten çıktı.

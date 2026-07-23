@@ -53,6 +53,25 @@ public class AnalyticsProperties {
          */
         private Duration tripCloseGrace = Duration.ofMinutes(15);
 
+        /**
+         * Hard ceiling on how long a single trip may run before it is force-closed and a fresh
+         * one opened in its place.
+         *
+         * <p>A trip normally ends when the vehicle sits still for {@code TripRule.STOP_MILLIS};
+         * that is how a journey's arrival park closes it. But some vehicles never produce that
+         * still stretch — the geofence lap car circles forever, and a fuel-hopper stops only for
+         * the sub-window refuel dwell — so their one trip runs for days and swallows dozens of
+         * journeys. Every km-normalised driver score built on such a trip is meaningless, and its
+         * entry in the history reads as a single 6000&nbsp;km, 160-hour drive.
+         *
+         * <p>Ten hours is chosen against the fleet's own shape: the longest legitimate single
+         * journey a vehicle drives (slowest cruise, farthest of the eight nearest provinces) tops
+         * out around eight hours, and measured trip durations are cleanly bimodal — a mass below
+         * eight hours and a mass above sixteen, with nothing in between. Ten hours sits in that
+         * empty band, so no real journey is ever split while every runaway trip is capped.
+         */
+        private Duration maxTripDuration = Duration.ofHours(10);
+
         public Duration getGrace() {
             return grace;
         }
@@ -67,6 +86,14 @@ public class AnalyticsProperties {
 
         public void setTripCloseGrace(Duration tripCloseGrace) {
             this.tripCloseGrace = tripCloseGrace;
+        }
+
+        public Duration getMaxTripDuration() {
+            return maxTripDuration;
+        }
+
+        public void setMaxTripDuration(Duration maxTripDuration) {
+            this.maxTripDuration = maxTripDuration;
         }
     }
 }

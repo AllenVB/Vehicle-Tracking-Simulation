@@ -317,6 +317,53 @@
         .ov-bar .track { flex: 1; height: 14px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
         .ov-bar .track i { display: block; height: 100%; background: var(--accent); }
         .ov-bar .n { width: 34px; text-align: right; flex: 0 0 auto; color: var(--muted); }
+
+        /* ══ Hareket ve cila ══════════════════════════════════════════════════
+           Kural: yalnızca transform/opacity, ya da nadir değişen küçük öğeler.
+           105 araç · 1 sn tık · 400+ marker'ın her-kare yolu (layout) ASLA
+           tetiklenmez; tüm hareket prefers-reduced-motion ile kapanır. */
+
+        /* Çubuklar soldan dolar (sürücü skoru, bakım ilerlemesi, genel bakış).
+           scaleX derleyicide çalışır — genişlik değil dönüşüm, yani layout yok. */
+        @keyframes growX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        .scbar i, .dbar i, .ov-bar .track i {
+            transform-origin: left center;
+            animation: growX .7s cubic-bezier(.22, 1, .36, 1);
+        }
+
+        /* KPI sayıları: değer değiştiğinde hafif nabız (sınıfı JS yalnızca
+           gerçekten değişince ekler, her tıkta değil). */
+        @keyframes kpiPulse { 0%, 100% { transform: scale(1); } 35% { transform: scale(1.18); } }
+        .stat b.pulse, .ov-kpi b { animation: kpiPulse .5s ease; display: inline-block; }
+
+        /* Kartlar: yumuşak gölge + hover'da hafif kalkış (transform). */
+        .stat, .ov-kpi { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+        .stat:hover, .ov-kpi:hover {
+            transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, .38); border-color: #33506b;
+        }
+
+        /* Bakım gecikmişse KPI kartı belirgin kırmızı vurgu + yavaş nabız —
+           "16 bakım yaklaşıyor" ile "3'ü gecikmiş" bir bakışta ayrılsın. */
+        .stat.maint-overdue { border-color: rgba(226, 75, 74, .55); animation: overdueGlow 2s ease-in-out infinite; }
+        @keyframes overdueGlow {
+            0%, 100% { box-shadow: 0 0 0 1px rgba(226, 75, 74, .18), 0 0 8px rgba(226, 75, 74, .16); }
+            50%      { box-shadow: 0 0 0 1px rgba(226, 75, 74, .48), 0 0 18px rgba(226, 75, 74, .42); }
+        }
+
+        /* Satır ve durum rozeti geçişleri pürüzsüz. */
+        .row { transition: background .12s ease, border-color .12s ease; }
+        .vstate { transition: color .2s ease, border-color .2s ease; }
+
+        /* Modal içeriği yumuşak girsin (çekmecenin kayması zaten var). */
+        @keyframes modalIn { from { transform: translateY(10px) scale(.985); opacity: 0; } to { transform: none; opacity: 1; } }
+        #ovModal.on #ovCard { animation: modalIn .22s cubic-bezier(.22, 1, .36, 1); }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+                transition-duration: .001ms !important;
+            }
+        }
     </style>
 </head>
 <body>
