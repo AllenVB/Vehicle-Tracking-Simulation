@@ -1,5 +1,8 @@
 package com.fleet.vts.processing.persistence;
 
+import com.fleet.vts.common.enums.GeofenceEventType;
+import com.fleet.vts.common.enums.RuleType;
+import com.fleet.vts.common.enums.Severity;
 import com.fleet.vts.common.enums.TripStatus;
 import com.fleet.vts.common.event.GeofenceEvent;
 import com.fleet.vts.common.event.TripEvent;
@@ -57,6 +60,58 @@ public class StreamOutputPersister {
                 e.tenantId(), e.geofenceId(), e.vehicleId(), e.driverId(),
                 e.eventType() == null ? null : e.eventType().name(),
                 ts(e.occurredAt()), e.lon(), e.lat());
+
+        // A geofence crossing is a movement event; whether it is a VIOLATION depends on the
+        // zone. Entering a forbidden (EXCLUSION) zone is one — the CRITICAL one — and leaving a
+        // required (INCLUSION) zone is another. Until now nothing turned the crossing into a
+        // violation, so an operator's drawn zone raised events nobody saw in the violation list
+        // and that never counted toward a trip score.
+        maybeGeofenceViolation(e);
+    }
+
+    /** Write a GEOFENCE_ENTER/EXIT violation when the crossing breaches the zone's intent. */
+    private void maybeGeofenceViolation(GeofenceEvent e) {
+        if (e.eventType() == null || e.geofenceId() == null || e.vehicleId() == null) {
+            return;
+        }
+        String kind = geofenceKind(e.geofenceId());
+        boolean enteredForbidden = "EXCLUSION".equals(kind) && e.eventType() == GeofenceEventType.ENTER;
+        boolean leftRequired = "INCLUSION".equals(kind) && e.eventType() == GeofenceEventType.EXIT;
+        if (!enteredForbidden && !leftRequired) {
+            return;
+        }
+
+        RuleType type = enteredForbidden ? RuleType.GEOFENCE_ENTER : RuleType.GEOFENCE_EXIT;
+        Long ruleId = ruleId(e.tenantId(), type.name());
+        if (ruleId == null) {
+            return;   // no rule row for this code; nothing to attribute the violation to
+        }
+        // Entering a forbidden zone is the fleet's most serious event; leaving a required one is
+        // one step down.
+        Severity severity = enteredForbidden ? Severity.CRITICAL : Severity.HIGH;
+        jdbc.update("""
+                INSERT INTO violation
+                    (tenant_id, vehicle_id, driver_id, device_id, rule_id, rule_code,
+                     type, severity, occurred_at, value, threshold, location)
+                VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL,
+                        ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography)
+                """,
+                e.tenantId(), e.vehicleId(), driverAt(e.vehicleId(), e.occurredAt()),
+                ruleId, type.name(), type.name(), severity.name(),
+                ts(e.occurredAt()), e.lon(), e.lat());
+    }
+
+    /** A geofence's kind (EXCLUSION/INCLUSION); cached, since a zone's kind never changes. */
+    private final Map<Long, String> geofenceKinds = new ConcurrentHashMap<>();
+
+    private String geofenceKind(long geofenceId) {
+        return geofenceKinds.computeIfAbsent(geofenceId, id -> {
+            try {
+                return jdbc.queryForObject("SELECT kind FROM geofence WHERE id = ?", String.class, id);
+            } catch (Exception ex) {
+                return "";
+            }
+        });
     }
 
     /** Violations from the stateful rules (harsh braking, sustained speeding, idling). */

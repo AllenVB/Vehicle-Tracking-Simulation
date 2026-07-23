@@ -161,9 +161,9 @@
         const list = await res.json();
         const el = document.getElementById("vehicleList");
         el.innerHTML = "";
-        list.sort((a, b) => plateNo(a.plate) - plateNo(b.plate));
+        list.sort((a, b) => vinNo(a.vin) - vinNo(b.vin));
         list.forEach(v => {
-            const no = plateNo(v.plate);
+            const no = vinNo(v.vin);
             vehicles.set(v.id, {
                 plate: v.plate, plateNo: no, type: v.type,
                 model: [v.make, v.model].filter(Boolean).join(" "),
@@ -185,7 +185,9 @@
         document.getElementById("statTotal").textContent = list.length;
     }
 
-    const plateNo = p => { const m = /VTS-(\d+)/.exec(p || ""); return m ? parseInt(m[1], 10) : 0; };
+    // Araç numarası artık plakadan değil VIN'den (VIN00000001 -> 1): plaka gerçek Türk
+    // formatına geçti ("06 AFK 1928"), numara ise araç seçmek/sıralamak için hâlâ gerekli.
+    const vinNo = vin => { const m = /(\d+)/.exec(vin || ""); return m ? parseInt(m[1], 10) : 0; };
 
     // ── Konumlar ────────────────────────────────────────────────────────────
     async function loadSnapshot() {
@@ -1372,7 +1374,7 @@
         body.innerHTML = '<div class="dsect dmuted">Yükleniyor…</div>';
 
         const [trips, cmds, msgs] = await Promise.all([
-            fetchJson(`/api/v1/vehicles/${vehicleId}/trips?limit=5`),
+            fetchJson(`/api/v1/vehicles/${vehicleId}/trips?limit=8`),
             fetchJson(`/api/v1/vehicles/${vehicleId}/commands?limit=5`),
             fetchJson(`/api/v1/vehicles/${vehicleId}/messages`)
         ]);
@@ -1390,12 +1392,15 @@
                 `</div>`;
         }
         // Son seferler
-        html += `<div class="dsect"><h4>Son seferler</h4>`;
+        html += `<div class="dsect"><h4>Geçmiş yolculuklar</h4>`;
         if (trips && trips.length) {
             trips.forEach(t => {
                 const s = t.score != null ? t.score : "-";
-                html += `<div class="drow"><span>${new Date(t.startedAt).toLocaleDateString("tr-TR")} · ${Math.round(t.distanceKm)} km</span>` +
-                    `<span>★ ${s}/10 <button class="dreplay" data-trip="${t.id}">Oynat</button></span></div>`;
+                const sc = t.score == null ? "" : (t.score >= 8 ? "#5dcaa5" : t.score >= 6 ? "#f0997b" : "#e24b4a");
+                html += `<div class="drow"><span>${new Date(t.startedAt).toLocaleDateString("tr-TR")}` +
+                    `<div class="dmuted">${Math.round(t.distanceKm)} km · ${tripDuration(t)}</div></span>` +
+                    `<span style="text-align:right">★ <b style="color:${sc}">${s}</b>/10` +
+                    `<div class="dmuted"><button class="dreplay" data-trip="${t.id}">Oynat</button></div></span></div>`;
             });
         } else { html += `<div class="dmuted">Tamamlanmış sefer yok.</div>`; }
         html += `</div>`;
@@ -1442,6 +1447,14 @@
             live.fitBounds(L.polyline(points.map(p => [p.lat, p.lon])).getBounds(), { padding: [40, 40] });
             showReplayFrame(0); playReplay();
         } catch (_) { flash("Sefer yüklenemedi"); }
+    }
+
+    /** Bir yolculuğun süresi: bitiş - başlangıç, "1s 23dk" gibi. */
+    function tripDuration(t) {
+        if (!t.startedAt || !t.endedAt) return "—";
+        const min = Math.max(0, Math.round((new Date(t.endedAt) - new Date(t.startedAt)) / 60000));
+        if (min < 60) return min + " dk";
+        return Math.floor(min / 60) + " sa " + (min % 60) + " dk";
     }
 
     async function fetchJson(url) {

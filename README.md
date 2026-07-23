@@ -36,7 +36,8 @@ TimescaleDB + PostGIS · Redis · Leaflet · çok modüllü Maven monorepo.**
 - **Cihaza komut** (⛔): seçili araca Codec 12 komutu gönderilir — konum sorgula, cihaz
   bilgisi al, **röleyi kes**. Komutun durumu panelde canlı ilerler.
 - **Bölge çiz** (⬡): operatör haritasına tıklayarak yasak bölge poligonu kurulur ve kaydedilir.
-  Kural motoru en geç bir dakika içinde devreye alır — yani ihlal üretmeye başlar.
+  Kural motoru en geç bir dakika içinde devreye alır: **yasak bölgeye giren araç (içeride olan
+  dâhil) `GEOFENCE_ENTER` ihlali alır** (CRITICAL) ve bu ihlal listede, haritada ve puanda görünür.
 - **Seferi oynat** (▶): biten bir yolculuk, kırıntılarının **kendi zaman damgalarıyla**
   haritada oynatılır; zaman çubuğuyla ileri geri sarılır.
 - **Bakım**: gerçek kilometre sayacına göre yaklaşan/geçmiş bakımlar barın altında listelenir,
@@ -138,7 +139,7 @@ Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında
 ```
 
 > **Kimlik tuzağı:** `vehicle.id` ile plaka numarası **aynı değildir** — araçlar, tipleri
-> serpiştirmek için hash sırasıyla seed edilir, identity id'leri plaka numarasına oturmaz.
+> serpiştirmek için hash sırasıyla seed edilir, identity id'leri araç numarasına oturmaz.
 > Bu yüzden UI her yerde `vehicleId` konuşur; simülatörün cihaz index'ine çeviriyi gateway
 > **imei (doğal anahtar)** üzerinden yapar. Aksi halde operatör "7"yi taşıdığında haritada
 > bambaşka bir araç hareket eder.
@@ -189,7 +190,7 @@ olanlar dahil döner.
 yol ağına bağlıdır, hava araçları değil. Kod tipe değil kategoriye bakar — "bu bir
 helikopter mi" sorusu, iki serviste birbirinden farklı iki muafiyet listesi doğurmuştu.
 
-Plaka tipi de taşır: `VTS-001-Otomobil`, `VTS-027-Tır`, `VTS-063-Motor`.
+Plakalar gerçek Türk formatındadır: **`06 AFK 1928`** (il kodu 01-81 · 3 harf · 4 rakam). Harf alfabesi Türk plakasınınki — Q, W, X yok. Üretim deterministik (araç numarasından, random'sız), benzersizlik `uq_vehicle_plate` ile garanti. Araç tipi artık plakada değil `vehicle_type` taksonomisinde; UI araç numarasını plakadan değil VIN'den okur.
 
 ### Hangi kural hangi tipe? (`rule_assignment` → `VEHICLE_TYPE`)
 İhlaller **kara araçlarına özeldir**; istisna, yola değil makineye ait olan yakıt/batarya

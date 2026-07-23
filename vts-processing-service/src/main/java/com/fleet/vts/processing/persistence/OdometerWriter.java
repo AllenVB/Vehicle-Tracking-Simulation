@@ -19,9 +19,18 @@ import java.util.List;
  * at install. The maintenance reminder is exactly that question, which is why it counted zero
  * vehicles due every night without ever failing.
  *
- * <p>The update is monotonic. An odometer does not run backwards, and a device coming back
- * from a coverage gap delivers readings that are hours old — accepting one of those would
- * roll the fleet's mileage back and, with it, push every service date into the future.
+ * <p>The write follows the latest reading, not a running maximum. A monotonic guard
+ * ({@code odometer_km < new}) was tried first and it froze: the simulator is the source of
+ * truth for a vehicle's mileage, and it re-bases each vehicle's odometer to a fixed per-vehicle
+ * value on restart. That fresh base sits just below the peak the previous run left in the
+ * database, so a strict guard rejected every reading and the mileage — and the maintenance
+ * counter built on it — stopped moving with no error anywhere.
+ *
+ * <p>So the DB simply mirrors the device's current odometer. {@code latestPerVehicle} is the
+ * newest reading in the batch and Kafka keeps a vehicle's telemetry ordered, so successive
+ * writes climb in normal operation. A store-and-forward burst can momentarily write an older
+ * odometer, which the next live reading corrects — acceptable for a mileage counter, unlike for
+ * a legal odometer, where a timestamp-guarded write would be the next step.
  */
 @Component
 public class OdometerWriter {
@@ -29,7 +38,7 @@ public class OdometerWriter {
     private static final String SQL = """
             UPDATE vehicle
                SET odometer_km = ?, updated_at = now()
-             WHERE id = ? AND odometer_km < ?
+             WHERE id = ?
             """;
 
     private final JdbcTemplate jdbc;
@@ -54,7 +63,6 @@ public class OdometerWriter {
                 TelemetryEvent e = withOdometer.get(i);
                 ps.setLong(1, e.odometerKm());
                 ps.setLong(2, e.vehicleId());
-                ps.setLong(3, e.odometerKm());
             }
 
             @Override

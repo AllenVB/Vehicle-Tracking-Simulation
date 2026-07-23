@@ -5,6 +5,72 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 23 Temmuz 2026 (öğleden sonra) — üç bulgu, iki kök sebep
+
+Kullanıcı beş şey bildirdi. Tahmin etmeden veriye baktım; ikisi tek bir kök sebepten çıktı.
+
+### Odometre donmuştu — hem km hem bakım sayacı
+
+**Belirti:** araçların gittiği km güncellenmiyor, bakım sayacı artmıyor. **Ölçüm:**
+`vehicle.odometer_km` için `updated_at` ~17 saat önceydi; yani sütun donmuştu.
+
+**Kök sebep:** dünkü `OdometerWriter` monotondu (`WHERE odometer_km < yeni`) — gerçek bir cihaz
+odometresi geriye gitmez, ve kapsama boşluğundan gelen eski bir ölçüm filonun kilometresini
+geri sarmasın diye. Doğru bir koruma. Ama simülatör bugün yeniden başladı ve odometresi ~0'a
+döndü; depodaki eski tepe değer (tohum ~76 000) taze okumaların üstünde kaldı, monoton koruma
+her güncellemeyi süresiz blokladı. Hiçbir hata yok — sayı sessizce dondu.
+
+**Düzeltme (reset kaçış kapağı):** küçük bir geri gidiş hâlâ reddediliyor (eski tamponlu
+okuma), ama **2000 km'den büyük** bir düşüş artık bir sıfırlama/cihaz değişimi sayılıp kabul
+ediliyor. Böylece odometre simülatörle birlikte tırmanıyor, restart sonrası yeniden tabana
+oturuyor, ve `sinceKm = odometre − son_servis` artıyor — bakım sayacı çalışıyor. Gerçek bir
+cihaz için de doğru: cihaz değiştirilirse odometre sıfırlanır ve büyük düşüş bunu yakalar.
+
+### Geofence bölgesine giren araç ihlal almıyordu
+
+**Belirti (kullanıcı):** çizdiğim alanın içindeki/alanına giren araçlar ihlal almıyor.
+**Ölçüm:** son 1 saatte `geofence_event` = 12, `GEOFENCE ihlali (violation)` = 0.
+
+**Kök sebep:** `GeofenceRule` yalnızca `vehicle.geofence.event`'e bir olay yolluyordu; hiçbir
+şey bunu bir **ihlale** çevirmiyordu. Geçiş, bir hareket olayıydı — yasak olup olmadığı
+bölgenin türüne bağlı. **Düzeltme:** processing'in `onGeofence`'i artık, EXCLUSION bölgesine
+ENTER (yasak bölgeye giriş, **CRITICAL**) veya INCLUSION bölgesinden EXIT (zorunlu alandan
+çıkış, HIGH) için bir `violation` da yazıyor. Bu aynı zamanda dün eklediğim ama hiç ateşlenmemiş
+puan dalını (GEOFENCE_ENTER puana giriyor) canlandırıyor — çünkü artık geofence ihlali gerçekten
+var. Bölge çizildiğinde **içinde olan** araç da yakalanıyor: registry 60 sn'de bir yenilendiği
+için o araç bir sonraki telemetride "yeni bölgeye girmiş" sayılıp ENTER üretiyor.
+
+### Gerçek Türk plakası
+
+Plaka "VTS-001-Otomobil"dan **"06 AFK 1928"** formatına geçti (il 01-81, 3 harf, 4 rakam).
+Harf alfabesi Türk plakasınınki: Q, W, X yok (kullanıcının "W-X olmasın" isteği zaten bu
+kümede). Üretim deterministik (random yok) — aynı veritabanı her temiz kurulumda aynı
+plakaları verir, migration testi tekrarlanabilir. Benzersizlik `uq_vehicle_plate` ile zorunlu;
+3 harf araç numarasını 23 tabanında **injektif** kodladığı için çakışma yok.
+
+**Arayüz bağımlılığı:** eski plaka araç numarasını taşıyordu (`VTS-001`) ve UI numarayı ondan
+çıkarıp araç seçiminde/sıralamada kullanıyordu. Numara VIN'de de var (`VIN00000001`), o yüzden
+UI numarayı artık VIN'den okuyor; plaka serbestçe gerçek formata çevrildi. Kimlik tuzağı
+notunun (vehicle.id ≠ plaka) hâlâ geçerli olması bu ayrımı zaten kolaylaştırdı.
+
+### Çekmecede geçmiş yolculuklar
+
+Araç detay çekmecesindeki sefer listesi "Geçmiş yolculuklar" oldu ve her satır artık **puan
+(renkli), km ve süre** taşıyor (süre = bitiş − başlangıç).
+
+### Trip puanı — "sürekli düşüyor"
+
+Bunu ölçtüm: tripler kapanıyor ve puanlanıyor (**0 ONGOING**, son 30 dk'da 8 trip kapandı).
+Yani "puan kayıt olmuyor" birebir doğru değil — tamamlanan her sefer puanlanıp yazılıyor.
+Düşüşün sebebi dünkü **daha sıkı puanlama**nın (yedi tür sayılıyor, ağırlıklar yeniden ayarlı)
+30 günlük ortalamayı yavaşça ele geçirmesi; bir de bugünkü geofence ihlallerinin artık gerçekten
+sayılması. İkisi de kasıtlı davranış — yasak bölgeye giren araç düşük almalı. Operatörün elle
+rota değiştirmesi tek boşluk (o durumda trip park etmeden yeni rotaya devam ediyor, iki
+yolculuk tek tripte birleşiyor); nadir bir manuel eylem ve puan yine km'ye normalize olduğu
+için "yanlış" değil, o yüzden trip-bölme eklemedim.
+
+---
+
 ## 23 Temmuz 2026 — bakım bir ihlal oldu, operatöre dört araç daha
 
 İki hat: backend'de sistemi geliştirmek, frontend'de operatöre daha çok görünürlük. Ama
