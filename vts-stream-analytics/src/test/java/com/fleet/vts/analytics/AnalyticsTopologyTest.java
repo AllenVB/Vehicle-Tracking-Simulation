@@ -11,6 +11,7 @@ import com.fleet.vts.analytics.rules.VehicleRuleRegistry;
 import com.fleet.vts.analytics.topology.AnalyticsTopology;
 import com.fleet.vts.common.enums.GeofenceEventType;
 import com.fleet.vts.common.enums.RuleType;
+import com.fleet.vts.common.enums.Severity;
 import com.fleet.vts.common.enums.TripStatus;
 import com.fleet.vts.common.event.GeofenceEvent;
 import com.fleet.vts.common.event.TelemetryEvent;
@@ -334,5 +335,38 @@ class AnalyticsTopologyTest {
     private TestOutputTopic<String, TripEvent> tripTopic() {
         return driver.createOutputTopic(Topics.TRIP, new StringDeserializer(),
                 Serdes.json(TripEvent.class, mapper).deserializer());
+    }
+
+    @Test
+    void twoAggressiveViolationsInAWindowRaiseACompoundEscalation() {
+        // Compound event processing: neither rule escalates on its own, but two aggressive acts
+        // from the same vehicle inside the window do. Two hard brakes past the 300 s cooldown so
+        // both actually fire, both inside the same 10-minute aggression window.
+        start(emptyRegistry());
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(1)), t.plusSeconds(1));      // brake 1
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t.plusSeconds(310)), t.plusSeconds(310));
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(311)), t.plusSeconds(311));  // brake 2 -> compound
+
+        List<ViolationEvent> out = violations().readValuesToList();
+        long harsh = out.stream().filter(x -> x.ruleType() == RuleType.HARSH_BRAKING).count();
+        assertEquals(2, harsh, "two hard brakes past the cooldown both fire");
+        assertTrue(out.stream().anyMatch(x -> "AGGRESSIVE_DRIVING".equals(x.ruleCode())
+                        && x.severity() == Severity.CRITICAL),
+                "a compound aggressive-driving escalation is raised when the second brake lands");
+    }
+
+    @Test
+    void aSingleViolationRaisesNoCompoundEscalation() {
+        // The escalation must not fire on one act — that is the whole point of it being compound.
+        start(emptyRegistry());
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(1)), t.plusSeconds(1));      // one brake
+
+        assertFalse(violations().readValuesToList().stream()
+                        .anyMatch(x -> "AGGRESSIVE_DRIVING".equals(x.ruleCode())),
+                "one violation is not aggressive driving");
     }
 }

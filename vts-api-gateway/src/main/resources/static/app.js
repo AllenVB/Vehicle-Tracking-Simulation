@@ -53,7 +53,11 @@
         IDLING:             { tr: "Rölanti",             fine: 500 },
         LOW_BATTERY:        { tr: "Düşük Batarya",       fine: 750 },
         LOW_FUEL:           { tr: "Düşük Yakıt",         fine: 750 },
-        MAINTENANCE_OVERDUE:{ tr: "Bakım Gecikmesi",     fine: 0 }
+        MAINTENANCE_OVERDUE:{ tr: "Bakım Gecikmesi",     fine: 0 },
+        // Bileşik alarm (analytics CEP): tek ihlal değil, kısa pencerede biriken agresif
+        // sürüş. Ceza 0 — cezalandırılabilir tek olaylar zaten kendi başlarına sayıldı;
+        // bu bir CANLI eskalasyon, DB'ye yazılmıyor.
+        AGGRESSIVE_DRIVING: { tr: "Agresif Sürüş",       fine: 0 }
     };
     const tl = n => n.toLocaleString("tr-TR") + " ₺";
 
@@ -931,6 +935,13 @@
     // ── İhlaller ────────────────────────────────────────────────────────────
     function onViolation(v) {
         const rule = RULES[v.ruleCode] || { tr: "", fine: 0 };
+        // Bileşik eskalasyon (analytics CEP): tek tük ihlalden farklı, belirgin bir uyarı çıkar.
+        if (v.ruleCode === "AGGRESSIVE_DRIVING") {
+            const av = vehicles.get(v.vehicleId);
+            const n = v.value != null ? Math.round(v.value) : null;
+            showToast(`<span class="tt">🚨 Agresif sürüş — eskalasyon</span><br/>` +
+                `${av ? esc(av.plate) : "#" + v.vehicleId} · 10 dk içinde ${n ? n + " " : ""}bileşik ihlal (sert fren + hız aşımı).`);
+        }
         alerts++;
         fineTotal += rule.fine;
         countUp(document.getElementById("statAlerts"), alerts);

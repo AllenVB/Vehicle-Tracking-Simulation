@@ -3,11 +3,13 @@ package com.fleet.vts.analytics.topology;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fleet.vts.analytics.config.AnalyticsProperties;
 import com.fleet.vts.analytics.geofence.GeofenceRegistry;
+import com.fleet.vts.analytics.rules.AggressionRule;
 import com.fleet.vts.analytics.rules.GeofenceRule;
 import com.fleet.vts.analytics.rules.HarshBrakingRule;
 import com.fleet.vts.analytics.rules.IdlingRule;
 import com.fleet.vts.analytics.rules.TripRule;
 import com.fleet.vts.analytics.rules.VehicleRuleRegistry;
+import com.fleet.vts.analytics.state.AggressionState;
 import com.fleet.vts.analytics.state.GeofenceState;
 import com.fleet.vts.analytics.state.SpeedWindowAgg;
 import com.fleet.vts.analytics.state.TripState;
@@ -27,6 +29,7 @@ import org.apache.kafka.streams.kstream.Grouped;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.Repartitioned;
 import org.apache.kafka.streams.kstream.Suppressed;
 import org.apache.kafka.streams.kstream.Suppressed.BufferConfig;
 import org.apache.kafka.streams.kstream.TimeWindows;
@@ -48,6 +51,23 @@ public class AnalyticsTopology {
     private static final int MIN_WINDOW_SAMPLES = 5;
     private static final double SUSTAINED_RATIO = 0.8;
 
+    /**
+     * Compound "aggressive driving" escalation: this many escalation-worthy violations (harsh
+     * braking + sustained speeding) from one vehicle inside {@link #AGGRESSION_WINDOW} raises a
+     * single CRITICAL alert that neither rule raises on its own.
+     */
+    private static final int AGGRESSION_THRESHOLD = 2;
+    private static final Duration AGGRESSION_WINDOW = Duration.ofMinutes(10);
+    /** After an escalation fires, the same vehicle stays quiet this long before it can fire again. */
+    private static final Duration AGGRESSION_COOLDOWN = Duration.ofMinutes(10);
+    private static final String AGGRESSION_CODE = "AGGRESSIVE_DRIVING";
+    /**
+     * Marks the compound alert as already-attributed so {@code StreamOutputPersister} lets it pass
+     * without trying to store it: it is a live operator escalation built from violations that are
+     * each already persisted on their own, not a new row of its own.
+     */
+    private static final long ESCALATION_SENTINEL_RULE_ID = -1L;
+
     private final GeofenceRegistry geofenceRegistry;
     private final AnalyticsProperties.EventTime eventTime;
     private final VehicleRuleRegistry rules;
@@ -58,6 +78,7 @@ public class AnalyticsTopology {
     private final Serde<SpeedWindowAgg> speedAggSerde;
     private final Serde<GeofenceState> geofenceStateSerde;
     private final Serde<TripState> tripStateSerde;
+    private final Serde<AggressionState> aggressionSerde;
 
     public AnalyticsTopology(GeofenceRegistry geofenceRegistry, VehicleRuleRegistry rules,
                             ObjectMapper mapper, AnalyticsProperties properties) {
@@ -71,6 +92,7 @@ public class AnalyticsTopology {
         this.speedAggSerde = json(SpeedWindowAgg.class, mapper);
         this.geofenceStateSerde = json(GeofenceState.class, mapper);
         this.tripStateSerde = json(TripState.class, mapper);
+        this.aggressionSerde = json(AggressionState.class, mapper);
     }
 
     @Autowired
@@ -96,7 +118,8 @@ public class AnalyticsTopology {
                 raw.filter((k, e) -> rules.applies(RuleType.SUSTAINED_SPEEDING.name(), k));
 
         // Stateful rules (Processor API + RocksDB state stores)
-        harshBraking.process(new HarshBrakingRule(rules)).to(Topics.VIOLATION, toViolation);
+        KStream<String, ViolationEvent> harshViolations = harshBraking.process(new HarshBrakingRule(rules));
+        harshViolations.to(Topics.VIOLATION, toViolation);
         idling.process(new IdlingRule()).to(Topics.VIOLATION, toViolation);
         geofence.process(new GeofenceRule(geofenceRegistry, geofenceStateSerde))
                 .to(Topics.GEOFENCE_EVENT, Produced.with(Serdes.String(), geofenceSerde));
@@ -114,7 +137,8 @@ public class AnalyticsTopology {
         // third of the fleet permanently speeding that alone was ~33 events/min and
         // dominated the violation stream. A tumbling window emits at most once per
         // 5 minutes per vehicle, matching the rule's cooldown_seconds (300).
-        sustainedSpeeding.filter((k, e) -> e != null && e.speedKmh() != null)
+        KStream<String, ViolationEvent> sustainedViolations =
+                sustainedSpeeding.filter((k, e) -> e != null && e.speedKmh() != null)
                 .groupByKey(Grouped.with(Serdes.String(), telemetrySerde))
                 // Grace was zero, which was correct only while event time and arrival time were
                 // the same thing. With a device channel they are not: a reading recorded at 09:58
@@ -132,7 +156,19 @@ public class AnalyticsTopology {
                 .filter((wk, agg) -> agg != null
                         && agg.total() >= MIN_WINDOW_SAMPLES
                         && agg.ratioOver() >= SUSTAINED_RATIO)
-                .map((wk, agg) -> KeyValue.pair(wk.key(), sustainedViolation(wk.key(), agg, wk.window().end())))
+                .map((wk, agg) -> KeyValue.pair(wk.key(), sustainedViolation(wk.key(), agg, wk.window().end())));
+        sustainedViolations.to(Topics.VIOLATION, toViolation);
+
+        // COMPOUND EVENT PROCESSING: aggressive driving = >= AGGRESSION_THRESHOLD escalation-worthy
+        // violations (harsh braking, sustained speeding) from one vehicle within a ROLLING
+        // AGGRESSION_WINDOW. Repartition first so a vehicle's harsh and sustained violations meet
+        // on the same task; AggressionRule keeps the per-vehicle timestamps and a cooldown, and
+        // emits a CRITICAL ViolationEvent (sentinel ruleId) that rides the existing violation ->
+        // WebSocket relay to the operator's map without being stored or double-counted.
+        harshViolations.merge(sustainedViolations)
+                .repartition(Repartitioned.with(Serdes.String(), violationSerde).withName("aggression-in"))
+                .process(new AggressionRule(aggressionSerde, AGGRESSION_WINDOW, AGGRESSION_COOLDOWN,
+                        AGGRESSION_THRESHOLD, ESCALATION_SENTINEL_RULE_ID, AGGRESSION_CODE))
                 .to(Topics.VIOLATION, toViolation);
     }
 

@@ -5,6 +5,39 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 23 Temmuz 2026 (gece) — bileşik alarm (Kafka CEP) ve pencerenin tuzağı
+
+Tek tük ihlal bir şey söylemez; **kısa sürede biriken** ihlal söyler. "Agresif sürüş" bileşik
+alarmı: bir aracın 10 dk içinde 2+ eskalasyon-değer ihlali (sert fren, sürekli hız aşımı).
+
+**Yeni tür açmadan (bilerek).** Doğru "tam" çözüm yeni bir `RECKLESS_IN_ZONE` ihlal türüydü —
+ama o, `vts-common` enum'ı (HER servisi kırar) + DB migration + puanlama + UI demek. Bunun
+yerine bileşik alarm mevcut `ViolationEvent`'i yeniden kullanıyor: sentinel `ruleId = -1` ile
+processing'in persister'ı onu "zaten işlenmiş" sayıp atlıyor (DB'ye yazılmıyor, puanı
+şişirmiyor), ama gateway'in mevcut `LiveRelays.onViolation` → `/topic/violations` yayını onu
+operatörün haritasına taşıyor. İstemcide `AGGRESSIVE_DRIVING` için etiket + belirgin eskalasyon
+toast'ı. Yani veri yolu **analytics-only**, vts-common'a dokunulmadı.
+
+**Pencerenin tuzağı — ölçünce çıktı.** İlk sürüm 10-dk **tumbling** (sabit takvim kovası)
+pencereli agregasyondu; birim testi geçti, deploy oldu, ama canlıda hiç ateşlenmedi. Neden?
+Ölçtüm: araç 54'ün iki sert freni 13:06:07 ve 13:11:17'de — 5 dk arayla ama sabit pencere
+sınırının iki yanında (kova 2974686 vs 2974687), yani hiçbir kovada sayı 2'ye ulaşmadı. Sabit
+pencere, "10 dk içinde 2" derken sınıra takılan çiftleri kaçırıyor. Bu, tumbling'in bu iş için
+yanlış araç olduğunu gösteriyor. Düzeltme: codebase'in kendi desenine (TripRule/GeofenceRule
+gibi **custom Processor**) geçtim — `AggressionRule` her araç için son ihlallerin
+zaman damgalarını tutuyor, gelen her ihlalde pencereyi kaydırıp sayıyor, ve bir kez ateşleyince
+`cooldown` ile susuyor (her sonraki ihlalde tekrar bağırmasın). Kayan pencere = sınırdan
+bağımsız, gerçek "birbirinden 10 dk içinde" semantiği. Merge'den önce `repartition`, aracın
+sert fren ve hız aşımı akışlarının aynı task'ta buluşmasını garanti ediyor.
+
+**Doğrulama durumu:** 16/16 birim testi (2 CEP testi: 2 ihlal → alarm, 1 → yok) ve deploy
+(streams RUNNING, aggression-state store + repartition topic oluştu, istemci wiring sunuluyor).
+Alarm doğası gereği seyrek (eskalasyon); kısa gözlem penceresinde canlı örnek yakalanmadı —
+restart sonrası taze state + sürekli-hız'ın gecikmesi bunu yavaşlatıyor. Docker motoru bu
+sırada 500'e düştü (bilinen kararsızlık), tam sağlık taraması ertelendi.
+
+---
+
 ## 23 Temmuz 2026 (gece) — Redis'i hak ettiği işlere koymak
 
 Redis şimdiye kadar sadece cache'ti (son konum, araç-lookup, bildirim cooldown). İki gerçek
