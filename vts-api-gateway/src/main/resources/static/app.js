@@ -32,6 +32,10 @@
     const draw = { on: false, points: [], layer: null };
     let routeLayer = null;
     let alerts = 0, fineTotal = 0, fitted = false;
+    const maintProgress = new Map();   // vehicleId -> {sinceKm, intervalKm, overdue}
+    let geofences = [];                // yönetim listesi için tutulur
+    let liveMode = true;               // ihlal listesi canlı akışta mı, geçmişte mi
+    let alertCursor = null;            // ihlal geçmişi sayfalama imleci
 
     // Tip -> renk: otomobil mavi, tır sarı, motor beyaz, helikopter mor
     const TYPE_COLOR = { CAR: "#2b7fff", TRUCK: "#f5b301", MOTORCYCLE: "#f8fafc", HELICOPTER: "#a855f7" };
@@ -47,7 +51,8 @@
         GEOFENCE_EXIT:      { tr: "Bölge Çıkışı",        fine: 1000 },
         IDLING:             { tr: "Rölanti",             fine: 500 },
         LOW_BATTERY:        { tr: "Düşük Batarya",       fine: 750 },
-        LOW_FUEL:           { tr: "Düşük Yakıt",         fine: 750 }
+        LOW_FUEL:           { tr: "Düşük Yakıt",         fine: 750 },
+        MAINTENANCE_OVERDUE:{ tr: "Bakım Gecikmesi",     fine: 0 }
     };
     const tl = n => n.toLocaleString("tr-TR") + " ₺";
 
@@ -124,6 +129,20 @@
         loadMaintenance();
         setInterval(loadMaintenance, 60000);
         setInterval(refreshAgoLabels, 20000);
+
+        loadMaintProgress();
+        setInterval(loadMaintProgress, 30000);
+        // İhlal filtresi dropdown'ını RULES'tan doldur (tek gerçek kaynak).
+        const fr = document.getElementById("fRule");
+        Object.entries(RULES).forEach(([code, r]) => {
+            const o = document.createElement("option"); o.value = code; o.textContent = r.tr; fr.appendChild(o);
+        });
+        document.getElementById("fApply").addEventListener("click", () => loadViolationHistory(true));
+        document.getElementById("fLive").addEventListener("click", backToLive);
+        document.getElementById("alertMore").addEventListener("click", () => loadViolationHistory(false));
+        document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+        document.getElementById("ovBtn").addEventListener("click", openOverview);
+        document.getElementById("ovClose").addEventListener("click", () => document.getElementById("ovModal").classList.remove("on"));
     }
 
     function initMaps() {
@@ -341,8 +360,20 @@
             ? `<br><span style="color:#ffd27f">⚠ ${msgs[0].category}:</span> ${msgs[0].body}` : "";
         return `<b>${v ? v.plate : "#" + p.vehicleId}</b>` +
             `<br><small>${v ? v.model : ""}</small><br>Hız: ${p.speedKmh ?? "-"} km/s` +
-            driverScoreLine(v) +
+            driverScoreLine(v) + maintLine(p.vehicleId) +
             (j && j.destination ? `<br>${journeyText(j)}` : "") + lastMsg;
+    }
+
+    /**
+     * Balonda bakım ilerlemesi: son servisten beri gidilen km / servis aralığı.
+     * Kullanıcının istediği '1234/10000' formatı. Aralığı geçince kırmızı ve 'gecikmiş'.
+     */
+    function maintLine(vehicleId) {
+        const m = maintProgress.get(vehicleId);
+        if (!m) return "";
+        const renk = m.overdue ? "#e24b4a" : (m.sinceKm >= m.intervalKm * 0.9 ? "#f0997b" : "#8aa0b4");
+        const et = m.overdue ? " — gecikmiş!" : "";
+        return `<br>Bakım: <b style="color:${renk}">${m.sinceKm.toLocaleString("tr-TR")}/${m.intervalKm.toLocaleString("tr-TR")} km</b>${et}`;
     }
 
     /** Balondaki sürücü puanı satırı: aracı kullanan sürücü ve yolculuk ortalaması. */
@@ -472,7 +503,10 @@
             }
             info.innerHTML = `<b>${v.plate}</b>${heli}` +
                 `<div class="meta" style="margin-top:4px">${v.model} · ${p ? p.speedKmh + " km/s" : "-"}${j ? " · " + journeyText(j) : ""}</div>` +
-                scoreLine + tankLine + fuelLine;
+                scoreLine + tankLine + fuelLine +
+                `<button id="detailBtn" class="btn-ghost" style="width:100%;margin-top:8px">Araç detayı ▸</button>`;
+            const db = document.getElementById("detailBtn");
+            if (db) db.addEventListener("click", () => openDrawer(selected));
             if (p) ctrl.panTo([p.lat, p.lon]);
             if (changedSelection) showPlannedRoute(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
@@ -779,12 +813,14 @@
             // çiziliyor. Aksi halde her yenilemede eskisinin üstüne bir kopya daha binerdi.
             if (geofenceLayer) live.removeLayer(geofenceLayer);
             geofenceLayer = L.layerGroup().addTo(live);
-            (await res.json()).forEach(g => {
+            geofences = await res.json();
+            geofences.forEach(g => {
                 const ex = g.kind === "EXCLUSION";
                 L.geoJSON(JSON.parse(g.geojson), {
                     style: { color: ex ? "#e24b4a" : "#5dcaa5", weight: 2, fillOpacity: 0.12, dashArray: ex ? null : "4" }
                 }).bindTooltip(`${g.name} (${ex ? "yasak" : "izinli"})`).addTo(geofenceLayer);
             });
+            renderZoneList();
         } catch (_) { /* yoksay */ }
     }
 
@@ -864,6 +900,7 @@
         }
         const veh = vehicles.get(v.vehicleId);
         const el = document.getElementById("alertList");
+        if (!liveMode) return;   // geçmiş görünümündeyken canlı satır listeyi bozmasın
         const placeholder = el.querySelector(".empty");
         if (placeholder) placeholder.remove();
 
@@ -1202,6 +1239,274 @@
     function esc(text) {
         return String(text == null ? "" : text).replace(/[&<>"]/g, c =>
             ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    // ── Bakım ilerlemesi (balon için, toplu) ────────────────────────────────
+    async function loadMaintProgress() {
+        try {
+            const res = await fetch("/api/v1/maintenance/progress", { headers: auth() });
+            if (!res.ok) return;
+            maintProgress.clear();
+            (await res.json()).forEach(m => maintProgress.set(m.vehicleId, {
+                sinceKm: m.sinceKm, intervalKm: m.intervalKm, overdue: m.overdue
+            }));
+            refreshOpenPopups();
+        } catch (_) { /* yoksay */ }
+    }
+
+    // ── İhlal geçmişi + filtre ──────────────────────────────────────────────
+    /**
+     * Canlı akış ekranda kalıcı bir geçmiş DEĞİL: sayfa yenilenince sıfırlanıyor. Bu, aynı
+     * ihlalleri keyset sayfalamalı /violations ucundan çekip araç/kural/güne göre süzüyor.
+     * Geçmiş moduna geçince canlı satırlar listeye karışmaz (onViolation liveMode'a bakıyor).
+     */
+    async function loadViolationHistory(reset) {
+        liveMode = false;
+        document.getElementById("fLive").classList.remove("on");
+        if (reset) alertCursor = null;
+
+        const plate = document.getElementById("fPlate").value;
+        const rule = document.getElementById("fRule").value;
+        const days = document.getElementById("fDays").value;
+        const params = new URLSearchParams({ limit: "40" });
+        if (rule) params.set("ruleCode", rule);
+        if (days) params.set("from", new Date(Date.now() - days * 86400000).toISOString());
+        if (plate) {
+            const vid = byPlateNo.get(parseInt(plate, 10));
+            if (vid != null) params.set("vehicleId", vid);
+        }
+        if (alertCursor) params.set("cursor", alertCursor);
+
+        try {
+            const res = await fetch("/api/v1/violations?" + params, { headers: auth() });
+            if (!res.ok) return;
+            const page = await res.json();
+            const el = document.getElementById("alertList");
+            if (reset) el.innerHTML = "";
+            el.querySelectorAll(".empty").forEach(x => x.remove());
+            if (reset && !page.items.length) {
+                el.innerHTML = '<div class="empty">Bu filtreyle ihlal bulunamadı.</div>';
+            }
+            page.items.forEach(v => el.appendChild(historyRow(v)));
+            alertCursor = page.nextCursor;
+            document.getElementById("alertMore").classList.toggle("on", !!page.nextCursor);
+        } catch (_) { /* yoksay */ }
+    }
+
+    function historyRow(v) {
+        const rule = RULES[v.ruleCode] || { tr: v.ruleCode, fine: 0 };
+        const veh = vehicles.get(v.vehicleId);
+        const row = document.createElement("div");
+        row.className = "row alertRow sev-" + (v.severity || "MEDIUM");
+        row.innerHTML =
+            `<div class="ar-top"><span class="code">${esc(rule.tr)}</span>` +
+            `<span class="fine">${tl(rule.fine)}</span></div>` +
+            `<div class="meta">${esc(veh ? veh.plate : "#" + v.vehicleId)} · ` +
+            `${v.occurredAt ? new Date(v.occurredAt).toLocaleString("tr-TR") : ""}</div>`;
+        row.addEventListener("click", () => select(v.vehicleId));
+        return row;
+    }
+
+    /** Canlı akışa dön: filtreyi temizle, canlı satırlar yeniden listelensin. */
+    function backToLive() {
+        liveMode = true;
+        alertCursor = null;
+        document.getElementById("fLive").classList.add("on");
+        document.getElementById("alertMore").classList.remove("on");
+        const el = document.getElementById("alertList");
+        el.innerHTML = '<div class="empty">Canlı akış — yeni ihlal bekleniyor.</div>';
+    }
+
+    // ── Yasak bölge yönetimi ────────────────────────────────────────────────
+    function renderZoneList() {
+        const el = document.getElementById("zoneList");
+        document.getElementById("zoneCount").textContent = geofences.length ? `(${geofences.length})` : "";
+        if (!geofences.length) {
+            el.innerHTML = '<div class="empty">Tanımlı bölge yok.</div>';
+            return;
+        }
+        el.innerHTML = "";
+        geofences.forEach(g => {
+            const ex = g.kind === "EXCLUSION";
+            const item = document.createElement("div");
+            item.className = "gz-item";
+            item.innerHTML =
+                `<span class="gz-dot" style="background:${ex ? "#e24b4a" : "#5dcaa5"}"></span>` +
+                `<span class="gz-name" title="${esc(g.name)}">${esc(g.name)}</span>` +
+                `<button class="gz-del" data-id="${g.id}">Sil</button>`;
+            item.querySelector(".gz-name").addEventListener("click", () => zoomToZone(g));
+            item.querySelector(".gz-del").addEventListener("click", () => deleteZone(g));
+            el.appendChild(item);
+        });
+    }
+
+    function zoomToZone(g) {
+        try {
+            const layer = L.geoJSON(JSON.parse(g.geojson));
+            live.fitBounds(layer.getBounds(), { padding: [60, 60] });
+        } catch (_) { /* yoksay */ }
+    }
+
+    async function deleteZone(g) {
+        if (!confirm(`"${g.name}" bölgesi kaldırılsın mı? (kayıt silinmez, pasifleşir)`)) return;
+        try {
+            const res = await fetch(`/api/v1/geofences/${g.id}`, { method: "DELETE", headers: auth() });
+            if (!res.ok && res.status !== 204) { flash("Bölge kaldırılamadı"); return; }
+            flash("Bölge kaldırıldı");
+            await loadGeofences();
+        } catch (_) { flash("Bölge kaldırılamadı"); }
+    }
+
+    // ── Araç detay çekmecesi ────────────────────────────────────────────────
+    /**
+     * Araca ait dağınık bilgiyi tek yerde toplar: son seferler (oynatma butonuyla), komut
+     * geçmişi, bakım durumu ve mesajlar. Kenar çubuğu aksiyonları tutuyor; çekmece okuma görünümü.
+     */
+    async function openDrawer(vehicleId) {
+        if (vehicleId == null) return;
+        const v = vehicles.get(vehicleId);
+        document.getElementById("dTitle").textContent = v ? v.plate : "#" + vehicleId;
+        document.getElementById("dModel").textContent = v ? v.model : "";
+        document.getElementById("vehDrawer").classList.add("on");
+        const body = document.getElementById("dBody");
+        body.innerHTML = '<div class="dsect dmuted">Yükleniyor…</div>';
+
+        const [trips, cmds, msgs] = await Promise.all([
+            fetchJson(`/api/v1/vehicles/${vehicleId}/trips?limit=5`),
+            fetchJson(`/api/v1/vehicles/${vehicleId}/commands?limit=5`),
+            fetchJson(`/api/v1/vehicles/${vehicleId}/messages`)
+        ]);
+        const m = maintProgress.get(vehicleId);
+
+        let html = "";
+        // Bakım
+        if (m) {
+            const pct = Math.min(100, Math.round(m.sinceKm / m.intervalKm * 100));
+            const cls = m.overdue ? "over" : (pct >= 90 ? "warn" : "");
+            html += `<div class="dsect"><h4>Bakım</h4>` +
+                `<div class="drow"><span>Sonraki servise</span><span>${m.sinceKm.toLocaleString("tr-TR")}/${m.intervalKm.toLocaleString("tr-TR")} km</span></div>` +
+                `<div class="dbar"><i class="${cls}" style="width:${pct}%"></i></div>` +
+                (m.overdue ? `<div class="dmuted" style="color:#e24b4a;margin-top:4px">Bakım gecikmiş</div>` : "") +
+                `</div>`;
+        }
+        // Son seferler
+        html += `<div class="dsect"><h4>Son seferler</h4>`;
+        if (trips && trips.length) {
+            trips.forEach(t => {
+                const s = t.score != null ? t.score : "-";
+                html += `<div class="drow"><span>${new Date(t.startedAt).toLocaleDateString("tr-TR")} · ${Math.round(t.distanceKm)} km</span>` +
+                    `<span>★ ${s}/10 <button class="dreplay" data-trip="${t.id}">Oynat</button></span></div>`;
+            });
+        } else { html += `<div class="dmuted">Tamamlanmış sefer yok.</div>`; }
+        html += `</div>`;
+        // Komutlar
+        html += `<div class="dsect"><h4>Son komutlar</h4>`;
+        if (cmds && cmds.length) {
+            cmds.forEach(c => html += `<div class="drow"><span>${esc(c.command)}</span>` +
+                `<span class="dmuted">${CMD_STATUS[c.status] || c.status}</span></div>`);
+        } else { html += `<div class="dmuted">Komut geçmişi yok.</div>`; }
+        html += `</div>`;
+        // Mesajlar
+        html += `<div class="dsect"><h4>Uyarılar</h4>`;
+        if (msgs && msgs.length) {
+            msgs.slice(0, 5).forEach(mm => html += `<div class="drow"><span>${esc(mm.category)}: ${esc(mm.body)}</span></div>`);
+        } else { html += `<div class="dmuted">Uyarı yok.</div>`; }
+        html += `</div>`;
+
+        body.innerHTML = html;
+        body.querySelectorAll(".dreplay").forEach(b =>
+            b.addEventListener("click", () => { closeDrawer(); startReplayTrip(Number(b.dataset.trip)); }));
+    }
+
+    function closeDrawer() {
+        document.getElementById("vehDrawer").classList.remove("on");
+    }
+
+    /** Belirli bir trip'i oynat (çekmeceden). startReplay araç bazlı; bu trip bazlı. */
+    async function startReplayTrip(tripId) {
+        stopReplay();
+        try {
+            const points = await fetchJson(`/api/v1/trips/${tripId}/route`);
+            if (!points || points.length < 2) { flash("Seferin izi yok"); return; }
+            replay.tripId = tripId; replay.points = points; replay.idx = 0;
+            replay.layer = L.layerGroup().addTo(live);
+            L.polyline(points.map(p => [p.lat, p.lon]),
+                { color: "#ffd27f", weight: 3, opacity: .55, dashArray: "5 4" }).addTo(replay.layer);
+            replay.marker = L.marker([points[0].lat, points[0].lon], {
+                icon: L.divIcon({ className: "", html: '<div class="replay-mk"></div>', iconSize: [14, 14] }),
+                zIndexOffset: 1200
+            }).addTo(replay.layer);
+            document.getElementById("replayRange").max = String(points.length - 1);
+            document.getElementById("replayRange").value = "0";
+            document.getElementById("replayBar").classList.add("on");
+            live.fitBounds(L.polyline(points.map(p => [p.lat, p.lon])).getBounds(), { padding: [40, 40] });
+            showReplayFrame(0); playReplay();
+        } catch (_) { flash("Sefer yüklenemedi"); }
+    }
+
+    async function fetchJson(url) {
+        try {
+            const res = await fetch(url, { headers: auth() });
+            return res.ok ? await res.json() : null;
+        } catch (_) { return null; }
+    }
+
+    // ── Genel bakış modalı ──────────────────────────────────────────────────
+    /**
+     * Filonun bir bakışta özeti: durum dağılımı, bakım, ve son ihlallerin türe göre kırılımı.
+     * İhlal kırılımı /violations'tan (son 200, 7 gün) türetiliyor; yeni bir uç gerektirmiyor.
+     */
+    async function openOverview() {
+        document.getElementById("ovModal").classList.add("on");
+        const body = document.getElementById("ovBody");
+        body.innerHTML = '<div class="ov-h">Yükleniyor…</div>';
+
+        // Durum dağılımı (istemcideki canlı veriden)
+        let moving = 0, parked = 0, stopped = 0, waiting = 0;
+        vehicles.forEach((v, id) => {
+            const j = journey.get(id), p = pos.get(id);
+            if (j && j.parked) parked++;
+            else if (p && p.speedKmh > 0) moving++;
+            else if (p && p.speedKmh === 0) stopped++;
+            else waiting++;
+        });
+        let overdue = 0, dueSoon = 0;
+        maintProgress.forEach(m => { if (m.overdue) overdue++; else if (m.sinceKm >= m.intervalKm * 0.9) dueSoon++; });
+
+        // Son 7 günün ihlalleri, türe göre
+        const from = new Date(Date.now() - 7 * 86400000).toISOString();
+        const page = await fetchJson("/api/v1/violations?limit=200&from=" + from);
+        const byType = {};
+        (page && page.items ? page.items : []).forEach(v => {
+            byType[v.ruleCode] = (byType[v.ruleCode] || 0) + 1;
+        });
+        const pairs = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+        const max = pairs.length ? pairs[0][1] : 1;
+
+        let html = `<div class="ov-kpis">` +
+            ovKpi(vehicles.size, "Araç") + ovKpi(moving, "Yolda") +
+            ovKpi(stopped, "Durdu", stopped ? "#ff9b9b" : "") +
+            ovKpi(overdue, "Bakım gecikmiş", overdue ? "#e24b4a" : "") + `</div>`;
+
+        html += `<div class="ov-h">Son 7 gün · ihlal türleri (${pairs.reduce((a, b) => a + b[1], 0)})</div>`;
+        html += `<div class="ov-bars">`;
+        if (!pairs.length) html += `<div class="ov-h" style="text-transform:none">İhlal yok.</div>`;
+        pairs.forEach(([code, n]) => {
+            const tr = (RULES[code] || { tr: code }).tr;
+            html += `<div class="ov-bar"><span class="lbl">${esc(tr)}</span>` +
+                `<span class="track"><i style="width:${Math.round(n / max * 100)}%"></i></span>` +
+                `<span class="n">${n}</span></div>`;
+        });
+        html += `</div>`;
+        html += `<div class="ov-h">Bakım</div><div class="ov-bars">` +
+            `<div class="ov-bar"><span class="lbl">Yaklaşan</span><span class="track"><i style="width:${dueSoon ? 60 : 3}%;background:#f0997b"></i></span><span class="n">${dueSoon}</span></div>` +
+            `<div class="ov-bar"><span class="lbl">Gecikmiş</span><span class="track"><i style="width:${overdue ? 60 : 3}%;background:#e24b4a"></i></span><span class="n">${overdue}</span></div>` +
+            `</div>`;
+        body.innerHTML = html;
+    }
+
+    function ovKpi(value, label, color) {
+        return `<div class="ov-kpi"><b${color ? ` style="color:${color}"` : ""}>${value}</b><span>${label}</span></div>`;
     }
 
 })();

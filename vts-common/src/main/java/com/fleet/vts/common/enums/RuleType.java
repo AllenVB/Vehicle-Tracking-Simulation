@@ -15,5 +15,8 @@ public enum RuleType {
     SUSTAINED_SPEEDING,
     IDLING,
     GEOFENCE_ENTER,
-    GEOFENCE_EXIT
+    GEOFENCE_EXIT,
+    // Fleet-management (scheduler-service): odometer past the maintenance interval.
+    // Not a driving behaviour, so it stays out of the trip score; it is still a violation.
+    MAINTENANCE_OVERDUE
 }

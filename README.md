@@ -40,7 +40,17 @@ TimescaleDB + PostGIS · Redis · Leaflet · çok modüllü Maven monorepo.**
 - **Seferi oynat** (▶): biten bir yolculuk, kırıntılarının **kendi zaman damgalarıyla**
   haritada oynatılır; zaman çubuğuyla ileri geri sarılır.
 - **Bakım**: gerçek kilometre sayacına göre yaklaşan/geçmiş bakımlar barın altında listelenir,
-  "Yapıldı" ile kayda geçer ve bir sonraki periyoda yuvarlanır.
+  "Yapıldı" ile kayda geçer ve bir sonraki periyoda yuvarlanır. Periyodik aralık **10.000 km**;
+  aracın balonunda **`1234/10000 km`** olarak ilerleme gösterilir. Aralığı geçen araç bir
+  **`MAINTENANCE_OVERDUE` ihlali** üretir (aşağıya bakın).
+- **İhlal geçmişi + filtre**: liste yalnızca canlı akış değil — araç/kural/güne göre süzülüp
+  keyset sayfalamayla geçmişe gidilebilir.
+- **Araç detayı** (▸): araca ait son seferler (oynatma), komut geçmişi, bakım durumu ve
+  uyarılar sağdan açılan tek panelde toplanır.
+- **Bölge yönetimi**: çizilen yasak bölgeler listelenir, tıklanınca haritada odaklanılır,
+  "Sil" ile pasifleştirilir (kayıt silinmez — ihlal geçmişi referans verir).
+- **Genel bakış** (📊 Özet): filo durum dağılımı, bakım ve son 7 günün ihlal türü kırılımı
+  tek modalda.
 
 ### Operatör: rota oluşturma ve araç uyarıları
 
@@ -88,7 +98,7 @@ flowchart TB
     end
 
     NOT["vts-notification :8084<br/>Strategy sender · quiet hours"]
-    SCH["vts-scheduler :8086<br/>ShedLock · outbox publisher"]
+    SCH["vts-scheduler :8086<br/>ShedLock · outbox publisher<br/>bakım gecikmesi ihlali"]
 
     subgraph SUNUM["5 - Sunum (tek sayfa, tek origin)"]
         GW["vts-api-gateway :8080<br/>JWT · REST · STOMP WebSocket<br/>1 sn delta · viewport filtresi<br/>operatör kontrolünü simülatöre proxy'ler"]
@@ -147,7 +157,7 @@ Sağ haritada çift tık → Gateway (proxy) → Simülatör (override + anında
 | `vts-stream-analytics` | 8083 | Kafka Streams; durumlu kurallar (sert fren, sürekli hız, rölanti, geofence, trip) |
 | `vts-notification-service` | 8084 | Strategy sender'lar, cooldown (Redis), quiet hours |
 | `vts-api-gateway` | 8080 | JWT güvenlik, REST, STOMP WebSocket, şema sahibi (Flyway) **+ tek sayfa UI (iki harita)** + operatör kontrol proxy'si |
-| `vts-scheduler-service` | 8086 | ShedLock jobs: offline tespiti, bakım hatırlatma, outbox publisher |
+| `vts-scheduler-service` | 8086 | ShedLock jobs: offline tespiti, bakım hatırlatma, **bakım gecikmesi ihlali üretimi**, outbox publisher |
 
 ---
 
@@ -298,6 +308,8 @@ CRITICAL saydığı tek ihlal) **10/10 alabiliyordu**, yani bu puanın kendi tan
 | `SPEED_LIMIT` | 1.0 | Referans. |
 | `IDLING` | 2/3 | |
 | `LOW_FUEL` / `LOW_BATTERY` | **1/3** | En hafifi ve bilinçli: bu bir planlama hatası, tehlike değil — ve en az sürücü kadar aracı yola çıkarana ait. |
+
+**Sekizinci tür puanın dışında.** Bakım gecikmesi (`MAINTENANCE_OVERDUE`) bir ihlal olarak listelenir, canlı haritaya düşer ve bildirilir — ama **sürücü puanına girmez**. Sebebi türlerin geri kalanından farkı: diğerleri aracın nasıl sürüldüğünü anlatır, bu ise filonun nasıl yönetildiğini. Aracı zamanında servise sokmamak sürücünün sürüşüyle ilgili değil.
 
 2.5'in 2.0 yerine seçilmesinin bir sebebi var ve yazmaya değer: puan tam sayıya
 yuvarlanıyor, yani birbirine %20'den yakın iki ağırlık her gerçekçi ihlal sayısında **aynı

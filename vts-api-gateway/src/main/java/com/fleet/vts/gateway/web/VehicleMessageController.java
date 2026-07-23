@@ -1,10 +1,9 @@
 package com.fleet.vts.gateway.web;
 
+import com.fleet.vts.gateway.repository.VehicleMessageRepository;
 import com.fleet.vts.gateway.security.CurrentUser;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.ResultSetExtractor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,8 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,16 +23,20 @@ import java.util.Map;
  * Each message is stored per vehicle and broadcast to every connected operator over
  * {@code /topic/vehicle-messages}, so it both persists (shown when the vehicle is clicked)
  * and arrives as a live notification.
+ *
+ * <p>The SQL lives in {@link VehicleMessageRepository}; this class only maps HTTP to it.
  */
 @RestController
 @RequestMapping("/api/v1/vehicles")
 public class VehicleMessageController {
 
-    private final JdbcTemplate jdbc;
+    private static final int MAX_BODY = 500;
+
+    private final VehicleMessageRepository messages;
     private final SimpMessagingTemplate messaging;
 
-    public VehicleMessageController(JdbcTemplate jdbc, SimpMessagingTemplate messaging) {
-        this.jdbc = jdbc;
+    public VehicleMessageController(VehicleMessageRepository messages, SimpMessagingTemplate messaging) {
+        this.messages = messages;
         this.messaging = messaging;
     }
 
@@ -52,20 +54,17 @@ public class VehicleMessageController {
         if (body.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
-        if (body.length() > 500) {
-            body = body.substring(0, 500);
+        if (body.length() > MAX_BODY) {
+            body = body.substring(0, MAX_BODY);
         }
 
-        String plate = jdbc.query("SELECT plate FROM vehicle WHERE id = ? AND tenant_id = ?",
-                (ResultSetExtractor<String>) rs -> rs.next() ? rs.getString(1) : null, id, tenant);
+        String plate = messages.findPlate(id, tenant);
         if (plate == null) {
             return ResponseEntity.notFound().build();
         }
+        messages.insert(tenant, id, category, body);
 
-        jdbc.update("INSERT INTO vehicle_message (tenant_id, vehicle_id, category, body) VALUES (?, ?, ?, ?)",
-                tenant, id, category, body);
-
-        Map<String, Object> msg = new HashMap<>();
+        Map<String, Object> msg = new LinkedHashMap<>();
         msg.put("vehicleId", id);
         msg.put("plate", plate);
         msg.put("category", category);
@@ -77,19 +76,6 @@ public class VehicleMessageController {
 
     @GetMapping("/{id}/messages")
     public List<Map<String, Object>> list(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id) {
-        return jdbc.query("""
-                SELECT category, body, created_at
-                FROM vehicle_message
-                WHERE tenant_id = ? AND vehicle_id = ?
-                ORDER BY created_at DESC LIMIT 20
-                """,
-                (rs, n) -> {
-                    Map<String, Object> m = new HashMap<>();
-                    m.put("category", rs.getString("category"));
-                    m.put("body", rs.getString("body"));
-                    m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
-                    return m;
-                },
-                CurrentUser.tenantId(jwt), id);
+        return messages.recent(CurrentUser.tenantId(jwt), id);
     }
 }

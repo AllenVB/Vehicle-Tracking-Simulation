@@ -280,6 +280,8 @@ services:
         OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       # The gateway serves the whole UI and proxies operator control to the simulator.
       SIMULATOR_BASE_URL: http://simulator:8085
+      # DLQ replay re-ingests telemetry through ingestion's HTTP endpoint.
+      VTS_INGESTION_BASE_URL: http://ingestion-service:8081
     ports: ["8080:8080"]
     restart: unless-stopped
 

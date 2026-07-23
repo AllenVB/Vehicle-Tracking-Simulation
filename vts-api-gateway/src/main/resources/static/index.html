@@ -253,13 +253,77 @@
         #legend span { display: flex; align-items: center; gap: 4px; }
         #legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); display: block; }
         #legend i.sq { border-radius: 2px; }
+
+        /* ── İhlal filtresi ── */
+        #alertFilter { display: flex; gap: 5px; padding: 6px 12px; flex-wrap: wrap; align-items: center; }
+        #alertFilter input, #alertFilter select { padding: 4px 7px; border-radius: 5px; border: 1px solid var(--line);
+            background: var(--panel); color: var(--text); font-size: 11px; }
+        #alertFilter input { width: 62px; }
+        #alertFilter .fbtn { padding: 4px 9px; border: 1px solid var(--line); border-radius: 5px;
+            background: transparent; color: var(--text); font-size: 11px; cursor: pointer; }
+        #alertFilter .fbtn.on { background: var(--accent); color: #201607; border-color: var(--accent); }
+        #alertMore { width: calc(100% - 24px); margin: 4px 12px 8px; padding: 6px; border: 1px dashed var(--line);
+            border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; display: none; }
+        #alertMore.on { display: block; }
+
+        /* ── Bölge yönetim listesi ── */
+        .gz-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 5px 12px; }
+        .gz-item .gz-dot { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+        .gz-item .gz-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .gz-del { padding: 2px 7px; border: 1px solid var(--line); border-radius: 5px; background: transparent;
+            color: #ff9b9b; cursor: pointer; font-size: 11px; }
+
+        /* ── Araç detay çekmecesi (sağdan açılır) ── */
+        #vehDrawer { position: fixed; top: 0; right: 0; width: 340px; max-width: 90vw; height: 100%;
+            background: var(--panel); border-left: 1px solid var(--line); z-index: 1500;
+            transform: translateX(105%); transition: transform .25s ease; overflow-y: auto;
+            box-shadow: -8px 0 24px rgba(0,0,0,.5); }
+        #vehDrawer.on { transform: translateX(0); }
+        #vehDrawer header { display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+        #vehDrawer h3 { margin: 0; font-size: 15px; }
+        #vehDrawer .dsub { font-size: 11px; color: var(--muted); }
+        #drawerClose { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
+        .dsect { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+        .dsect h4 { margin: 0 0 8px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+        .dsect .drow { font-size: 12px; padding: 4px 0; display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.04); }
+        .dsect .drow:last-child { border-bottom: 0; }
+        .dsect .dmuted { color: var(--muted); font-size: 10.5px; }
+        .dbar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 6px; }
+        .dbar i { display: block; height: 100%; background: #5dcaa5; }
+        .dbar i.warn { background: #f0997b; } .dbar i.over { background: var(--alert); }
+        .dreplay { padding: 2px 7px; border: 1px solid var(--line); border-radius: 5px; background: transparent;
+            color: var(--text); cursor: pointer; font-size: 10px; }
+
+        /* ── Genel bakış modalı ── */
+        #ovBtn { border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 11px;
+            padding: 3px 9px; border-radius: 6px; cursor: pointer; }
+        #ovModal { position: fixed; inset: 0; background: rgba(9,14,20,.72); z-index: 1800; display: none;
+            align-items: center; justify-content: center; }
+        #ovModal.on { display: flex; }
+        #ovCard { width: 560px; max-width: 94vw; max-height: 88vh; overflow-y: auto; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+        #ovCard header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        #ovCard h2 { margin: 0; font-size: 17px; }
+        #ovClose { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
+        .ov-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+        .ov-kpi { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; text-align: center; }
+        .ov-kpi b { display: block; font-size: 19px; }
+        .ov-kpi span { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
+        .ov-h { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 4px 0 8px; }
+        .ov-bars { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+        .ov-bar { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+        .ov-bar .lbl { width: 130px; flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ov-bar .track { flex: 1; height: 14px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+        .ov-bar .track i { display: block; height: 100%; background: var(--accent); }
+        .ov-bar .n { width: 34px; text-align: right; flex: 0 0 auto; color: var(--muted); }
     </style>
 </head>
 <body>
 
 <aside id="bar">
     <header>
-        <h1>VTS · Filo</h1>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h1>VTS · Filo</h1><button id="ovBtn">📊 Özet</button></div>
         <div class="sub" id="statusLine">Bağlanılıyor…</div>
     </header>
 
@@ -277,8 +341,16 @@
     <div class="sect">Sürücü skorları <span style="text-transform:none;color:var(--muted)">(30 gün)</span></div>
     <div id="scoreList"><div class="empty">Puanlanmış sefer bekleniyor…</div></div>
 
-    <div class="sect">Canlı ihlaller · toplam ceza <span id="fineTotal">0 ₺</span></div>
+    <div class="sect">İhlaller · toplam ceza <span id="fineTotal">0 ₺</span></div>
+    <div id="alertFilter">
+        <button class="fbtn on" id="fLive" title="Canlı akış">● Canlı</button>
+        <input id="fPlate" type="number" min="1" max="105" placeholder="Plaka"/>
+        <select id="fRule"><option value="">Tüm kurallar</option></select>
+        <select id="fDays"><option value="1">Bugün</option><option value="7">7 gün</option><option value="30">30 gün</option></select>
+        <button class="fbtn" id="fApply">Ara</button>
+    </div>
     <div id="alertList"><div class="empty">Henüz ihlal yok — filo limitler içinde.</div></div>
+    <button id="alertMore">Daha fazla…</button>
 
     <div id="ctrl">
         <div class="hint">
@@ -315,7 +387,22 @@
 
     <div class="sect">Bakım <span id="maintCount" style="text-transform:none;color:var(--muted)"></span></div>
     <div id="maintList"><div class="empty">Yaklaşan bakım yok.</div></div>
+
+    <div class="sect">Yasak bölgeler <span id="zoneCount" style="text-transform:none;color:var(--muted)"></span></div>
+    <div id="zoneList"><div class="empty">Tanımlı bölge yok.</div></div>
 </aside>
+
+<div id="vehDrawer">
+    <header><div><h3 id="dTitle">—</h3><div class="dsub" id="dModel"></div></div><button id="drawerClose">✕</button></header>
+    <div id="dBody"></div>
+</div>
+
+<div id="ovModal">
+    <div id="ovCard">
+        <header><h2>Filo genel bakış</h2><button id="ovClose">✕</button></header>
+        <div id="ovBody"></div>
+    </div>
+</div>
 
 <div class="mapWrap">
     <div class="maplabel">CANLI FİLO · OpenStreetMap</div>

@@ -5,6 +5,73 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 23 Temmuz 2026 — bakım bir ihlal oldu, operatöre dört araç daha
+
+İki hat: backend'de sistemi geliştirmek, frontend'de operatöre daha çok görünürlük. Ama
+`vts-common`'a bir enum değeri eklendiği için tüm servisler yeniden derlenecekti — o yüzden
+her şey yazılıp **sonunda tek build** atıldı. `mvn verify` 5 dk 13 sn, 37 migration temiz
+Postgres'e uygulanıyor, tümü yeşil.
+
+### Bakım gecikmesi bir ihlal oldu (kullanıcının istediği)
+
+Şimdiye kadar bakım yalnızca bir panel satırıydı: operatör görmezse hiçbir şey olmazdı. Oysa
+bakımı geçmiş bir araç, yakıtı biten bir araçla aynı kategoride. Artık öyle:
+
+- Periyodik aralık **10.000 km** (kullanıcı "her 10 bin km" dedi).
+- Scheduler saatte bir eşiği geçen aracı tarıyor ve `vehicle.violation`'a bir
+  `MAINTENANCE_OVERDUE` olayı basıyor. Oradan **mevcut ihlal hattı** devralıyor: processing
+  kalıcılaştırıyor, gateway canlı haritaya düşürüyor, notification gönderiyor. Yeni bir
+  kalıcılaştırma yolu yazılmadı — sistemin zaten yaptığı şeye takıldı.
+- Balon artık **`1234/10000 km`** gösteriyor (son servisten beri / aralık); geçince kırmızı.
+
+**İki karar önemliydi.** Birincisi: olay `ruleId=null` ile yayınlanıyor, çünkü
+`StreamOutputPersister` tam da bu olayları alıp `rule_id`'yi `rule_code`'dan çözüyor —
+dolayısıyla bir `rule` satırı ve `rule.type` CHECK'inin genişletilmesi şart oldu (violation.
+rule_id NOT NULL). İkincisi: scheduler'a **ikinci bir Kafka producer bean'i eklemedim**;
+ViolationEvent'i paylaşılan Jackson yapılandırmasıyla JSON'a çevirip mevcut String
+template'ten yolladım — elle-kurulan-Kafka tuzağına hiç girmeden.
+
+**Puana katmadım, bilinçli.** Bakım gecikmesi sürüş tarzı değil filo yönetimi meselesi; puan
+"nasıl sürüldü"yü ölçüyor. Ayrı bir uyarı olarak duruyor.
+
+### Operatöre dört yeni pencere (frontend)
+
+Hepsi zaten istemcide olan veriyi gösteriyor ya da mevcut uçları çağırıyor — yeni backend
+gerekmedi (BE-1 ihlal ucu zaten vardı):
+
+- **İhlal geçmişi + filtre.** Liste eskiden yalnızca canlı akıştı, yenilemede sıfırlanırdı.
+  Artık keyset sayfalamalı `/violations`'tan araç/kural/güne göre süzülüyor. Geçmiş
+  modundayken canlı satır listeyi bozmuyor (`onViolation` `liveMode`'a bakıyor).
+- **Araç detay çekmecesi.** Sağdan açılan panel: son seferler (oynatma butonuyla), komut
+  geçmişi, bakım çubuğu, uyarılar. Kenar çubuğu aksiyonları tutuyor, çekmece okuma görünümü.
+- **Bölge yönetimi.** Dün çizmeyi eklemiştik; artık mevcut bölgeler listeleniyor, tıklayınca
+  zoom, "Sil" ile pasifleşiyor (silme değil — ihlal geçmişi referans veriyor).
+- **Genel bakış.** Tek modalda: durum dağılımı, bakım, ve son 7 günün ihlallerinin türe göre
+  kırılımı (kütüphanesiz SVG/div çubuk; veri `/violations`'tan, yeni uç yok).
+
+### Sistem geliştirmeleri (backend)
+
+- **Geçersiz araç tipi artık 400.** `VehicleRequest.type` serbest metindi ama şemada FK; bilinmeyen
+  bir değer veritabanına ulaşıp 500 olarak dönüyordu. Artık taksonomiye karşı kontrol edilip
+  yazımdan önce izin verilen listeyle birlikte 400 dönüyor.
+- **`VehicleMessageController`'ın 5 ham jdbc çağrısı** `VehicleMessageRepository`'ye taşındı;
+  controller artık yalnızca HTTP'yi eşliyor.
+- **DLQ replay aracı.** Ölü-mektup topic'leri görünmez bir delikti. Yeni admin ucu: derinlikleri
+  gösteriyor (`GET /admin/dlq`) ve yeniden işliyor (`POST /admin/dlq/{topic}/replay`). İki DLQ
+  şekli iki farklı iş: framework DLQ'ları kaynağa **verbatim** yeniden yayınlanıyor; telemetri
+  DLQ'su `DlqRecord` zarfı taşıdığı için açılıp ingestion'a **yeniden gönderiliyor** (zarfı ham
+  topic'e geri basmak onu tekrar DLQ'ya atardı). DLQ→kaynak eşlemesi — sessizce yanlış
+  olabilecek tek parça — `DlqTopicsTest` ile broker'sız test ediliyor.
+
+### Ders (yine migration sırasından)
+
+`rule.type` CHECK'ini genişletirken eski inline CHECK'i (Postgres'in `rule_type_check` adını
+verdiği) düşürmek şarttı: düşürmeseydim iki CHECK birden dayatılır ve eskisi
+`MAINTENANCE_OVERDUE` içeren `INSERT`'i reddederdi. Bunu ilk yakalayacak şey `FlywayMigrationIT`
+olurdu — ki temiz Postgres'te geçti, yani ad doğruydu.
+
+---
+
 ## 22 Temmuz 2026 (gece) — filo barı bir dizin olmaktan çıktı
 
 Kırk dakikalık bir kutu içinde, yalnızca arayüz. Backend'e hiç dokunulmadı — kullanılan

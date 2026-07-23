@@ -97,6 +97,41 @@ public class MaintenanceController {
     }
 
     /**
+     * Per-vehicle progress toward the next km-based service, for the map popup.
+     *
+     * <p>Loaded in bulk, once, like the driver scores: the popup needs "1234 / 10000" for
+     * whichever vehicle was clicked, and asking per vehicle would be one request per marker.
+     * {@code sinceKm} is how far it has driven since its last service, {@code intervalKm} the
+     * distance between services — so the ratio reads exactly as the operator expects.
+     */
+    @GetMapping("/progress")
+    public List<Map<String, Object>> progress(@AuthenticationPrincipal Jwt jwt) {
+        long tenant = CurrentUser.tenantId(jwt);
+        return jdbc.query("""
+                        SELECT mp.vehicle_id,
+                               GREATEST(0, v.odometer_km - mp.last_service_km) AS since_km,
+                               mp.interval_km,
+                               (v.odometer_km >= mp.next_due_km) AS overdue
+                        FROM maintenance_plan mp
+                        JOIN vehicle v ON v.id = mp.vehicle_id
+                        WHERE mp.tenant_id = ? AND mp.enabled AND mp.interval_km IS NOT NULL
+                        """,
+                rs -> {
+                    List<Map<String, Object>> out = new ArrayList<>();
+                    while (rs.next()) {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("vehicleId", rs.getLong("vehicle_id"));
+                        row.put("sinceKm", rs.getLong("since_km"));
+                        row.put("intervalKm", rs.getLong("interval_km"));
+                        row.put("overdue", rs.getBoolean("overdue"));
+                        out.add(row);
+                    }
+                    return out;
+                },
+                tenant);
+    }
+
+    /**
      * Record that a plan was serviced and roll it forward.
      *
      * <p>The next due point is computed from the odometer reading at service time, not from the
