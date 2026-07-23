@@ -261,7 +261,10 @@ services:
   api-gateway:
     build: {context: ., args: {MODULE: vts-api-gateway}}
     container_name: vts-api-gateway
-    mem_limit: 512m
+    # 512m/128m metaspace idi; Redis (Lettuce + serde) devreye girince metaspace 128m'i
+    # aştı ve istekler OutOfMemoryError: Metaspace ile patladı. Gateway hem tüm UI'ı sunuyor
+    # hem web+security+jdbc+kafka+redis yüklüyor — sınıf metaverisi en ağır burada.
+    mem_limit: 768m
     depends_on:
       postgres: {condition: service_healthy}
       kafka: {condition: service_healthy}
@@ -278,6 +281,8 @@ services:
         # BİRLEŞTİRMESİNDE: yalnızca bir kısmı gönderirse zincir ortasından kopar ve
         # geriye tek tek logdan farkı olmayan parçalar kalır.
         OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      # Gateway'e özel: paylaşılan Dockerfile 128m metaspace veriyor, Redis'li gateway için az.
+      JAVA_OPTS: "-XX:MaxRAMPercentage=50 -XX:MaxMetaspaceSize=256m"
       # The gateway serves the whole UI and proxies operator control to the simulator.
       SIMULATOR_BASE_URL: http://simulator:8085
       # DLQ replay re-ingests telemetry through ingestion's HTTP endpoint.

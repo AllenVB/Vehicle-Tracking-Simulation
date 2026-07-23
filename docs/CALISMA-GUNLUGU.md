@@ -5,6 +5,38 @@ değiştirdiğini anlatır; burada bir günün kararları ve o kararların bedel
 
 ---
 
+## 23 Temmuz 2026 (gece) — Redis'i hak ettiği işlere koymak
+
+Redis şimdiye kadar sadece cache'ti (son konum, araç-lookup, bildirim cooldown). İki gerçek
+Redis yeteneği eklendi; ikisi de mevcut veriyi yeniden kullanıyor, yeni yazma yükü getirmiyor.
+
+**Sürücü liderlik tablosu — ZSET, gateway'de cache-aside.** Skorboard sert biçimde çekiliyor
+(harita her aracın balonuna sürücü puanını basmak için tüm tabloyu bir kez çekiyor, üstüne
+kenar çubuğunun kendi yenilemesi). Her çekiş `trip ⋈ driver` üzerinde bir agregasyondu. Artık
+pencere başına bir kez hesaplanıp 30 sn cache'leniyor: sonraki okumalar sıralı listenin tek
+`GET`'i, bir sürücünün yeri ise ZSET üzerinde `ZREVRANK`. Yazma tarafına dokunmadım bilerek —
+mantık gateway'de cache-aside, Redis düşerse doğrudan SQL'e düşüyor (fail-open). TTL içinde
+eventual: yeni kapanan bir trip ortalamayı en geç 30 sn sonra oynatır; bir *sıralama* için
+(alarm değil) doğru takas. Çekmecede "Sıra #69/105 · Puan 8.4" görünür oldu — ZSET'in düz
+sıralı listeden farkını haklı çıkaran şey bu tekil-sıra sorgusu.
+
+**En yakın araç — GEO indeks + operatör dispatch.** `PositionCache` her tick GEOADD'liyor
+(`vts:geo:<tenant>`), konum JSON'unun yanında. Operatör haritada bir "iş" noktasına tıklar,
+`GEOSEARCH` en yakın araçları bellekten O(log n) döndürür — PostGIS taraması yok, koordinatlar
+sonuçla geldiği için ikinci lookup da yok. Redis'te 105 araç sürekli rapor verdiğinden indeks
+hep taze, tahliye gerekmiyor.
+
+**Bedeli — ölçünce çıktı, "çalışıyor" sanmadım:** gateway'de Redis'i *aktive edince* (Lettuce +
+serde sınıfları) araç listesi boşaldı. Log: `OutOfMemoryError: Metaspace`. Kök sebep, paylaşılan
+Dockerfile'ın `-XX:MaxMetaspaceSize=128m`'i + 512m konteyner limiti — gateway hem tüm UI'ı sunup
+hem web+security+jdbc+kafka+redis yüklerken 128m metaspace'i aştı. Yeni bağımlılık *kullanmak*
+metaspace'i büyütür; ölçmeden fark edilmezdi. Düzeltme sadece config: gateway'e özel
+`JAVA_OPTS` (metaspace 256m) + `mem_limit` 768m; imaj rebuild değil, recreate. Ders: bir servise
+ağır bir istemci (Redis/Lettuce) eklemek, o servisin sınıf-metaverisi tavanını gözden geçirmeyi
+gerektirir.
+
+---
+
 ## 23 Temmuz 2026 (akşam) — 18 saatlik trip'in kökü ve animasyonlu arayüz
 
 ### Bir trip neden 171 saat sürer?

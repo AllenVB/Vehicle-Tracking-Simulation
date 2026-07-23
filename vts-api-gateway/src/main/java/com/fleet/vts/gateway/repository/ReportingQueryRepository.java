@@ -119,31 +119,42 @@ public class ReportingQueryRepository {
      * them and left two scores disagreeing about the same driving.
      */
     public List<DriverScoreDto> findDriverScores(long tenantId, int days, int limit) {
-        return jdbc.query("""
-                SELECT d.id,
-                       d.first_name || ' ' || d.last_name AS name,
-                       round(avg(t.score), 1)             AS avg_score,
-                       round(sum(t.distance_km), 0)       AS distance_km,
-                       sum(t.violation_count)             AS violation_count,
-                       count(*)                           AS trips_scored
-                FROM trip t
-                JOIN driver d ON d.id = t.driver_id
-                WHERE t.tenant_id = ?
-                  AND t.score IS NOT NULL
-                  AND t.ended_at >= now() - make_interval(days => ?)
-                GROUP BY d.id, name
-                ORDER BY avg_score DESC NULLS LAST
-                LIMIT ?
-                """,
-                (rs, n) -> new DriverScoreDto(
-                        rs.getLong("id"),
-                        rs.getString("name"),
-                        rs.getBigDecimal("avg_score"),
-                        rs.getBigDecimal("distance_km"),
-                        rs.getObject("violation_count", Long.class),
-                        rs.getLong("trips_scored")),
-                tenantId, days, limit);
+        return jdbc.query(DRIVER_SCORES_SQL + "\nLIMIT ?",
+                DRIVER_SCORE_MAPPER, tenantId, days, limit);
     }
+
+    /**
+     * The whole scoreboard for the window, unbounded. Backs the Redis leaderboard cache, which
+     * needs every driver (not just a page) to answer both top-N and any single driver's rank.
+     */
+    public List<DriverScoreDto> findAllDriverScores(long tenantId, int days) {
+        return jdbc.query(DRIVER_SCORES_SQL, DRIVER_SCORE_MAPPER, tenantId, days);
+    }
+
+    private static final String DRIVER_SCORES_SQL = """
+            SELECT d.id,
+                   d.first_name || ' ' || d.last_name AS name,
+                   round(avg(t.score), 1)             AS avg_score,
+                   round(sum(t.distance_km), 0)       AS distance_km,
+                   sum(t.violation_count)             AS violation_count,
+                   count(*)                           AS trips_scored
+            FROM trip t
+            JOIN driver d ON d.id = t.driver_id
+            WHERE t.tenant_id = ?
+              AND t.score IS NOT NULL
+              AND t.ended_at >= now() - make_interval(days => ?)
+            GROUP BY d.id, name
+            ORDER BY avg_score DESC NULLS LAST
+            """;
+
+    private static final org.springframework.jdbc.core.RowMapper<DriverScoreDto> DRIVER_SCORE_MAPPER =
+            (rs, n) -> new DriverScoreDto(
+                    rs.getLong("id"),
+                    rs.getString("name"),
+                    rs.getBigDecimal("avg_score"),
+                    rs.getBigDecimal("distance_km"),
+                    rs.getObject("violation_count", Long.class),
+                    rs.getLong("trips_scored"));
 
     public List<TripSummaryDto> findVehicleTrips(long tenantId, long vehicleId, int limit) {
         return jdbc.query("""

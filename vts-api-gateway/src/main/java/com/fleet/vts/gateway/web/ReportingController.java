@@ -1,8 +1,10 @@
 package com.fleet.vts.gateway.web;
 
+import com.fleet.vts.gateway.cache.DriverLeaderboardCache;
 import com.fleet.vts.gateway.repository.ReportingQueryRepository;
 import com.fleet.vts.gateway.security.CurrentUser;
 import com.fleet.vts.gateway.web.dto.DashboardSummaryDto;
+import com.fleet.vts.gateway.web.dto.DriverRankDto;
 import com.fleet.vts.gateway.web.dto.DriverScoreDto;
 import com.fleet.vts.gateway.web.dto.FuelStationDto;
 import com.fleet.vts.gateway.web.dto.GeofenceDto;
@@ -44,9 +46,11 @@ public class ReportingController {
     private static final int MAX_DRIVER_SCORES = 500;
 
     private final ReportingQueryRepository reporting;
+    private final DriverLeaderboardCache leaderboard;
 
-    public ReportingController(ReportingQueryRepository reporting) {
+    public ReportingController(ReportingQueryRepository reporting, DriverLeaderboardCache leaderboard) {
         this.reporting = reporting;
+        this.leaderboard = leaderboard;
     }
 
     @GetMapping("/dashboard/summary")
@@ -84,13 +88,32 @@ public class ReportingController {
         return reporting.findFuelStations(CurrentUser.tenantId(jwt));
     }
 
-    /** Driver scoreboard: best drivers over the window, by average daily score. */
+    /**
+     * Driver scoreboard: best drivers over the window, by average journey score. Served from the
+     * Redis leaderboard cache ({@link DriverLeaderboardCache}) — a single sorted-list read when
+     * warm, the {@code trip} aggregate only on a cold window.
+     */
     @GetMapping("/drivers/scores")
     public List<DriverScoreDto> driverScores(@AuthenticationPrincipal Jwt jwt,
                                              @RequestParam(defaultValue = "30") int days,
                                              @RequestParam(defaultValue = "20") int limit) {
         int capped = Math.clamp(limit, 1, MAX_DRIVER_SCORES);
-        return reporting.findDriverScores(CurrentUser.tenantId(jwt), days, capped);
+        return leaderboard.topDrivers(CurrentUser.tenantId(jwt), days, capped);
+    }
+
+    /**
+     * One driver's standing on the board: rank (1-based) out of everyone scored in the window,
+     * via a {@code ZREVRANK} on the leaderboard sorted set. 204 when the driver has no scored
+     * trip in the window, so the UI can say "henüz sıralanmadı" rather than invent a rank.
+     */
+    @GetMapping("/drivers/{id}/rank")
+    public org.springframework.http.ResponseEntity<DriverRankDto> driverRank(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
+            @RequestParam(defaultValue = "30") int days) {
+        DriverRankDto rank = leaderboard.rank(CurrentUser.tenantId(jwt), days, id);
+        return rank == null
+                ? org.springframework.http.ResponseEntity.noContent().build()
+                : org.springframework.http.ResponseEntity.ok(rank);
     }
 
     @GetMapping("/vehicles/{id}/trips")

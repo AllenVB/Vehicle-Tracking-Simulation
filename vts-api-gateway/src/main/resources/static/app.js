@@ -30,6 +30,7 @@
     let cmdTimer = null;               // seçili aracın komut geçmişi anketi
     const replay = { points: [], layer: null, marker: null, idx: 0, timer: null, tripId: null };
     const draw = { on: false, points: [], layer: null };
+    const near = { on: false, layer: null };   // "en yakın araç" modu (Redis GEO)
     let routeLayer = null;
     let alerts = 0, fineTotal = 0, fitted = false;
     const maintProgress = new Map();   // vehicleId -> {sinceKm, intervalKm, overdue}
@@ -172,6 +173,10 @@
         document.getElementById("zoneSave").addEventListener("click", saveZone);
         document.getElementById("zoneCancel").addEventListener("click", cancelDraw);
         ctrl.on("click", onDrawClick);
+
+        document.getElementById("nearBtn").addEventListener("click", toggleNear);
+        document.getElementById("nearClose").addEventListener("click", exitNear);
+        ctrl.on("click", onNearClick);
 
         loadMaintenance();
         setInterval(loadMaintenance, 60000);
@@ -1264,6 +1269,89 @@
         if (selected != null) ctrl.doubleClickZoom.disable(); else ctrl.doubleClickZoom.enable();
     }
 
+    // ── En yakın araç (Redis GEO) ────────────────────────────────────────────
+    /**
+     * Operatör bir "iş" noktasına tıklar; sunucu Redis GEO indeksinden (GEOSEARCH) en yakın
+     * araçları bellekten O(log n) döndürür — PostGIS taraması yok, konumlar zaten her tick
+     * GEOADD'leniyor. Bölge çizimiyle aynı tek-tık modeli; ikisi aynı anda açık olmaz.
+     */
+    function toggleNear() {
+        if (near.on) { exitNear(); return; }
+        if (draw.on) cancelDraw();
+        near.on = true;
+        near.layer = L.layerGroup().addTo(ctrl);
+        document.getElementById("nearPanel").style.display = "block";
+        document.getElementById("nearBtn").style.display = "none";
+        document.getElementById("zoneBtn").style.display = "none";
+        document.getElementById("routeBtn").style.display = "none";
+        document.getElementById("nearHint").textContent = "Haritada bir noktaya tıkla — en yakın 5 aracı bulur (Redis GEO).";
+        document.getElementById("nearList").innerHTML = "";
+        document.getElementById("mapCtrl").classList.add("drawing");
+        ctrl.doubleClickZoom.disable();
+    }
+
+    function exitNear() {
+        near.on = false;
+        if (near.layer) { ctrl.removeLayer(near.layer); near.layer = null; }
+        document.getElementById("nearPanel").style.display = "none";
+        document.getElementById("nearBtn").style.display = "block";
+        document.getElementById("zoneBtn").style.display = "block";
+        document.getElementById("routeBtn").style.display = selected != null ? "block" : "none";
+        document.getElementById("mapCtrl").classList.remove("drawing");
+        if (selected != null) ctrl.doubleClickZoom.disable(); else ctrl.doubleClickZoom.enable();
+    }
+
+    async function onNearClick(e) {
+        if (!near.on) return;
+        const lat = e.latlng.lat, lon = e.latlng.lng;
+        document.getElementById("nearHint").textContent = "Aranıyor…";
+        try {
+            const res = await fetch(`/api/v1/dispatch/nearest?lat=${lat}&lon=${lon}&limit=5`, { headers: auth() });
+            if (!res.ok) { document.getElementById("nearHint").textContent = "Arama başarısız."; return; }
+            renderNearest([lat, lon], await res.json());
+        } catch (_) {
+            document.getElementById("nearHint").textContent = "Arama başarısız.";
+        }
+    }
+
+    function renderNearest(jobLatLng, list) {
+        near.layer.clearLayers();
+        L.marker(jobLatLng, { icon: L.divIcon({ className: "", html: '<div class="job-pin"></div>', iconSize: [16, 16] }) })
+            .addTo(near.layer);
+        const hint = document.getElementById("nearHint");
+        const listEl = document.getElementById("nearList");
+        if (!list.length) {
+            hint.textContent = "Bu menzilde araç yok.";
+            listEl.innerHTML = '<div class="empty">Yakında araç yok.</div>';
+            return;
+        }
+        hint.textContent = `En yakın ${list.length} araç · en yakını atayın:`;
+        listEl.innerHTML = "";
+        list.forEach((v, i) => {
+            if (v.lat != null && v.lon != null) {
+                L.polyline([jobLatLng, [v.lat, v.lon]],
+                    { color: "#ffd27f", weight: 1.5, dashArray: "4 4", opacity: .85 }).addTo(near.layer);
+            }
+            const veh = vehicles.get(v.vehicleId);
+            const plate = veh ? veh.plate : "#" + v.vehicleId;
+            const row = document.createElement("div");
+            row.className = "near-item";
+            row.innerHTML = `<span class="nr">${i + 1}</span>` +
+                `<span class="npl">${esc(plate)}</span>` +
+                `<span class="nd">${v.distanceKm} km</span>` +
+                `<button class="nassign">Ata</button>`;
+            row.querySelector(".nassign").addEventListener("click", ev => {
+                ev.stopPropagation();
+                if (veh) document.getElementById("plateNo").value = veh.plateNo;
+                select(v.vehicleId);
+                exitNear();
+                flash(`${plate} seçildi — rota oluşturabilir veya konumunu değiştirebilirsiniz.`);
+            });
+            row.addEventListener("click", () => { if (v.lat != null) ctrl.panTo([v.lat, v.lon]); });
+            listEl.appendChild(row);
+        });
+    }
+
     /**
      * "2 dk önce" — mutlak saat yerine.
      *
@@ -1423,14 +1511,32 @@
         const body = document.getElementById("dBody");
         body.innerHTML = '<div class="dsect dmuted">Yükleniyor…</div>';
 
-        const [trips, cmds, msgs] = await Promise.all([
+        const driverId = v ? v.driverId : null;
+        const [trips, cmds, msgs, rank] = await Promise.all([
             fetchJson(`/api/v1/vehicles/${vehicleId}/trips?limit=8`),
             fetchJson(`/api/v1/vehicles/${vehicleId}/commands?limit=5`),
-            fetchJson(`/api/v1/vehicles/${vehicleId}/messages`)
+            fetchJson(`/api/v1/vehicles/${vehicleId}/messages`),
+            driverId != null ? fetchJson(`/api/v1/drivers/${driverId}/rank`) : Promise.resolve(null)
         ]);
         const m = maintProgress.get(vehicleId);
 
         let html = "";
+        // Sürücü sırası — Redis ZSET (ZREVRANK). Sürücünün 30 günlük ortalama puanına göre
+        // tüm filodaki yeri; sıralanmamışsa uydurmak yerine bunu söyler.
+        if (driverId != null) {
+            const d = driverScores.get(driverId);
+            const nm = d ? d.name : "—";
+            html += `<div class="dsect"><h4>Sürücü</h4><div class="drow"><span>${esc(nm)}</span>`;
+            if (rank && rank.rank) {
+                const sc = rank.score != null ? Number(rank.score).toFixed(1) : "—";
+                const rc = rank.score >= 8 ? "#5dcaa5" : rank.score >= 6 ? "#f0997b" : "#e24b4a";
+                html += `<span style="text-align:right">Sıra <b>#${rank.rank}</b><span class="dmuted">/${rank.total}</span>` +
+                    `<div class="dmuted">Puan <b style="color:${rc}">${sc}</b>/10</div></span>`;
+            } else {
+                html += `<span class="dmuted">henüz sıralanmadı</span>`;
+            }
+            html += `</div></div>`;
+        }
         // Bakım
         if (m) {
             const pct = Math.min(100, Math.round(m.sinceKm / m.intervalKm * 100));

@@ -201,6 +201,26 @@
 
         /* ── Bölge çizimi ── */
         #zoneBtn { right: 150px; }
+        #nearBtn { right: 288px; }
+
+        /* En yakın araç paneli (Redis GEO sonucu) — operatör haritasının sol altında. */
+        #nearPanel { position: absolute; left: 12px; bottom: 14px; z-index: 601; width: 236px; padding: 12px;
+                   border-radius: 10px; background: var(--panel); border: 1px solid var(--line);
+                   box-shadow: 0 6px 18px rgba(0,0,0,.55); }
+        .rp-hint { font-size: 10.5px; color: var(--muted); margin: 4px 0 8px; line-height: 1.4; }
+        #nearList { max-height: 200px; overflow-y: auto; }
+        .near-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 7px;
+                   border-radius: 6px; cursor: pointer; transition: background .12s ease; }
+        .near-item:hover { background: var(--panel-2); }
+        .near-item .nr { color: var(--muted); font-size: 10px; width: 15px; text-align: right; flex: 0 0 auto; }
+        .near-item .npl { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .near-item .nd { color: #7fd4b4; font-weight: 700; white-space: nowrap; }
+        .near-item .nassign { padding: 2px 8px; font-size: 10px; border: 1px solid var(--line); border-radius: 5px;
+                   background: transparent; color: var(--text); cursor: pointer; flex: 0 0 auto; }
+        .near-item .nassign:hover { background: var(--accent); color: #201607; border-color: var(--accent); }
+        /* Tıklanan "iş" noktası ve en yakın araçlara çizilen ışınlar. */
+        .job-pin { width: 16px; height: 16px; border-radius: 50%; background: #ffd27f; border: 2px solid #201607;
+                   box-shadow: 0 0 10px #ffd27f; }
         #zonePicker { position: absolute; right: 12px; bottom: 14px; z-index: 601; width: 240px; padding: 12px;
                    border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.55); }
         #zoneName, #zoneKind { width: 100%; margin-top: 6px; padding: 6px 9px; border-radius: 6px;
@@ -476,6 +496,7 @@
     <div id="mapCtrl" class="map"></div>
     <button id="routeBtn" class="map-fab" style="display:none">🗺️ Rota Oluştur</button>
     <button id="zoneBtn" class="map-fab">⬡ Bölge Çiz</button>
+    <button id="nearBtn" class="map-fab">📍 En yakın araç</button>
     <div id="zonePicker" style="display:none">
         <div class="rp-title">Yasak bölge tanımla</div>
         <input id="zoneName" maxlength="120" placeholder="Bölge adı"/>
@@ -495,6 +516,14 @@
         <div class="rp-actions">
             <button id="routeGo" class="btn-send">Rotayı Oluştur</button>
             <button id="routeCancel" class="btn-ghost">İptal</button>
+        </div>
+    </div>
+    <div id="nearPanel" style="display:none">
+        <div class="rp-title">📍 En yakın araçlar</div>
+        <div id="nearHint" class="rp-hint">Haritada bir noktaya tıkla — en yakın 5 aracı bulur (Redis GEO).</div>
+        <div id="nearList"></div>
+        <div class="rp-actions">
+            <button id="nearClose" class="btn-ghost">Kapat</button>
         </div>
     </div>
 </div>
