@@ -4,8 +4,10 @@ import com.fleet.vts.gateway.cache.DriverLeaderboardCache;
 import com.fleet.vts.gateway.repository.ReportingQueryRepository;
 import com.fleet.vts.gateway.security.CurrentUser;
 import com.fleet.vts.gateway.web.dto.DashboardSummaryDto;
+import com.fleet.vts.gateway.web.dto.DriverDetailDto;
 import com.fleet.vts.gateway.web.dto.DriverRankDto;
 import com.fleet.vts.gateway.web.dto.DriverScoreDto;
+import com.fleet.vts.gateway.web.dto.FleetAnalyticsDto;
 import com.fleet.vts.gateway.web.dto.FuelStationDto;
 import com.fleet.vts.gateway.web.dto.GeofenceDto;
 import com.fleet.vts.gateway.web.dto.TelemetryBucketDto;
@@ -120,6 +122,40 @@ public class ReportingController {
     public List<TripSummaryDto> vehicleTrips(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
                                              @RequestParam(defaultValue = "20") int limit) {
         return reporting.findVehicleTrips(CurrentUser.tenantId(jwt), id, limit);
+    }
+
+    /** Fleet analytics time series for the charts panel: violations/day and average score/day. */
+    @GetMapping("/analytics/daily")
+    public FleetAnalyticsDto analyticsDaily(@AuthenticationPrincipal Jwt jwt,
+                                            @RequestParam(defaultValue = "14") int days) {
+        int d = Math.clamp(days, 1, 90);
+        long tenant = CurrentUser.tenantId(jwt);
+        return new FleetAnalyticsDto(reporting.findViolationsDaily(tenant, d),
+                reporting.findScoreDaily(tenant, d));
+    }
+
+    /**
+     * Everything the driver-detail view needs in one call: the driver's standing (rank via the
+     * Redis leaderboard), window aggregates, recent trips and day-by-day score trend.
+     */
+    @GetMapping("/drivers/{id}/detail")
+    public DriverDetailDto driverDetail(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
+                                        @RequestParam(defaultValue = "30") int days) {
+        int d = Math.clamp(days, 1, 90);
+        long tenant = CurrentUser.tenantId(jwt);
+        DriverScoreDto s = reporting.findDriverSummary(tenant, id, d);
+        DriverRankDto r = leaderboard.rank(tenant, d, id);
+        return new DriverDetailDto(
+                id,
+                s == null ? null : s.name(),
+                r == null ? null : r.rank(),
+                r == null ? null : r.total(),
+                s == null ? null : s.score(),
+                s == null ? null : s.distanceKm(),
+                s == null ? null : s.violationCount(),
+                s == null ? 0 : s.tripsScored(),
+                reporting.findDriverTrips(tenant, id, 10),
+                reporting.findDriverScoreDaily(tenant, id, d));
     }
 
     @GetMapping("/trips/{id}/route")

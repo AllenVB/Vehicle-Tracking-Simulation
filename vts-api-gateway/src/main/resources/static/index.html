@@ -376,7 +376,28 @@
 
         /* Modal içeriği yumuşak girsin (çekmecenin kayması zaten var). */
         @keyframes modalIn { from { transform: translateY(10px) scale(.985); opacity: 0; } to { transform: none; opacity: 1; } }
-        #ovModal.on #ovCard { animation: modalIn .22s cubic-bezier(.22, 1, .36, 1); }
+        #ovModal.on #ovCard, #drvModal.on #drvCard { animation: modalIn .22s cubic-bezier(.22, 1, .36, 1); }
+
+        /* Kütüphanesiz SVG grafikler */
+        .chart { width: 100%; height: 130px; display: block; margin: 2px 0 14px; }
+        .spark { width: 120px; height: 30px; vertical-align: middle; }
+
+        /* Sürücü detay modalı — genel bakış modalıyla aynı iskelet */
+        #drvModal { position: fixed; inset: 0; background: rgba(9, 14, 20, .72); z-index: 1800; display: none;
+            align-items: center; justify-content: center; }
+        #drvModal.on { display: flex; }
+        #drvCard { width: 560px; max-width: 94vw; max-height: 88vh; overflow-y: auto; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+        #drvCard header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        #drvCard h2 { margin: 0; font-size: 17px; }
+        #drvClose { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
+        .drv-trip { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 6px 2px;
+            border-bottom: 1px solid rgba(255, 255, 255, .04); }
+        .drv-trip .dt-date { width: 88px; flex: 0 0 auto; }
+        .drv-trip .dt-meta { flex: 1; color: var(--muted); }
+        .drv-trip .dt-score { font-weight: 700; white-space: nowrap; }
+        /* Skor tablosu satırları artık tıklanabilir (sürücü detayına götürür). */
+        #scoreList .scoreRow { cursor: pointer; }
 
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
@@ -468,6 +489,13 @@
     <div id="ovCard">
         <header><h2>Filo genel bakış</h2><button id="ovClose">✕</button></header>
         <div id="ovBody"></div>
+    </div>
+</div>
+
+<div id="drvModal">
+    <div id="drvCard">
+        <header><h2 id="drvTitle">Sürücü</h2><button id="drvClose">✕</button></header>
+        <div id="drvBody"></div>
     </div>
 </div>
 

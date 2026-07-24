@@ -1,5 +1,6 @@
 package com.fleet.vts.gateway.repository;
 
+import com.fleet.vts.gateway.web.dto.DailyPointDto;
 import com.fleet.vts.gateway.web.dto.DashboardSummaryDto;
 import com.fleet.vts.gateway.web.dto.DriverScoreDto;
 import com.fleet.vts.gateway.web.dto.FuelStationDto;
@@ -175,6 +176,83 @@ public class ReportingQueryRepository {
                             rs.getString("status"));
                 },
                 tenantId, vehicleId, limit);
+    }
+
+    // ── Analytics time series (charts) ──────────────────────────────────────
+
+    private static final org.springframework.jdbc.core.RowMapper<DailyPointDto> DAILY_COUNT_MAPPER =
+            (rs, n) -> new DailyPointDto(rs.getString("day"), rs.getDouble("value"), rs.getLong("cnt"));
+
+    /** Violations per day over the window — the fleet analytics panel's first chart. */
+    public List<DailyPointDto> findViolationsDaily(long tenantId, int days) {
+        return jdbc.query("""
+                SELECT to_char(date_trunc('day', occurred_at), 'YYYY-MM-DD') AS day,
+                       count(*)::float8 AS value, count(*) AS cnt
+                FROM violation
+                WHERE tenant_id = ? AND occurred_at >= now() - make_interval(days => ?)
+                GROUP BY 1 ORDER BY 1
+                """, DAILY_COUNT_MAPPER, tenantId, days);
+    }
+
+    /** Average trip score per day over the window — the analytics panel's second chart. */
+    public List<DailyPointDto> findScoreDaily(long tenantId, int days) {
+        return jdbc.query(SCORE_DAILY_SQL + " AND ended_at >= now() - make_interval(days => ?)\nGROUP BY 1 ORDER BY 1",
+                DAILY_COUNT_MAPPER, tenantId, days);
+    }
+
+    /** Same, for a single driver — the sparkline on the driver-detail view. */
+    public List<DailyPointDto> findDriverScoreDaily(long tenantId, long driverId, int days) {
+        return jdbc.query(SCORE_DAILY_SQL + " AND driver_id = ? AND ended_at >= now() - make_interval(days => ?)\nGROUP BY 1 ORDER BY 1",
+                DAILY_COUNT_MAPPER, tenantId, driverId, days);
+    }
+
+    private static final String SCORE_DAILY_SQL = """
+            SELECT to_char(date_trunc('day', ended_at), 'YYYY-MM-DD') AS day,
+                   round(avg(score), 1)::float8 AS value, count(*) AS cnt
+            FROM trip
+            WHERE tenant_id = ? AND score IS NOT NULL""";
+
+    /** A single driver's recent trips (by driver, not vehicle) for the driver-detail view. */
+    public List<TripSummaryDto> findDriverTrips(long tenantId, long driverId, int limit) {
+        return jdbc.query("""
+                SELECT id, started_at, ended_at, distance_km, score, status
+                FROM trip
+                WHERE tenant_id = ? AND driver_id = ?
+                ORDER BY started_at DESC
+                LIMIT ?
+                """,
+                (rs, n) -> {
+                    OffsetDateTime ended = rs.getObject("ended_at", OffsetDateTime.class);
+                    return new TripSummaryDto(
+                            rs.getLong("id"),
+                            rs.getObject("started_at", OffsetDateTime.class).toInstant(),
+                            ended == null ? null : ended.toInstant(),
+                            rs.getBigDecimal("distance_km"),
+                            rs.getObject("score", Integer.class),
+                            rs.getString("status"));
+                },
+                tenantId, driverId, limit);
+    }
+
+    /**
+     * One driver's window aggregates (name always, the rest null when they have no scored trip).
+     * A LEFT JOIN off {@code driver} so the name comes back even for a driver with nothing to show.
+     */
+    public DriverScoreDto findDriverSummary(long tenantId, long driverId, int days) {
+        List<DriverScoreDto> rows = jdbc.query("""
+                SELECT d.id,
+                       d.first_name || ' ' || d.last_name AS name,
+                       round(avg(t.score), 1)             AS avg_score,
+                       round(sum(t.distance_km), 0)       AS distance_km,
+                       sum(t.violation_count)             AS violation_count,
+                       count(t.id)                        AS trips_scored
+                FROM driver d
+                LEFT JOIN trip t ON t.driver_id = d.id AND t.tenant_id = ? AND t.score IS NOT NULL
+                     AND t.ended_at >= now() - make_interval(days => ?)
+                WHERE d.id = ?
+                GROUP BY d.id, name
+                """, DRIVER_SCORE_MAPPER, tenantId, days, driverId);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     /**

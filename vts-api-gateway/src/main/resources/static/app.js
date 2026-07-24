@@ -199,6 +199,8 @@
         document.getElementById("drawerClose").addEventListener("click", closeDrawer);
         document.getElementById("ovBtn").addEventListener("click", openOverview);
         document.getElementById("ovClose").addEventListener("click", () => document.getElementById("ovModal").classList.remove("on"));
+        document.getElementById("drvClose").addEventListener("click", () => document.getElementById("drvModal").classList.remove("on"));
+        document.getElementById("drvModal").addEventListener("click", e => { if (e.target.id === "drvModal") document.getElementById("drvModal").classList.remove("on"); });
     }
 
     function initMaps() {
@@ -915,6 +917,7 @@
                         `<div class="scbar"><i class="${cls === "good" ? "" : cls}" style="width:${s * 10}%"></i></div>` +
                         `</span>` +
                         `<span class="sc ${cls}">${s.toFixed(1)}</span>`;
+                    row.addEventListener("click", () => openDriverDetail(d.driverId));
                     el.appendChild(row);
                 });
             }
@@ -1653,9 +1656,12 @@
         let overdue = 0, dueSoon = 0;
         maintProgress.forEach(m => { if (m.overdue) overdue++; else if (m.sinceKm >= m.intervalKm * 0.9) dueSoon++; });
 
-        // Son 7 günün ihlalleri, türe göre
+        // Son 7 günün ihlalleri (türe göre) + 14 günün günlük trendleri (grafikler)
         const from = new Date(Date.now() - 7 * 86400000).toISOString();
-        const page = await fetchJson("/api/v1/violations?limit=200&from=" + from);
+        const [page, daily] = await Promise.all([
+            fetchJson("/api/v1/violations?limit=200&from=" + from),
+            fetchJson("/api/v1/analytics/daily?days=14")
+        ]);
         const byType = {};
         (page && page.items ? page.items : []).forEach(v => {
             byType[v.ruleCode] = (byType[v.ruleCode] || 0) + 1;
@@ -1667,6 +1673,16 @@
             ovKpi(vehicles.size, "Araç") + ovKpi(moving, "Yolda") +
             ovKpi(stopped, "Durdu", stopped ? "#ff9b9b" : "") +
             ovKpi(overdue, "Bakım gecikmiş", overdue ? "#e24b4a" : "") + `</div>`;
+
+        // Trend grafikleri (kütüphanesiz SVG)
+        if (daily) {
+            const vPts = (daily.violationsByDay || []).map(p => ({ label: p.day.slice(5), value: p.value, title: Math.round(p.value) }));
+            const sPts = (daily.scoresByDay || []).map(p => ({ label: p.day.slice(5), value: p.value, title: p.value + " · " + p.count + " sefer" }));
+            html += `<div class="ov-h">Son 14 gün · günlük ihlal</div>` +
+                (vPts.length ? lineChart(vPts, { color: "#e08a1d" }) : '<div class="empty">İhlal yok.</div>');
+            html += `<div class="ov-h">Son 14 gün · ortalama sefer puanı</div>` +
+                (sPts.length ? lineChart(sPts, { color: "#5dcaa5", yMax: 10 }) : '<div class="empty">Puanlı sefer yok.</div>');
+        }
 
         html += `<div class="ov-h">Son 7 gün · ihlal türleri (${pairs.reduce((a, b) => a + b[1], 0)})</div>`;
         html += `<div class="ov-bars">`;
@@ -1687,6 +1703,77 @@
 
     function ovKpi(value, label, color) {
         return `<div class="ov-kpi"><b${color ? ` style="color:${color}"` : ""}>${value}</b><span>${label}</span></div>`;
+    }
+
+    // ── Kütüphanesiz SVG grafikler ───────────────────────────────────────────
+    /**
+     * Basit çizgi + alan grafiği. points = [{label, value, title?}]. Kütüphane yok, tek SVG
+     * string; noktalarda <title> ile hover değeri. Alanı hafif dolduruyoruz ki değerler az
+     * değişse bile trend okunur olsun.
+     */
+    function lineChart(points, opts) {
+        opts = opts || {};
+        if (!points || !points.length) return '<div class="empty">Yeterli veri yok.</div>';
+        const w = 480, h = opts.h || 130, pad = 26, color = opts.color || "#5dcaa5", n = points.length;
+        const maxV = Math.max(0.0001, ...points.map(p => p.value));
+        const yMax = (opts.yMax != null ? opts.yMax : maxV * 1.15) || 1;
+        const X = i => pad + (n === 1 ? (w - 2 * pad) / 2 : i * (w - 2 * pad) / (n - 1));
+        const Y = v => h - pad - (Math.max(0, v) / yMax) * (h - 2 * pad);
+        const line = points.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
+        const area = `M${X(0).toFixed(1)},${(h - pad).toFixed(1)} ` +
+            points.map((p, i) => `L${X(i).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ") +
+            ` L${X(n - 1).toFixed(1)},${(h - pad).toFixed(1)} Z`;
+        const dots = points.map((p, i) =>
+            `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.value).toFixed(1)}" r="2.6" fill="${color}">` +
+            `<title>${esc(p.label)}: ${esc(String(p.title != null ? p.title : p.value))}</title></circle>`).join("");
+        const idx = [...new Set(n <= 4 ? points.map((_, i) => i) : [0, Math.floor((n - 1) / 2), n - 1])];
+        const labels = idx.map(i =>
+            `<text x="${X(i).toFixed(1)}" y="${h - 7}" fill="#8aa0b4" font-size="9" text-anchor="middle">${esc(points[i].label)}</text>`).join("");
+        return `<svg viewBox="0 0 ${w} ${h}" class="chart" preserveAspectRatio="none">` +
+            `<line x1="${pad}" y1="${(h - pad).toFixed(1)}" x2="${w - pad}" y2="${(h - pad).toFixed(1)}" stroke="#26384a"/>` +
+            `<path d="${area}" fill="${color}" opacity="0.13"/>` +
+            `<path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>` +
+            dots + labels + `</svg>`;
+    }
+
+    // ── Sürücü detay modalı ──────────────────────────────────────────────────
+    /**
+     * Bir sürücünün tek bakışta profili: filodaki sırası (Redis ZSET), 30 günlük özet, günlük
+     * puan trendi (SVG grafik) ve son seferleri. Skor tablosundaki satıra tıklayınca açılır.
+     */
+    async function openDriverDetail(driverId) {
+        if (driverId == null) return;
+        document.getElementById("drvModal").classList.add("on");
+        const body = document.getElementById("drvBody");
+        const title = document.getElementById("drvTitle");
+        title.textContent = "Sürücü";
+        body.innerHTML = '<div class="ov-h">Yükleniyor…</div>';
+        const d = await fetchJson(`/api/v1/drivers/${driverId}/detail?days=30`);
+        if (!d) { body.innerHTML = '<div class="empty">Sürücü verisi alınamadı.</div>'; return; }
+        title.textContent = d.name || ("Sürücü #" + driverId);
+        const avg = d.avgScore != null ? Number(d.avgScore) : null;
+        const sc = avg == null ? "#8aa0b4" : avg >= 8 ? "#5dcaa5" : avg >= 6 ? "#f0997b" : "#e24b4a";
+
+        let html = `<div class="ov-kpis">` +
+            ovKpi(d.rank ? "#" + d.rank : "—", d.total ? "Sıra · " + d.total + " içinde" : "Sıralanmadı") +
+            `<div class="ov-kpi"><b style="color:${sc}">${avg != null ? avg.toFixed(1) : "—"}</b><span>Ort. puan</span></div>` +
+            ovKpi(d.distanceKm != null ? Math.round(d.distanceKm).toLocaleString("tr-TR") : 0, "km · 30 gün") +
+            ovKpi(d.violationCount != null ? d.violationCount : 0, "ihlal · 30 gün") + `</div>`;
+
+        const sPts = (d.scoreByDay || []).map(p => ({ label: p.day.slice(5), value: p.value, title: p.value + " · " + p.count + " sefer" }));
+        html += `<div class="ov-h">Günlük puan trendi · ${d.tripsScored} sefer</div>` +
+            (sPts.length ? lineChart(sPts, { color: sc, yMax: 10, h: 110 }) : '<div class="empty">Puanlı sefer yok.</div>');
+
+        html += `<div class="ov-h">Son seferler</div>`;
+        if (d.trips && d.trips.length) {
+            d.trips.forEach(t => {
+                const tc = t.score == null ? "#8aa0b4" : t.score >= 8 ? "#5dcaa5" : t.score >= 6 ? "#f0997b" : "#e24b4a";
+                html += `<div class="drv-trip"><span class="dt-date">${new Date(t.startedAt).toLocaleDateString("tr-TR")}</span>` +
+                    `<span class="dt-meta">${Math.round(t.distanceKm || 0)} km · ${tripDuration(t)}</span>` +
+                    `<span class="dt-score" style="color:${tc}">★ ${t.score != null ? t.score : "-"}/10</span></div>`;
+            });
+        } else { html += `<div class="empty">Sefer yok.</div>`; }
+        body.innerHTML = html;
     }
 
 })();
