@@ -16,6 +16,7 @@ COPY vts-stream-analytics/pom.xml vts-stream-analytics/
 COPY vts-notification-service/pom.xml vts-notification-service/
 COPY vts-api-gateway/pom.xml vts-api-gateway/
 COPY vts-scheduler-service/pom.xml vts-scheduler-service/
+COPY vts-iett-feed/pom.xml vts-iett-feed/
 RUN mvn -q -B dependency:go-offline || true
 COPY . .
 RUN mvn -q -B -DskipTests package

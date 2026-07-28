@@ -28,6 +28,7 @@
         <module>vts-notification-service</module>
         <module>vts-api-gateway</module>
         <module>vts-scheduler-service</module>
+        <module>vts-iett-feed</module>
     </modules>
 
     <properties>

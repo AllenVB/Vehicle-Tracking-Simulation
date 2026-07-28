@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: vts-iett-feed
+  profiles:
+    default: dev
+
+server:
+  port: 8087
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:0.05}
+  otlp:
+    tracing:
+      # Uc verilmezse Boot varsayilan olarak localhost'a gonderir ve her istek sessizce
+      # basarisiz olur; compose bunu jaeger'a yonlendirir.
+      endpoint: ${OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# Gercek veri kaynagi: İETT canli otobus konumlari -> ingestion. Random simulatorun yerini alir.
+vts:
+  iett:
+    enabled: ${VTS_IETT_ENABLED:true}
+    base-url: ${VTS_IETT_BASE_URL:https://api.ibb.gov.tr/iett/FiloDurum}
+    # Hat kodlari (HatKodu). API'de "tum hatlar" metodu yok; yogun hatlar cekilir.
+    # Her cagri o hattin otobuslerini doner; ~5 hat onlarca arac eder.
+    routes: ${VTS_IETT_ROUTES:15B,500T,34,146,28,500L,11ES,320}
+    # Kac ayri otobus izlenecek. Seed IMEI sayisini (100) asmamali.
+    max-vehicles: ${VTS_IETT_MAX_VEHICLES:100}
+    poll-interval-ms: ${VTS_IETT_POLL_INTERVAL_MS:15000}
+    initial-delay-ms: ${VTS_IETT_INITIAL_DELAY_MS:5000}
+    ingestion-base-url: ${VTS_INGESTION_BASE_URL:http://localhost:8081}

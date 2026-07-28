@@ -374,6 +374,23 @@ services:
     ports: ["8086:8086"]
     restart: unless-stopped
 
+  # ── İETT canlı otobüs feed'i (gerçek veri kaynağı) ─────────────────────────
+  # Simülatörün ürettiği rastgele telemetrinin YERİNE geçer: İBB açık verisinden
+  # gerçek İstanbul otobüslerinin konumunu periyodik çeker, mevcut seed IMEI'lerine
+  # (001-100) map'leyip ingestion'a basar. DB/Kafka/Redis kullanmaz (yalın env),
+  # ama İBB API'sine ulaşmak için DIŞ İNTERNET gerekir (varsayılan bridge sağlar).
+  # NOT: simulator ile AYNI ANDA çalıştırma — ikisi de 001-100'ü beslerse konum çakışır.
+  iett-feed:
+    build: {context: ., args: {MODULE: vts-iett-feed}}
+    container_name: vts-iett-feed
+    mem_limit: 384m
+    depends_on: {ingestion-service: {condition: service_started}}
+    environment:
+      VTS_INGESTION_BASE_URL: http://ingestion-service:8081
+      OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    ports: ["8087:8087"]
+    restart: unless-stopped
+
   simulator:
     build: {context: ., args: {MODULE: vts-simulator}}
     container_name: vts-simulator
