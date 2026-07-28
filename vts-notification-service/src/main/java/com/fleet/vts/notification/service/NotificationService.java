@@ -1,5 +1,6 @@
 package com.fleet.vts.notification.service;
 
+import com.fleet.vts.common.enums.NotificationChannel;
 import com.fleet.vts.common.enums.Severity;
 import com.fleet.vts.common.event.GeofenceEvent;
 import com.fleet.vts.common.event.ViolationEvent;
@@ -9,6 +10,7 @@ import com.fleet.vts.notification.sender.NotificationSender;
 import com.fleet.vts.notification.sender.NotificationSenderRegistry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -29,12 +31,14 @@ public class NotificationService {
     private final NotificationSenderRegistry senders;
     private final NotificationRepository repository;
     private final Clock clock;
+    private final Severity minEmailSeverity;
     private final Counter sent;
     private final Counter suppressed;
 
     public NotificationService(CooldownService cooldown, RuleCooldownService ruleCooldown,
                                PreferenceService preferences, NotificationSenderRegistry senders,
                                NotificationRepository repository, Clock clock,
+                               @Value("${vts.notification.email.min-severity:CRITICAL}") Severity minEmailSeverity,
                                MeterRegistry registry) {
         this.cooldown = cooldown;
         this.ruleCooldown = ruleCooldown;
@@ -42,6 +46,7 @@ public class NotificationService {
         this.senders = senders;
         this.repository = repository;
         this.clock = clock;
+        this.minEmailSeverity = minEmailSeverity;
         this.sent = Counter.builder("notification.sent").register(registry);
         this.suppressed = Counter.builder("notification.suppressed").register(registry);
     }
@@ -73,6 +78,13 @@ public class NotificationService {
         List<Preference> prefs = preferences.preferencesFor(tenantId, ruleCode);
         LocalTime now = LocalTime.now(clock);
         for (Preference p : prefs) {
+            // E-posta yalnizca kritik (varsayilan) ve uzeri onemdeki ihlaller icin: operatore
+            // gercek posta gonderen kanal, gurultuyu onlemek adina esigi asmayan olaylarda
+            // sessizce atlanir (cooldown gibi kayit tutulmaz). Diger kanallar (WEBSOCKET) etkilenmez.
+            if (p.channel() == NotificationChannel.EMAIL
+                    && severity.ordinal() < minEmailSeverity.ordinal()) {
+                continue;
+            }
             NotificationMessage msg = new NotificationMessage(tenantId, p.userId(), driverId,
                     vehicleId, ruleCode, severity, p.channel(), title, body, sourceViolationId, occurredAt);
             if (p.isQuiet(now)) {

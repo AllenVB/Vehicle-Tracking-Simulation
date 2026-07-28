@@ -25,10 +25,17 @@
             <artifactId>spring-kafka</artifactId>
         </dependency>
 
-        <!-- Real WebSocket sender; Email/SMS/Push are mock+log strategies -->
+        <!-- Real WebSocket sender; SMS/Push are mock+log strategies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+        <!-- Gerçek e-posta gönderimi (JavaMailSender). Sürüm Boot BOM'undan gelir.
+             Dev'de MailHog SMTP tuzağına, prod'da gerçek bir sağlayıcıya bağlanır. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
         <dependency>

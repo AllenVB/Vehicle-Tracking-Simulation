@@ -24,9 +24,28 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  # Kritik ihlal e-postalari icin SMTP. Dev'de MailHog (kimlik/TLS yok); host her
+  # zaman set oldugu icin Boot JavaMailSender bean'ini otomatik yapilandirir. Yerel
+  # (konteynersiz) calismada MailHog yoksa gonderim baglanti hatasiyla FAILED kaydolur.
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
 
 server:
   port: 8084
+
+vts:
+  notification:
+    email:
+      # Gonderen adresi ve e-posta uretecek en dusuk onem duzeyi. min-severity
+      # varsayilan CRITICAL: yalnizca en agir ihlaller mail uretir; WEBSOCKET her
+      # ihlali almaya devam eder. MailHog demosunda MAIL_MIN_SEVERITY=HIGH ile
+      # gecici olarak dusurulup mail akisi gozlenebilir.
+      from: ${MAIL_FROM:fleet-alerts@vts.local}
+      min-severity: ${MAIL_MIN_SEVERITY:CRITICAL}
 
 management:
   endpoints:

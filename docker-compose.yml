@@ -255,6 +255,24 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
 
+  # ── MailHog: geliştirme SMTP tuzağı ────────────────────────────────────────
+  # Kritik ihlal e-postaları gerçek bir posta sunucusuna değil buraya gider;
+  # yakaladığı her mail http://localhost:8025 arayüzünde görünür. Dışarı hiçbir
+  # mail çıkmaz — güvenli bir "gerçekten gönderildi mi" doğrulaması.
+  #
+  # Healthcheck YOK: imaj shell'siz minimal bir Go binary'si (CMD-SHELL testi
+  # koşamaz) ve SMTP tembel kullanılıyor — notification-service ancak mail
+  # gönderirken bağlanır, açılışta hazır olmasına gerek yok, bu yüzden depends_on
+  # ile gating de gereksiz. Mailler bellekte tutulur (volume yok); restart'ta silinir.
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: vts-mailhog
+    ports:
+      - "8025:8025"   # web arayüzü
+    expose:
+      - "1025"        # SMTP, yalnızca iç ağ (mailhog:1025)
+    restart: unless-stopped
+
   # ── Application services ────────────────────────────────────────────────
   # api-gateway owns the schema (runs Flyway on startup); the others start after
   # it and re-connect with retries until the schema is ready.
@@ -335,7 +353,15 @@ services:
     container_name: vts-notification-service
     mem_limit: 448m
     depends_on: {api-gateway: {condition: service_started}, kafka: {condition: service_healthy}}
-    environment: *db-kafka-redis
+    environment:
+      <<: *db-kafka-redis
+      # Kritik ihlal e-postaları MailHog'a gider (SMTP, iç ağ). MAIL_MIN_SEVERITY
+      # e-posta üretecek en düşük önem düzeyini belirler; varsayılan CRITICAL, yani
+      # yalnızca en ağır ihlaller (agresif sürüş, yasak bölge) mail üretir. MailHog
+      # demosunda geçici olarak HIGH'a indirilip mail akışı gözlenebilir.
+      MAIL_HOST: mailhog
+      MAIL_PORT: "1025"
+      MAIL_MIN_SEVERITY: CRITICAL
     ports: ["8084:8084"]
     restart: unless-stopped
 

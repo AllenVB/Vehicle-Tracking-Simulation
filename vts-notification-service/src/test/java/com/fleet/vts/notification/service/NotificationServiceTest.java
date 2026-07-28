@@ -34,16 +34,25 @@ class NotificationServiceTest {
     private final NotificationSenderRegistry registry = mock(NotificationSenderRegistry.class);
     private final NotificationRepository repository = mock(NotificationRepository.class);
     private final NotificationSender wsSender = mock(NotificationSender.class);
+    private final NotificationSender emailSender = mock(NotificationSender.class);
 
     private NotificationService service(Clock clock) {
+        return service(clock, Severity.CRITICAL);
+    }
+
+    private NotificationService service(Clock clock, Severity minEmailSeverity) {
         return new NotificationService(cooldown, ruleCooldown, preferences, registry,
-                repository, clock, new SimpleMeterRegistry());
+                repository, clock, minEmailSeverity, new SimpleMeterRegistry());
     }
 
     private ViolationEvent speedViolation() {
+        return violation(Severity.HIGH);
+    }
+
+    private ViolationEvent violation(Severity severity) {
         return ViolationEvent.builder()
                 .tenantId(1L).vehicleId(30L).driverId(30L)
-                .ruleCode("SPEED_LIMIT").ruleType(RuleType.SPEED_LIMIT).severity(Severity.HIGH)
+                .ruleCode("SPEED_LIMIT").ruleType(RuleType.SPEED_LIMIT).severity(severity)
                 .occurredAt(Instant.parse("2026-07-13T10:00:00Z")).value(100.0).threshold(80.0)
                 .lat(41.0).lon(29.0).build();
     }
@@ -92,5 +101,52 @@ class NotificationServiceTest {
 
         verify(repository).insertNotification(any(), eq("SUPPRESSED"));
         verify(registry, never()).forChannel(any());
+    }
+
+    @Test
+    void emailSkippedWhenSeverityBelowThreshold() {
+        when(ruleCooldown.cooldownSeconds(anyLong(), any())).thenReturn(300);
+        when(cooldown.tryAcquire(anyLong(), anyLong(), any(), anyInt())).thenReturn(true);
+        when(preferences.preferencesFor(1L, "SPEED_LIMIT")).thenReturn(List.of(
+                new Preference(9L, NotificationChannel.EMAIL, null, null)));
+
+        // HIGH violation, threshold CRITICAL -> EMAIL is silently skipped (no record, no sender lookup).
+        service(at("12:00")).onViolation(violation(Severity.HIGH));
+
+        verify(registry, never()).forChannel(NotificationChannel.EMAIL);
+        verify(repository, never()).insertNotification(any(), any());
+    }
+
+    @Test
+    void emailSentWhenSeverityMeetsThreshold() {
+        when(ruleCooldown.cooldownSeconds(anyLong(), any())).thenReturn(300);
+        when(cooldown.tryAcquire(anyLong(), anyLong(), any(), anyInt())).thenReturn(true);
+        when(preferences.preferencesFor(1L, "SPEED_LIMIT")).thenReturn(List.of(
+                new Preference(9L, NotificationChannel.EMAIL, null, null)));
+        when(registry.forChannel(NotificationChannel.EMAIL)).thenReturn(emailSender);
+        when(emailSender.send(any())).thenReturn(true);
+        when(repository.insertNotification(any(), eq("SENT"))).thenReturn(7L);
+
+        service(at("12:00")).onViolation(violation(Severity.CRITICAL));
+
+        verify(emailSender).send(any());
+        verify(repository).insertNotification(any(), eq("SENT"));
+        verify(repository).insertAttempt(eq(7L), eq("EMAIL"), eq(true), any());
+    }
+
+    @Test
+    void webSocketDeliveredRegardlessOfEmailThreshold() {
+        when(ruleCooldown.cooldownSeconds(anyLong(), any())).thenReturn(300);
+        when(cooldown.tryAcquire(anyLong(), anyLong(), any(), anyInt())).thenReturn(true);
+        when(preferences.preferencesFor(1L, "SPEED_LIMIT")).thenReturn(List.of(
+                new Preference(9L, NotificationChannel.WEBSOCKET, null, null)));
+        when(registry.forChannel(NotificationChannel.WEBSOCKET)).thenReturn(wsSender);
+        when(wsSender.send(any())).thenReturn(true);
+        when(repository.insertNotification(any(), eq("SENT"))).thenReturn(1L);
+
+        // LOW violation still reaches WEBSOCKET; the email threshold gates only EMAIL.
+        service(at("12:00")).onViolation(violation(Severity.LOW));
+
+        verify(wsSender).send(any());
     }
 }
