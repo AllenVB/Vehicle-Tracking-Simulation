@@ -61,6 +61,8 @@ public class AnalyticsTopology {
     /** After an escalation fires, the same vehicle stays quiet this long before it can fire again. */
     private static final Duration AGGRESSION_COOLDOWN = Duration.ofMinutes(10);
     private static final String AGGRESSION_CODE = "AGGRESSIVE_DRIVING";
+    /** Code for a driving violation committed inside a restricted (EXCLUSION) zone. */
+    private static final String RECKLESS_IN_ZONE_CODE = "RECKLESS_IN_ZONE";
     /**
      * Marks the compound alert as already-attributed so {@code StreamOutputPersister} lets it pass
      * without trying to store it: it is a live operator escalation built from violations that are
@@ -165,11 +167,42 @@ public class AnalyticsTopology {
         // on the same task; AggressionRule keeps the per-vehicle timestamps and a cooldown, and
         // emits a CRITICAL ViolationEvent (sentinel ruleId) that rides the existing violation ->
         // WebSocket relay to the operator's map without being stored or double-counted.
-        harshViolations.merge(sustainedViolations)
+        KStream<String, ViolationEvent> aggressive = harshViolations.merge(sustainedViolations);
+        aggressive
                 .repartition(Repartitioned.with(Serdes.String(), violationSerde).withName("aggression-in"))
                 .process(new AggressionRule(aggressionSerde, AGGRESSION_WINDOW, AGGRESSION_COOLDOWN,
                         AGGRESSION_THRESHOLD, ESCALATION_SENTINEL_RULE_ID, AGGRESSION_CODE))
                 .to(Topics.VIOLATION, toViolation);
+
+        // COMPOUND: a driving violation committed INSIDE a restricted (EXCLUSION) zone is worse
+        // than the violation on its own. The violation carries its own lat/lon, so a point-in-
+        // polygon check against the geofence registry answers "in a forbidden zone?" with no join
+        // and no presence state. Stateless filter + map; the sentinel ruleId lets it ride the
+        // existing violation -> WebSocket relay to the operator's map without being stored.
+        aggressive
+                .filter((k, v) -> v != null && v.lat() != null && v.lon() != null
+                        && geofenceRegistry.areasContaining(v.lat(), v.lon()).stream()
+                                .anyMatch(GeofenceRegistry.Area::exclusion))
+                .map((k, v) -> KeyValue.pair(k, zoneEscalation(v)))
+                .to(Topics.VIOLATION, toViolation);
+    }
+
+    /**
+     * The compound "reckless in a restricted zone" alert. Sentinel ruleId marks it
+     * already-attributed so the persister passes it through untouched; CRITICAL because breaking
+     * a driving rule where the fleet was told not to go at all is two problems at once.
+     */
+    private ViolationEvent zoneEscalation(ViolationEvent v) {
+        return ViolationEvent.builder()
+                .tenantId(v.tenantId())
+                .vehicleId(v.vehicleId())
+                .ruleId(ESCALATION_SENTINEL_RULE_ID)
+                .ruleCode(RECKLESS_IN_ZONE_CODE)
+                .severity(Severity.CRITICAL)
+                .occurredAt(v.occurredAt())
+                .lat(v.lat())
+                .lon(v.lon())
+                .build();
     }
 
     private ViolationEvent sustainedViolation(String vehicleId, SpeedWindowAgg agg, long windowEnd) {

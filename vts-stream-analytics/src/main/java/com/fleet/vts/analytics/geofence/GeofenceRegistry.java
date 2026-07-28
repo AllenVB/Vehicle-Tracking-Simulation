@@ -28,8 +28,12 @@ import java.util.List;
 @Component
 public class GeofenceRegistry {
 
-    /** An active geofence with its polygon geometry. */
-    public record Area(Long id, String name, Long tenantId, Polygon polygon) {
+    /** An active geofence with its polygon geometry and kind (EXCLUSION / INCLUSION). */
+    public record Area(Long id, String name, Long tenantId, String kind, Polygon polygon) {
+        /** A forbidden zone: being inside it is the breach the compound rule escalates on. */
+        public boolean exclusion() {
+            return "EXCLUSION".equals(kind);
+        }
     }
 
     private static final Logger log = LoggerFactory.getLogger(GeofenceRegistry.class);
@@ -58,12 +62,12 @@ public class GeofenceRegistry {
         }
         WKTReader reader = new WKTReader(GEOMETRY);
         List<Area> loaded = new ArrayList<>();
-        jdbc.query("SELECT id, name, tenant_id, ST_AsText(area::geometry) AS wkt "
+        jdbc.query("SELECT id, name, tenant_id, kind, ST_AsText(area::geometry) AS wkt "
                 + "FROM geofence WHERE active = true", rs -> {
             try {
                 Polygon polygon = (Polygon) reader.read(rs.getString("wkt"));
                 loaded.add(new Area(rs.getLong("id"), rs.getString("name"),
-                        rs.getLong("tenant_id"), polygon));
+                        rs.getLong("tenant_id"), rs.getString("kind"), polygon));
             } catch (Exception e) {
                 log.warn("Skipping geofence {} with unparseable geometry: {}",
                         rs.getLong("id"), e.getMessage());

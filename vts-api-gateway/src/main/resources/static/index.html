@@ -36,6 +36,22 @@
         #vehicleList { flex: 1 1 auto; overflow-y: auto; min-height: 60px; }
         #scoreList { flex: 0 0 20%; overflow-y: auto; border-top: 1px solid var(--line); }
         #alertList { flex: 0 0 22%; overflow-y: auto; border-top: 1px solid var(--line); }
+
+        /* Tut-çek yeniden boyutlandırma kolu: sürücü skorları ve ihlal panelleri
+           yukarı/aşağı sürüklenerek büyütülüp küçültülüyor; boyut localStorage'da kalıyor. */
+        .rz { flex: 0 0 auto; height: 9px; cursor: row-resize; display: flex; align-items: center;
+              justify-content: center; background: var(--panel); touch-action: none; }
+        .rz::before { content: ""; width: 34px; height: 3px; border-radius: 2px; background: var(--line);
+              transition: background .15s ease, width .15s ease; }
+        .rz:hover::before, .rz.drag::before { background: var(--accent); width: 52px; }
+
+        /* Modern ince kaydırma çubuğu (tüm panel + modal + çekmece). */
+        * { scrollbar-width: thin; scrollbar-color: #2b4257 transparent; }
+        ::-webkit-scrollbar { width: 9px; height: 9px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #2b4257; border-radius: 6px; border: 2px solid transparent;
+              background-clip: padding-box; transition: background .15s ease; }
+        ::-webkit-scrollbar-thumb:hover { background: #3a5a78; background-clip: padding-box; }
         .scoreRow { display: flex; align-items: center; gap: 8px; }
         .scoreRow .rank { color: var(--muted); font-size: 10px; width: 14px; }
         .scoreRow .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -426,9 +442,11 @@
     <div class="sect">Araçlar</div>
     <div id="vehicleList"></div>
 
+    <div class="rz" data-rz="scoreList" title="Sürükle: sürücü skorları panelini büyüt/küçült"></div>
     <div class="sect">Sürücü skorları <span style="text-transform:none;color:var(--muted)">(30 gün)</span></div>
     <div id="scoreList"><div class="empty">Puanlanmış sefer bekleniyor…</div></div>
 
+    <div class="rz" data-rz="alertList" title="Sürükle: ihlal panelini büyüt/küçült"></div>
     <div class="sect">İhlaller · toplam ceza <span id="fineTotal">0 ₺</span></div>
     <div id="alertFilter">
         <button class="fbtn on" id="fLive" title="Canlı akış">● Canlı</button>

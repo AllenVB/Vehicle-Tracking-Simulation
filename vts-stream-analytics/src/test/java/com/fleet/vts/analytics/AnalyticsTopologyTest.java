@@ -249,7 +249,7 @@ class AnalyticsTopologyTest {
                 new Coordinate(28.99, 40.99), new Coordinate(29.01, 40.99),
                 new Coordinate(29.01, 41.01), new Coordinate(28.99, 41.01),
                 new Coordinate(28.99, 40.99)});
-        start(new GeofenceRegistry(List.of(new GeofenceRegistry.Area(100L, "Test Zone", 1L, zone))));
+        start(new GeofenceRegistry(List.of(new GeofenceRegistry.Area(100L, "Test Zone", 1L, "EXCLUSION", zone))));
 
         TestOutputTopic<String, GeofenceEvent> geofence = driver.createOutputTopic(
                 Topics.GEOFENCE_EVENT, new StringDeserializer(),
@@ -330,6 +330,39 @@ class AnalyticsTopologyTest {
                 "a trip past the ceiling is force-closed though the vehicle never stopped");
         assertTrue(out.stream().filter(tp -> tp.status() == TripStatus.ONGOING).count() >= 2,
                 "a fresh trip opens to keep measuring the vehicle after the force-close");
+    }
+
+    @Test
+    void aDrivingViolationInsideARestrictedZoneEscalates() {
+        GeometryFactory gf = new GeometryFactory();
+        Polygon zone = gf.createPolygon(new Coordinate[]{
+                new Coordinate(28.99, 40.99), new Coordinate(29.01, 40.99),
+                new Coordinate(29.01, 41.01), new Coordinate(28.99, 41.01),
+                new Coordinate(28.99, 40.99)});
+        start(new GeofenceRegistry(List.of(
+                new GeofenceRegistry.Area(100L, "Yasak Bölge", 1L, "EXCLUSION", zone))));
+
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+        // A hard brake at (41.0, 29.0) — a point inside the restricted zone.
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(1)), t.plusSeconds(1));
+
+        List<ViolationEvent> out = violations().readValuesToList();
+        assertTrue(out.stream().anyMatch(x -> "RECKLESS_IN_ZONE".equals(x.ruleCode())
+                        && x.severity() == Severity.CRITICAL),
+                "a driving violation inside a restricted zone escalates");
+    }
+
+    @Test
+    void aViolationOutsideEveryZoneDoesNotEscalate() {
+        start(emptyRegistry());   // no zones registered
+        Instant t = Instant.parse("2026-07-13T10:00:00Z");
+        input.pipeInput("42", event(42, 90, true, true, 41.0, 29.0, t), t);
+        input.pipeInput("42", event(42, 40, true, true, 41.0, 29.0, t.plusSeconds(1)), t.plusSeconds(1));
+
+        assertFalse(violations().readValuesToList().stream()
+                        .anyMatch(x -> "RECKLESS_IN_ZONE".equals(x.ruleCode())),
+                "no zone means no zone-escalation");
     }
 
     private TestOutputTopic<String, TripEvent> tripTopic() {

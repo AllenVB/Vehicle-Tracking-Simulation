@@ -15,5 +15,6 @@ public record TripSummaryDto(
         Instant endedAt,
         BigDecimal distanceKm,
         Integer score,
+        Integer ecoScore,
         String status) {
 }

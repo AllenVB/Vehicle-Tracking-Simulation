@@ -159,7 +159,7 @@ public class ReportingQueryRepository {
 
     public List<TripSummaryDto> findVehicleTrips(long tenantId, long vehicleId, int limit) {
         return jdbc.query("""
-                SELECT id, started_at, ended_at, distance_km, score, status
+                SELECT id, started_at, ended_at, distance_km, score, eco_score, status
                 FROM trip
                 WHERE tenant_id = ? AND vehicle_id = ?
                 ORDER BY started_at DESC
@@ -173,6 +173,7 @@ public class ReportingQueryRepository {
                             ended == null ? null : ended.toInstant(),
                             rs.getBigDecimal("distance_km"),
                             rs.getObject("score", Integer.class),
+                            rs.getObject("eco_score", Integer.class),
                             rs.getString("status"));
                 },
                 tenantId, vehicleId, limit);
@@ -215,7 +216,7 @@ public class ReportingQueryRepository {
     /** A single driver's recent trips (by driver, not vehicle) for the driver-detail view. */
     public List<TripSummaryDto> findDriverTrips(long tenantId, long driverId, int limit) {
         return jdbc.query("""
-                SELECT id, started_at, ended_at, distance_km, score, status
+                SELECT id, started_at, ended_at, distance_km, score, eco_score, status
                 FROM trip
                 WHERE tenant_id = ? AND driver_id = ?
                 ORDER BY started_at DESC
@@ -229,6 +230,7 @@ public class ReportingQueryRepository {
                             ended == null ? null : ended.toInstant(),
                             rs.getBigDecimal("distance_km"),
                             rs.getObject("score", Integer.class),
+                            rs.getObject("eco_score", Integer.class),
                             rs.getString("status"));
                 },
                 tenantId, driverId, limit);

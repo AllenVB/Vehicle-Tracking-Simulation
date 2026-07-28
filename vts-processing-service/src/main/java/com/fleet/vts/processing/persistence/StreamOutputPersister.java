@@ -151,27 +151,71 @@ public class StreamOutputPersister {
         double distanceKm = e.distanceKm() == null ? 0 : e.distanceKm();
         int score = TripScore.of(distanceKm, counts.speeding(), counts.harsh(), counts.idling(),
                 counts.geofence(), counts.sustained(), counts.supply());
+        Integer ecoScore = ecoScore(e, distanceKm, counts);
 
         Long tripId = jdbc.queryForObject("""
                 INSERT INTO trip
                     (tenant_id, vehicle_id, driver_id, started_at, ended_at,
                      start_location, end_location, distance_km, avg_speed_kmh, max_speed_kmh,
-                     violation_count, score, status)
+                     violation_count, score, eco_score, status)
                 VALUES (?, ?, ?, ?, ?,
                         ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
                         ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
-                        ?, ?, ?, ?, ?, 'CLOSED')
+                        ?, ?, ?, ?, ?, ?, 'CLOSED')
                 RETURNING id
                 """, Long.class,
                 e.tenantId(), e.vehicleId(), driverId, ts(e.startedAt()), ts(e.endedAt()),
                 e.startLon(), e.startLat(), e.endLon(), e.endLat(),
                 e.distanceKm(), e.avgSpeedKmh(), e.maxSpeedKmh(),
-                counts.total(), score);
+                counts.total(), score, ecoScore);
 
         int points = persistBreadcrumb(tripId, e);
         if (points == 0) {
             log.warn("Trip {} (vehicle {}) closed with no telemetry breadcrumb", tripId, e.vehicleId());
         }
+    }
+
+    /**
+     * Eko-sürüş puanı (1-100): yakıt verimi (km başına harcanan yakıt) eksi sürüş-sertliği
+     * cezaları. İhlal-temelli {@code score}'dan ayrı bir eksen — "kurallara uydu mu" değil,
+     * "verimli mi sürdü". Kısa yolculuklar (&lt; 5 km) ölçmeye değmez; yakıt okuması yoksa null.
+     */
+    private Integer ecoScore(TripEvent e, double distanceKm, Violations counts) {
+        if (e.startedAt() == null || e.endedAt() == null || distanceKm < 5) {
+            return null;
+        }
+        Double fuelUsed = jdbc.query("""
+                SELECT (array_agg(fuel_pct ORDER BY ts ASC))[1]  AS start_fuel,
+                       (array_agg(fuel_pct ORDER BY ts DESC))[1] AS end_fuel
+                FROM telemetry
+                WHERE vehicle_id = ? AND ts >= ? AND ts <= ? AND fuel_pct IS NOT NULL
+                """,
+                (ResultSetExtractor<Double>) rs -> {
+                    if (!rs.next()) {
+                        return null;
+                    }
+                    Object start = rs.getObject("start_fuel");
+                    Object end = rs.getObject("end_fuel");
+                    if (start == null || end == null) {
+                        return null;
+                    }
+                    // A mid-trip refuel reads as negative use; floor at 0 rather than reward it.
+                    return Math.max(0.0, ((Number) start).doubleValue() - ((Number) end).doubleValue());
+                },
+                e.vehicleId(), ts(e.startedAt()), ts(e.endedAt()));
+        if (fuelUsed == null) {
+            return null;
+        }
+        double fuelPerKm = fuelUsed / distanceKm;               // % tank per km — lower is greener
+        int maxSp = e.maxSpeedKmh() == null ? 0 : e.maxSpeedKmh();
+        // Weight 130 (not 300): the simulator drains fuel by TIME (0.2%/min), so fuelPerKm is
+        // really 12/avgSpeed — a slow crawl looks thirsty. 130 spreads the score across ~45..85
+        // by cruise speed instead of pinning every trip to the red floor.
+        double eco = 100.0
+                - fuelPerKm * 130.0                            // efficiency dominates the score
+                - counts.harsh() * 6.0 - counts.sustained() * 8.0 - counts.speeding() * 3.0
+                - Math.max(0, maxSp - 100) * 0.5;               // sustained top speed burns fuel
+        return (int) Math.max(1, Math.min(100, Math.round(eco)));
     }
 
     /** Violation tally for one journey, by the kinds the score weighs. */

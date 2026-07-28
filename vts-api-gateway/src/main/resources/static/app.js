@@ -57,7 +57,10 @@
         // Bileşik alarm (analytics CEP): tek ihlal değil, kısa pencerede biriken agresif
         // sürüş. Ceza 0 — cezalandırılabilir tek olaylar zaten kendi başlarına sayıldı;
         // bu bir CANLI eskalasyon, DB'ye yazılmıyor.
-        AGGRESSIVE_DRIVING: { tr: "Agresif Sürüş",       fine: 0 }
+        AGGRESSIVE_DRIVING: { tr: "Agresif Sürüş",       fine: 0 },
+        // Bileşik alarm: yasak (EXCLUSION) bölge içinde sürüş ihlali. Ceza 0 — parçalar zaten
+        // kendi başlarına sayıldı; bu CANLI eskalasyon.
+        RECKLESS_IN_ZONE:   { tr: "Yasak Bölgede İhlal", fine: 0 }
     };
     const tl = n => n.toLocaleString("tr-TR") + " ₺";
 
@@ -201,6 +204,42 @@
         document.getElementById("ovClose").addEventListener("click", () => document.getElementById("ovModal").classList.remove("on"));
         document.getElementById("drvClose").addEventListener("click", () => document.getElementById("drvModal").classList.remove("on"));
         document.getElementById("drvModal").addEventListener("click", e => { if (e.target.id === "drvModal") document.getElementById("drvModal").classList.remove("on"); });
+        initResizers();
+    }
+
+    /**
+     * Sol menü panellerini tut-çek ile yeniden boyutlandırır. Grip'in altındaki panel
+     * (data-rz) yukarı sürükleyince büyür; araç listesi (flex:1) farkı emer. Boyut
+     * localStorage'da kalıcı. Pointer olayları → fare + dokunmatik birlikte çalışır.
+     */
+    function initResizers() {
+        document.querySelectorAll(".rz").forEach(grip => {
+            const el = document.getElementById(grip.dataset.rz);
+            if (!el) return;
+            const saved = localStorage.getItem("vts:rz:" + grip.dataset.rz);
+            if (saved) el.style.flex = "0 0 " + saved + "px";
+            let startY = 0, startH = 0;
+            const onMove = e => {
+                const h = Math.max(70, Math.min(window.innerHeight * 0.6, startH + (startY - e.clientY)));
+                el.style.flex = "0 0 " + Math.round(h) + "px";
+            };
+            const onUp = () => {
+                grip.classList.remove("drag");
+                document.body.style.userSelect = "";
+                document.removeEventListener("pointermove", onMove);
+                document.removeEventListener("pointerup", onUp);
+                localStorage.setItem("vts:rz:" + grip.dataset.rz, String(Math.round(el.getBoundingClientRect().height)));
+            };
+            grip.addEventListener("pointerdown", e => {
+                e.preventDefault();
+                startY = e.clientY;
+                startH = el.getBoundingClientRect().height;
+                grip.classList.add("drag");
+                document.body.style.userSelect = "none";
+                document.addEventListener("pointermove", onMove);
+                document.addEventListener("pointerup", onUp);
+            });
+        });
     }
 
     function initMaps() {
@@ -945,6 +984,11 @@
             showToast(`<span class="tt">🚨 Agresif sürüş — eskalasyon</span><br/>` +
                 `${av ? esc(av.plate) : "#" + v.vehicleId} · 10 dk içinde ${n ? n + " " : ""}bileşik ihlal (sert fren + hız aşımı).`);
         }
+        if (v.ruleCode === "RECKLESS_IN_ZONE") {
+            const zv = vehicles.get(v.vehicleId);
+            showToast(`<span class="tt">⛔ Yasak bölgede ihlal — eskalasyon</span><br/>` +
+                `${zv ? esc(zv.plate) : "#" + v.vehicleId} · yasak bölge içinde sürüş ihlali.`);
+        }
         alerts++;
         fineTotal += rule.fine;
         countUp(document.getElementById("statAlerts"), alerts);
@@ -1568,7 +1612,7 @@
                 const s = t.score != null ? t.score : "-";
                 const sc = t.score == null ? "" : (t.score >= 8 ? "#5dcaa5" : t.score >= 6 ? "#f0997b" : "#e24b4a");
                 html += `<div class="drow"><span>${new Date(t.startedAt).toLocaleDateString("tr-TR")}` +
-                    `<div class="dmuted">${Math.round(t.distanceKm)} km · ${tripDuration(t)}</div></span>` +
+                    `<div class="dmuted">${Math.round(t.distanceKm)} km · ${tripDuration(t)}${ecoBadge(t.ecoScore)}</div></span>` +
                     `<span style="text-align:right">★ <b style="color:${sc}">${s}</b>/10` +
                     `<div class="dmuted"><button class="dreplay" data-trip="${t.id}">Oynat</button></div></span></div>`;
             });
@@ -1632,6 +1676,13 @@
             const res = await fetch(url, { headers: auth() });
             return res.ok ? await res.json() : null;
         } catch (_) { return null; }
+    }
+
+    /** Eko-sürüş rozeti (🌿 1-100): yeşil verimli, kırmızı savurgan; yoksa boş. */
+    function ecoBadge(eco) {
+        if (eco == null) return "";
+        const c = eco >= 70 ? "#5dcaa5" : eco >= 45 ? "#f0997b" : "#e24b4a";
+        return ` · <span style="color:${c}">🌿 ${eco}</span>`;
     }
 
     // ── Genel bakış modalı ──────────────────────────────────────────────────
@@ -1768,8 +1819,9 @@
         if (d.trips && d.trips.length) {
             d.trips.forEach(t => {
                 const tc = t.score == null ? "#8aa0b4" : t.score >= 8 ? "#5dcaa5" : t.score >= 6 ? "#f0997b" : "#e24b4a";
+                const eco = ecoBadge(t.ecoScore);
                 html += `<div class="drv-trip"><span class="dt-date">${new Date(t.startedAt).toLocaleDateString("tr-TR")}</span>` +
-                    `<span class="dt-meta">${Math.round(t.distanceKm || 0)} km · ${tripDuration(t)}</span>` +
+                    `<span class="dt-meta">${Math.round(t.distanceKm || 0)} km · ${tripDuration(t)}${eco}</span>` +
                     `<span class="dt-score" style="color:${tc}">★ ${t.score != null ? t.score : "-"}/10</span></div>`;
             });
         } else { html += `<div class="empty">Sefer yok.</div>`; }
