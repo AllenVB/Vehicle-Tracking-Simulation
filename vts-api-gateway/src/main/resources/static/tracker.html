@@ -20,13 +20,11 @@
     h1 { font-size: 18px; margin: 4px 0 2px; }
     .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
     .card {
-      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-      padding: 16px; margin-bottom: 14px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px;
     }
     .plate {
       display: inline-block; background: #ffd400; color: #10131a; font-weight: 800;
-      letter-spacing: 1px; padding: 6px 12px; border-radius: 7px; font-size: 18px;
-      border: 2px solid #0c1220;
+      letter-spacing: 1px; padding: 6px 12px; border-radius: 7px; font-size: 18px; border: 2px solid #0c1220;
     }
     .veh { color: var(--muted); font-size: 13px; margin-top: 8px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -42,6 +40,11 @@
     }
     button.stop { background: var(--bad); color: #fff; }
     button:disabled { opacity: .5; }
+    input {
+      width: 100%; padding: 13px; border-radius: 11px; border: 1px solid var(--line);
+      background: var(--panel2); color: var(--fg); font-size: 16px; margin-top: 6px;
+    }
+    label { font-size: 13px; color: var(--muted); display: block; margin-top: 12px; }
     .status { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 12px; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
     .dot.live { background: var(--ok); box-shadow: 0 0 0 4px rgba(46,199,130,.18); }
@@ -53,19 +56,82 @@
     }
     .foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
     code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+
+    /* Çok adımlı giriş kapısı (QR sonrası): kod gir → araç bilgisi gir */
+    #gate { position: fixed; inset: 0; background: rgba(6,10,18,.95); z-index: 50;
+      display: none; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; }
+    #gate .screen { display: none; max-width: 380px; width: 100%; }
+    .g-t { font-size: 19px; font-weight: 800; text-align: center; }
+    .g-sub { color: var(--muted); font-size: 13px; text-align: center; margin: 6px 0 14px; }
+    #codeInput { text-align: center; font-size: 34px; letter-spacing: 10px; font-weight: 800; }
+    .g-err { color: var(--bad); font-size: 13px; margin-top: 10px; min-height: 16px; text-align: center; }
+    .g-step { color: var(--accent); font-size: 12px; font-weight: 700; text-align: center; margin-bottom: 6px; letter-spacing: 1px; }
+
+    /* İhlal bildirimi — üstten inen kırmızı bar */
+    #vio { position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+      background: var(--bad); color: #fff; font-weight: 800; font-size: 16px;
+      text-align: center; padding: 16px 14px; box-shadow: 0 6px 20px rgba(255,84,112,.5);
+      transform: translateY(-110%); transition: transform .25s ease; }
+    #vio.show { transform: translateY(0); }
   </style>
 </head>
 <body>
+
+  <div id="vio"></div>
+
+  <!-- ── Çok adımlı kapı ─────────────────────────────────────────────────── -->
+  <div id="gate">
+    <!-- QR olmadan açıldı -->
+    <div class="screen" data-s="needqr">
+      <div class="card" style="text-align:center">
+        <div class="g-t">QR ile aç</div>
+        <div class="g-sub">Bu sayfayı bilgisayardaki haritada çıkan QR'ı telefonunla tarayarak aç.</div>
+      </div>
+    </div>
+    <!-- Oturum yok/expired -->
+    <div class="screen" data-s="expired">
+      <div class="card" style="text-align:center">
+        <div class="g-t">Oturum bulunamadı</div>
+        <div class="g-sub">Süresi dolmuş olabilir. Bilgisayardaki QR'ı tekrar tarat.</div>
+      </div>
+    </div>
+    <!-- Kod gir -->
+    <div class="screen" data-s="code">
+      <div class="card">
+        <div class="g-step">ADIM 1/2 · DOĞRULAMA</div>
+        <div class="g-t">Onay kodunu gir</div>
+        <div class="g-sub">Bilgisayardaki haritada QR'ın altında beliren 2 basamaklı kodu gir.</div>
+        <input id="codeInput" inputmode="numeric" maxlength="2" placeholder="00" autocomplete="one-time-code">
+        <button id="codeBtn">Doğrula</button>
+        <div class="g-err" id="codeErr"></div>
+      </div>
+    </div>
+    <!-- Araç bilgisi -->
+    <div class="screen" data-s="form">
+      <div class="card">
+        <div class="g-step">ADIM 2/2 · ARAÇ BİLGİSİ</div>
+        <div class="g-t">Aracını tanımla</div>
+        <div class="g-sub">Bu bilgiler bu telefona kaydedilir; sonraki girişlerde korunur.</div>
+        <label>Plaka</label>
+        <input id="fPlate" maxlength="20" placeholder="34 ABC 123" autocapitalize="characters">
+        <label>Araç modeli (marka + model)</label>
+        <input id="fModel" maxlength="60" placeholder="Toyota Corolla">
+        <button id="formBtn">Kaydet ve Başlat</button>
+        <div class="g-err" id="formErr"></div>
+      </div>
+    </div>
+  </div>
+
   <h1>VTS · Canlı GPS Takip</h1>
   <div class="sub">Bu telefon bir araç takip cihazıdır — konumu, hızı ve doğruluğu sunucuya gerçek zamanlı gönderir.</div>
 
   <div id="insecure" class="banner" style="display:none">
     ⚠️ GPS yalnızca güvenli bağlamda (HTTPS) çalışır. Bu sayfayı <code>https://</code> adresinden açın
-    (ör. cloudflared tüneli). Düz <code>http://</code> ile tarayıcı konumu engeller.
+    (cloudflared tüneli). Düz <code>http://</code> ile tarayıcı konumu engeller.
   </div>
 
   <div class="card">
-    <span class="plate" id="plate">34 GPS 001</span>
+    <span class="plate" id="plate">—</span>
     <div class="veh"><span id="veh">Telefon · Canlı GPS</span> · IMEI <span id="imei">—</span></div>
   </div>
 
@@ -94,7 +160,7 @@
     </div>
     <div class="status">
       <span class="dot" id="dot"></span>
-      <span id="statusText">Hazır — Başlat'a bas.</span>
+      <span id="statusText">Doğrulama bekleniyor…</span>
     </div>
   </div>
 
@@ -106,47 +172,115 @@
 
   <script>
     const params = new URLSearchParams(location.search);
-    const IMEI = params.get('imei') || '990000000000001';
-    document.getElementById('imei').textContent = IMEI;
-    if (params.get('plate')) document.getElementById('plate').textContent = params.get('plate');
+    const PAIR = params.get('pair');
+    let IMEI = null;   // araç bilgisi kaydedilince (enrollment) gelir — paylaşılan sabit IMEI YOK.
+
+    // Bu telefona ait kalıcı kimlik: aynı telefon her zaman aynı araca bağlanır.
+    let deviceKey = localStorage.getItem('vts_device_key');
+    if (!deviceKey) {
+      deviceKey = (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
+                : 'dk-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      localStorage.setItem('vts_device_key', deviceKey);
+    }
 
     const $ = id => document.getElementById(id);
+    const gate = $('gate');
+    function screen(name) {
+      document.querySelectorAll('#gate .screen').forEach(s => s.style.display = (s.dataset.s === name ? 'block' : 'none'));
+      gate.style.display = 'flex';
+    }
+
+    if (!window.isSecureContext && location.hostname !== 'localhost') $('insecure').style.display = 'block';
+
+    // ── Akış: scan → kod doğrula → araç formu → enroll → yayın ──────────────
+    async function boot() {
+      if (!PAIR) { screen('needqr'); return; }
+      try {
+        const r = await fetch('/api/v1/track/pair/scan', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicId: PAIR })
+        });
+        if (!r.ok) { screen('expired'); return; }
+      } catch { screen('expired'); return; }
+      screen('code');
+      setTimeout(() => $('codeInput').focus(), 200);
+    }
+
+    $('codeBtn').onclick = async () => {
+      const code = $('codeInput').value.trim();
+      const err = $('codeErr'); err.textContent = '';
+      if (code.length < 2) { err.textContent = '2 basamaklı kodu gir.'; return; }
+      try {
+        const r = await fetch('/api/v1/track/pair/verify', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicId: PAIR, code })
+        });
+        const j = await r.json();
+        if (!j.ok) { err.textContent = 'Kod yanlış. Bilgisayardaki kodu kontrol et.'; return; }
+        await showForm();
+      } catch { err.textContent = 'Bir hata oldu, tekrar dene.'; }
+    };
+
+    async function showForm() {
+      try {
+        const r = await fetch('/api/v1/track/device/' + encodeURIComponent(deviceKey));
+        if (r.ok) {
+          const d = await r.json();
+          $('fPlate').value = d.plate || '';
+          $('fModel').value = [d.make, d.model].filter(Boolean).join(' ');
+        }
+      } catch { /* yeni telefon: bos form */ }
+      screen('form');
+    }
+
+    $('formBtn').onclick = async () => {
+      const plate = $('fPlate').value.trim();
+      const modelRaw = $('fModel').value.trim();
+      const err = $('formErr'); err.textContent = '';
+      if (!plate) { err.textContent = 'Plaka gir.'; return; }
+      let make = null, model = null;
+      if (modelRaw) { const p = modelRaw.split(/\s+/); make = p.shift(); model = p.join(' ') || null; }
+      try {
+        const r = await fetch('/api/v1/track/enroll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicId: PAIR, deviceKey, plate, make, model })
+        });
+        if (r.status === 409) { err.textContent = 'Bu plaka başka bir araçta kayıtlı.'; return; }
+        if (r.status === 403) { err.textContent = 'Onay geçersiz. QR\'ı tekrar tarat.'; return; }
+        if (!r.ok) { err.textContent = 'Kaydedilemedi, tekrar dene.'; return; }
+        const d = await r.json();
+        IMEI = d.imei;
+        $('imei').textContent = IMEI;
+        $('plate').textContent = d.plate;
+        $('veh').textContent = [d.make, d.model].filter(Boolean).join(' ') || 'Telefon · Canlı GPS';
+        gate.style.display = 'none';
+        setStatus('', 'Hazır — konum izni isteniyor…');
+        start();   // onaylandı + kaydedildi → konum akışı
+      } catch { err.textContent = 'Bir hata oldu.'; }
+    };
+
+    boot();
+
+    // ── GPS yayını ──────────────────────────────────────────────────────────
     const dot = $('dot'), statusText = $('statusText'), toggle = $('toggle');
     let watchId = null, sent = 0, errs = 0, lastSendAt = 0, wakeLock = null;
-    const MIN_INTERVAL_MS = 1000; // GPS bazen çok sık tetikler; en az 1 sn arayla gönder.
+    const MIN_INTERVAL_MS = 1000;
 
-    if (!window.isSecureContext && location.hostname !== 'localhost') {
-      $('insecure').style.display = 'block';
-    }
-
-    function setStatus(cls, text) {
-      dot.className = 'dot' + (cls ? ' ' + cls : '');
-      statusText.textContent = text;
-    }
+    function setStatus(cls, text) { dot.className = 'dot' + (cls ? ' ' + cls : ''); statusText.textContent = text; }
 
     async function start() {
-      if (!('geolocation' in navigator)) {
-        setStatus('err', 'Bu tarayıcı Geolocation desteklemiyor.');
-        return;
-      }
+      if (!IMEI) { setStatus('err', 'Önce araç bilgisi kaydedilmeli.'); return; }
+      if (!('geolocation' in navigator)) { setStatus('err', 'Bu tarayıcı Geolocation desteklemiyor.'); return; }
       setStatus('wait', 'Konum izni bekleniyor…');
-      watchId = navigator.geolocation.watchPosition(onPos, onErr, {
-        enableHighAccuracy: true, maximumAge: 1000, timeout: 15000
-      });
-      toggle.textContent = '■ Takibi Durdur';
-      toggle.classList.add('stop');
+      watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
+      toggle.textContent = '■ Takibi Durdur'; toggle.classList.add('stop');
       requestWakeLock();
     }
-
     function stop() {
       if (watchId != null) navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      toggle.textContent = '▶ Takibi Başlat';
-      toggle.classList.remove('stop');
-      setStatus('', 'Durduruldu.');
-      releaseWakeLock();
+      watchId = null; toggle.textContent = '▶ Takibi Başlat'; toggle.classList.remove('stop');
+      setStatus('', 'Durduruldu.'); releaseWakeLock();
     }
-
     toggle.onclick = () => (watchId == null ? start() : stop());
 
     function onPos(pos) {
@@ -154,61 +288,70 @@
       const speedKmh = (c.speed == null || isNaN(c.speed)) ? null : Math.round(c.speed * 3.6);
       const heading  = (c.heading == null || isNaN(c.heading)) ? null : Math.round(c.heading);
       const accuracy = (c.accuracy == null || isNaN(c.accuracy)) ? null : Math.round(c.accuracy * 10) / 10;
-
       $('lat').textContent = c.latitude.toFixed(6);
       $('lon').textContent = c.longitude.toFixed(6);
       $('speed').textContent = speedKmh == null ? '0' : speedKmh;
       $('head').textContent = heading == null ? '—' : heading;
       $('acc').textContent = accuracy == null ? '—' : accuracy;
-
+      checkViolations(speedKmh, pos.timestamp);
       const now = Date.now();
       if (now - lastSendAt < MIN_INTERVAL_MS) return;
       lastSendAt = now;
-
-      send({
-        imei: IMEI,
-        ts: new Date(pos.timestamp).toISOString(),
-        lat: c.latitude,
-        lon: c.longitude,
-        speedKmh: speedKmh,
-        heading: heading,
-        accuracy: accuracy
-      });
+      send({ imei: IMEI, ts: new Date(pos.timestamp).toISOString(), lat: c.latitude, lon: c.longitude,
+             speedKmh: speedKmh, heading: heading, accuracy: accuracy });
     }
 
     async function send(body) {
       try {
         const res = await fetch('/api/v1/track', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          keepalive: true
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        sent++;
-        $('sent').textContent = sent;
-        $('last').textContent = new Date().toLocaleTimeString('tr-TR');
+        sent++; $('sent').textContent = sent; $('last').textContent = new Date().toLocaleTimeString('tr-TR');
         setStatus('live', 'Canlı — sunucuya akıyor.');
       } catch (e) {
-        errs++;
-        $('errs').textContent = errs;
-        setStatus('err', 'Gönderim hatası: ' + e.message);
+        errs++; $('errs').textContent = errs; setStatus('err', 'Gönderim hatası: ' + e.message);
       }
     }
 
+    // ── İhlal tespiti (client-side, anlık) ──────────────────────────────────
+    // Hız > 82 km/s  → hız aşımı.  Ani yavaşlama ≥ 40 km/s (saniyede) → sert fren.
+    const SPEED_LIMIT = 82, HARSH_DROP_PER_SEC = 40;
+    let vPrevSpeed = null, vPrevTs = null;
+    const vLast = {};
+    function checkViolations(speedKmh, tsMs) {
+      const now = tsMs || Date.now();
+      if (speedKmh != null && speedKmh > SPEED_LIMIT) {
+        warn('speed', 'Hız aşımı! ' + speedKmh + ' km/s (limit ' + SPEED_LIMIT + ')');
+      }
+      if (vPrevSpeed != null && speedKmh != null && vPrevTs != null) {
+        const dt = (now - vPrevTs) / 1000;
+        if (dt > 0.2 && dt <= 5) {
+          const drop = vPrevSpeed - speedKmh;
+          if (drop / dt >= HARSH_DROP_PER_SEC) warn('brake', 'Sert fren! ' + Math.round(drop) + ' km/s ani düşüş');
+        }
+      }
+      vPrevSpeed = speedKmh; vPrevTs = now;
+    }
+    function warn(type, msg) {
+      const now = Date.now();
+      if (vLast[type] && now - vLast[type] < 5000) return;   // aynı türü 5 sn'de bir göster
+      vLast[type] = now;
+      const el = $('vio');
+      el.textContent = '⚠ İHLAL YAPTINIZ — ' + msg;
+      el.classList.add('show');
+      if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
+      clearTimeout(warn._t);
+      warn._t = setTimeout(() => el.classList.remove('show'), 4500);
+    }
+
     function onErr(err) {
-      const msg = {
-        1: 'Konum izni reddedildi. Tarayıcı ayarlarından bu siteye konum izni verin.',
-        2: 'Konum alınamıyor (sinyal yok).',
-        3: 'Konum zaman aşımına uğradı.'
-      }[err.code] || err.message;
+      const msg = { 1: 'Konum izni reddedildi. Ayarlardan bu siteye konum izni ver.',
+                    2: 'Konum alınamıyor (sinyal yok).', 3: 'Konum zaman aşımına uğradı.' }[err.code] || err.message;
       setStatus('err', msg);
     }
 
-    // Ekranı açık tut (takip sırasında uyumasın); desteklenmezse sessizce geç.
-    async function requestWakeLock() {
-      try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
-    }
+    async function requestWakeLock() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
     function releaseWakeLock() { try { wakeLock && wakeLock.release(); wakeLock = null; } catch (e) {} }
     document.addEventListener('visibilitychange', () => {
       if (wakeLock == null && watchId != null && document.visibilityState === 'visible') requestWakeLock();

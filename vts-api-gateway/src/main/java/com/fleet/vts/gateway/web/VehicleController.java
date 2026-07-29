@@ -1,8 +1,10 @@
 package com.fleet.vts.gateway.web;
 
 import com.fleet.vts.gateway.domain.Vehicle;
+import com.fleet.vts.gateway.repository.ReportingQueryRepository;
 import com.fleet.vts.gateway.repository.VehicleRepository;
 import com.fleet.vts.gateway.security.CurrentUser;
+import com.fleet.vts.gateway.web.dto.TrackPointDto;
 import com.fleet.vts.gateway.web.dto.VehicleDto;
 import com.fleet.vts.gateway.web.dto.VehicleRequest;
 import com.fleet.vts.gateway.web.mapper.VehicleMapper;
@@ -36,11 +38,20 @@ public class VehicleController {
     private final VehicleRepository repository;
     private final VehicleMapper mapper;
     private final JdbcTemplate jdbc;
+    private final ReportingQueryRepository reporting;
 
-    public VehicleController(VehicleRepository repository, VehicleMapper mapper, JdbcTemplate jdbc) {
+    public VehicleController(VehicleRepository repository, VehicleMapper mapper, JdbcTemplate jdbc,
+                            ReportingQueryRepository reporting) {
         this.repository = repository;
         this.mapper = mapper;
         this.jdbc = jdbc;
+        this.reporting = reporting;
+    }
+
+    /** Today's position trail (breadcrumb) for the live map's point-tracking of one vehicle. */
+    @GetMapping("/{id}/track-today")
+    public List<TrackPointDto> trackToday(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id) {
+        return reporting.findTodayPositions(CurrentUser.tenantId(jwt), id);
     }
 
     @GetMapping

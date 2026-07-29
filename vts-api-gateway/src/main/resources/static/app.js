@@ -146,12 +146,100 @@
 
     const auth = () => ({ "Authorization": "Bearer " + token });
 
+    // ── Telefon eşleştirme (QR + 2 basamaklı onay) ───────────────────────────
+    // Sağ üstteki QR, telefonun açacağı tracker linkini (tünel adresi + oturum)
+    // taşır. Telefon tarayıp aynı 2 basamaklı kodu gösterir; kullanıcı onaylayınca
+    // telefon konum akıtmaya başlar. Tünel adresi ayarlı değilse QR yerine uyarı.
+    async function initPairing() {
+        const panel = document.getElementById("pairPanel");
+        const qrEl = document.getElementById("pairQr");
+        const hint = document.getElementById("pairHint");
+        if (!panel) return;
+        document.getElementById("pairClose").onclick = () => { panel.style.display = "none"; };
+        const codeEl = document.getElementById("pairCode");
+        try {
+            const cfg = await (await fetch("/api/v1/track/config")).json();
+            const base = (cfg.publicUrl || "").replace(/\/+$/, "");
+            const s = await (await fetch("/api/v1/track/pair", { method: "POST" })).json();
+            // Kod telefon QR'ı TARAYANA kadar gizli (GitHub tarzı doğrulama).
+            codeEl.textContent = "••";
+            if (!base) {
+                qrEl.innerHTML = '<div style="color:#333;font-size:11px;padding:24px 6px;line-height:1.4">' +
+                    'Tünel adresi yok.<br><b>start-tracking</b><br>script\'ini çalıştır.</div>';
+                hint.textContent = "Tünel bekleniyor…";
+            } else if (typeof qrcode === "function") {
+                // QR publicId taşır (kodu ASLA taşımaz); kod yalnızca burada, taranınca belirir.
+                const url = `${base}/tracker.html?pair=${s.publicId}`;
+                const qr = qrcode(0, "M");
+                qr.addData(url);
+                qr.make();
+                qrEl.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2 });
+                hint.textContent = "QR'ı telefonunla tarat";
+            }
+            panel.style.display = "block";
+            const poll = setInterval(async () => {
+                try {
+                    const r = await fetch(`/api/v1/track/pair/${s.sessionId}`);
+                    if (!r.ok) return;
+                    const st = await r.json();
+                    if (st.status === "SCANNED") {
+                        codeEl.textContent = st.code;
+                        hint.textContent = "👉 Bu kodu telefona gir";
+                    } else if (st.status === "CONFIRMED") {
+                        clearInterval(poll);
+                        if (st.code) codeEl.textContent = st.code;
+                        panel.classList.add("confirmed");
+                        hint.textContent = "✓ Onaylandı — araç ekleniyor…";
+                    }
+                } catch (_) { /* yoksay */ }
+            }, 1500);
+        } catch (_) { /* eşleştirme best-effort; harita çalışmaya devam eder */ }
+    }
+
+    // ── Bugünün konum izi (breadcrumb / nokta takibi) ────────────────────────
+    // Seçili aracın bugünkü konumları noktalarla + kesikli çizgiyle çizilir; canlı
+    // konum geldikçe iz uzar. "O günki konum verileri ile yer değiştirme" bu.
+    let trailLayer = null, trailLine = null, trailVehicle = null;
+    const trailPts = [];
+
+    async function loadTrail(vehicleId) {
+        clearTrail();
+        trailVehicle = vehicleId;
+        try {
+            const res = await fetch(`/api/v1/vehicles/${vehicleId}/track-today`, { headers: auth() });
+            if (!res.ok || vehicleId !== trailVehicle) return;
+            const pts = await res.json();
+            trailLayer = L.layerGroup().addTo(live);
+            pts.forEach(p => { trailPts.push([p.lat, p.lon]); addTrailDot(p.lat, p.lon); });
+            trailLine = L.polyline(trailPts, { color: "#3ba3ff", weight: 2, opacity: .55,
+                dashArray: "1 6", lineCap: "round" }).addTo(trailLayer);
+        } catch (_) { /* yoksay */ }
+    }
+    function addTrailDot(lat, lon) {
+        if (!trailLayer) return;
+        L.circleMarker([lat, lon], { radius: 2.5, color: "#3ba3ff", weight: 1,
+            fillColor: "#3ba3ff", fillOpacity: .85, interactive: false }).addTo(trailLayer);
+    }
+    function extendTrail(p) {
+        if (p.vehicleId !== trailVehicle || !trailLayer) return;
+        const last = trailPts[trailPts.length - 1];
+        if (last && last[0] === p.lat && last[1] === p.lon) return;
+        trailPts.push([p.lat, p.lon]);
+        addTrailDot(p.lat, p.lon);
+        if (trailLine) trailLine.setLatLngs(trailPts);
+    }
+    function clearTrail() {
+        if (trailLayer) live.removeLayer(trailLayer);
+        trailLayer = null; trailLine = null; trailVehicle = null; trailPts.length = 0;
+    }
+
     // ── Başlat ──────────────────────────────────────────────────────────────
     async function start() {
         initMaps();
         await loadVehicles();
         await loadSnapshot();
         connectWs();
+        initPairing();
         refreshDispatch();
         setInterval(refreshDispatch, 3000);
         loadScores();
@@ -697,10 +785,12 @@
             refreshSelStatus(Date.now());
             if (p) ctrl.panTo([p.lat, p.lon]);
             if (changedSelection) showPlannedRoute(selected);
+            if (changedSelection) loadTrail(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
             if (row) row.scrollIntoView({ block: "nearest" });
         } else {
             info.textContent = "";
+            clearTrail();
         }
     }
 

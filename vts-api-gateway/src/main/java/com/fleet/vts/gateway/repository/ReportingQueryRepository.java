@@ -6,6 +6,7 @@ import com.fleet.vts.gateway.web.dto.DriverScoreDto;
 import com.fleet.vts.gateway.web.dto.FuelStationDto;
 import com.fleet.vts.gateway.web.dto.GeofenceDto;
 import com.fleet.vts.gateway.web.dto.TelemetryBucketDto;
+import com.fleet.vts.gateway.web.dto.TrackPointDto;
 import com.fleet.vts.gateway.web.dto.TripPointDto;
 import com.fleet.vts.gateway.web.dto.TripSummaryDto;
 import com.fleet.vts.gateway.web.dto.VehicleCategoryDto;
@@ -307,6 +308,26 @@ public class ReportingQueryRepository {
                         rs.getDouble("lon"),
                         rs.getObject("speed_kmh", Integer.class)),
                 tripId, tenantId);
+    }
+
+    /**
+     * A vehicle's positions since local midnight — the map's "today" breadcrumb. Straight off
+     * the raw hypertable (indexed by {@code (vehicle_id, ts)}), unwrapping the PostGIS point.
+     */
+    public List<TrackPointDto> findTodayPositions(long tenantId, long vehicleId) {
+        return jdbc.query("""
+                SELECT ts, ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon, speed_kmh
+                FROM telemetry
+                WHERE tenant_id = ? AND vehicle_id = ?
+                  AND ts >= date_trunc('day', now()) AND location IS NOT NULL
+                ORDER BY ts
+                """,
+                (rs, n) -> new TrackPointDto(
+                        toInstant(rs.getObject("ts", OffsetDateTime.class)),
+                        rs.getDouble("lat"),
+                        rs.getDouble("lon"),
+                        rs.getObject("speed_kmh", Integer.class)),
+                tenantId, vehicleId);
     }
 
     private static Instant toInstant(OffsetDateTime value) {
