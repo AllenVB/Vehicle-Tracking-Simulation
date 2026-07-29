@@ -99,7 +99,9 @@ services:
     image: redis:7-alpine
     container_name: vts-redis
     ports:
-      - "6379:6379"
+      # Host 6380 to avoid clashing with any other local project publishing redis on
+      # 6379; services still reach it in-network as redis:6379. Host tools: localhost:6380.
+      - "6380:6379"
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -133,6 +135,7 @@ services:
   osrm-fetch:
     image: curlimages/curl:8.11.1
     container_name: vts-osrm-fetch
+    profiles: ["sim"]
     volumes:
       - osrm-data:/data
     user: root
@@ -153,6 +156,7 @@ services:
   osrm-init:
     image: ghcr.io/project-osrm/osrm-backend:v5.27.1
     container_name: vts-osrm-init
+    profiles: ["sim"]
     depends_on:
       osrm-fetch:
         condition: service_completed_successfully
@@ -176,6 +180,7 @@ services:
   osrm:
     image: ghcr.io/project-osrm/osrm-backend:v5.27.1
     container_name: vts-osrm
+    profiles: ["sim"]
     depends_on:
       osrm-init:
         condition: service_completed_successfully
@@ -374,15 +379,19 @@ services:
     ports: ["8086:8086"]
     restart: unless-stopped
 
-  # ── İETT canlı otobüs feed'i (gerçek veri kaynağı) ─────────────────────────
-  # Simülatörün ürettiği rastgele telemetrinin YERİNE geçer: İBB açık verisinden
-  # gerçek İstanbul otobüslerinin konumunu periyodik çeker, mevcut seed IMEI'lerine
-  # (001-100) map'leyip ingestion'a basar. DB/Kafka/Redis kullanmaz (yalın env),
-  # ama İBB API'sine ulaşmak için DIŞ İNTERNET gerekir (varsayılan bridge sağlar).
-  # NOT: simulator ile AYNI ANDA çalıştırma — ikisi de 001-100'ü beslerse konum çakışır.
+  # ── İETT canlı otobüs feed'i (opsiyonel sentetik kaynak) ───────────────────
+  # İBB açık verisinden gerçek İstanbul otobüslerinin konumunu çeker, seed
+  # IMEI'lerine (001-100) map'leyip ingestion'a basar. DB/Kafka/Redis kullanmaz,
+  # ama İBB API'sine ulaşmak için DIŞ İNTERNET gerekir.
+  #
+  # VARSAYILAN ÇALIŞTIRMADA KAPALI ("iett" profili): sistem artık tek bir GERÇEK
+  # aracı (tarayıcı-içi telefon GPS'i, /tracker.html) izliyor. Otobüs feed'ini
+  # geri açmak istersen:  docker compose --profile iett up -d iett-feed
+  # NOT: simulator ile AYNI ANDA çalıştırma — ikisi de 001-100'ü beslerse çakışır.
   iett-feed:
     build: {context: ., args: {MODULE: vts-iett-feed}}
     container_name: vts-iett-feed
+    profiles: ["iett"]
     mem_limit: 384m
     depends_on: {ingestion-service: {condition: service_started}}
     environment:
@@ -391,9 +400,13 @@ services:
     ports: ["8087:8087"]
     restart: unless-stopped
 
+  # Sentetik filo üreticisi. VARSAYILAN ÇALIŞTIRMADA KAPALI ("sim" profili):
+  # gerçek telemetri artık telefon GPS'inden (/tracker.html) geliyor. Sentetik
+  # 100-araçlık demoyu geri açmak için:  docker compose --profile sim up -d simulator
   simulator:
     build: {context: ., args: {MODULE: vts-simulator}}
     container_name: vts-simulator
+    profiles: ["sim"]
     mem_limit: 448m
     depends_on:
       ingestion-service: {condition: service_started}

@@ -35,6 +35,9 @@ final class AvlTelemetryMapper {
                 clamp(record.speedKmh(), 0, 400),
                 // 360 and 0 are the same heading, and devices send both.
                 record.headingDegrees() % 360,
+                // GPS accuracy is not modelled in this AVL record; the in-browser phone
+                // tracker supplies it over HTTP instead. Left null for Teltonika devices.
+                null,
                 percent(record.ioValue(TeltonikaIo.BATTERY_LEVEL_PCT)),
                 percent(record.ioValue(TeltonikaIo.FUEL_LEVEL_PCT)),
                 // "Engine on" is movement when the device reports it, ignition otherwise: an

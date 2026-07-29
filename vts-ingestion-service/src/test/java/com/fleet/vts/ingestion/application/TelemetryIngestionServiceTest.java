@@ -54,7 +54,7 @@ class TelemetryIngestionServiceTest {
     }
 
     private TelemetryRequest request(String imei, Double lat) {
-        return new TelemetryRequest(imei, null, lat, 29.0, 55, 90, 80, 60,
+        return new TelemetryRequest(imei, null, lat, 29.0, 55, 90, 12.5, 80, 60,
                 true, true, 1000L, null);
     }
 
@@ -70,6 +70,17 @@ class TelemetryIngestionServiceTest {
         assertEquals(42L, event.getValue().vehicleId());
         assertEquals(1L, event.getValue().tenantId());
         verify(publisher, never()).publishDlq(any(), any());
+    }
+
+    @Test
+    void accuracyIsCarriedToTheEvent() {
+        when(lookup.findByImei("imei-1")).thenReturn(Optional.of(new VehicleRef(42L, 1L, 7L)));
+
+        service.ingestOne(request("imei-1", 41.0));
+
+        ArgumentCaptor<TelemetryEvent> event = ArgumentCaptor.forClass(TelemetryEvent.class);
+        verify(publisher).publishRaw(event.capture());
+        assertEquals(12.5, event.getValue().accuracy());
     }
 
     @Test

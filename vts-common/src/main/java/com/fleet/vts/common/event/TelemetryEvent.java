@@ -26,6 +26,7 @@ public record TelemetryEvent(
         Double lon,
         Integer speedKmh,
         Integer heading,
+        Double accuracy,
         Integer battery,
         Integer fuelPct,
         Boolean engineOn,

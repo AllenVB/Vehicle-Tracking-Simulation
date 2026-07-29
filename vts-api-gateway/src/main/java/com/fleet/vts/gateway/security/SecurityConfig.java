@@ -47,6 +47,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Static live-map UI shell (the data it loads still needs a JWT).
                         .requestMatchers("/", "/index.html", "/app.js").permitAll()
+                        // In-browser phone GPS tracker: a public page plus its ingress. A real
+                        // field device cannot carry a JWT, so this one write path is open by
+                        // design; the IMEI still has to resolve to a known vehicle downstream.
+                        .requestMatchers("/tracker.html", "/tracker.js").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/track").permitAll()
                         .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/actuator/health", "/actuator/prometheus",
                                 "/ws/**").permitAll()

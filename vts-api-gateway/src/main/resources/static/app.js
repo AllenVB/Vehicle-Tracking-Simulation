@@ -15,6 +15,7 @@
     const liveMarkers = new Map();
     const ctrlMarkers = new Map();
     const pos = new Map();
+    const accCircles = new Map();             // vehicleId -> GPS doğruluk (accuracy) çemberi
     const vehicles = new Map();               // vehicleId -> {plate, plateNo, type, model}
     const byPlateNo = new Map();
     const journey = new Map();
@@ -25,6 +26,7 @@
     let fuelStations = [];
     const messages = new Map();               // vehicleId -> [{category, body, at}]
     let selected = null;
+    let followId = null;               // sürekli ortalanan (canlı takip edilen) araç
     let geofenceLayer = null;          // yeniden çizilebilsin diye tutuluyor
     let commandCatalogue = [];
     let cmdTimer = null;               // seçili aracın komut geçmişi anketi
@@ -42,6 +44,9 @@
     const TYPE_COLOR = { CAR: "#2b7fff", TRUCK: "#f5b301", MOTORCYCLE: "#f8fafc", HELICOPTER: "#a855f7" };
     /** Bu seviyenin altında araç sarı yanıp söner ve en yakın istasyona yönelir (sunucuyla aynı eşik). */
     const LOW_FUEL_PCT = 25;
+    /** Bu süredir konum güncellemeyen araç "çevrimdışı" sayılır: işareti soluklaşır, canlı
+     *  sayacından düşer. Gerçek cihaz durunca (telefon takibi kapanınca) burada görünür. */
+    const STALE_MS = 30000;
 
     // İhlal kodları: Türkçe ad + TL ceza
     const RULES = {
@@ -151,6 +156,7 @@
         setInterval(refreshDispatch, 3000);
         loadScores();
         setInterval(loadScores, 60000);
+        setInterval(sweepStale, 5000);   // konum akışı durunca aracı çevrimdışına düşür
         loadGeofences();
         loadFuelStations();
 
@@ -315,11 +321,65 @@
             drawLive(p);
             drawCtrl(p);
         });
-        countUp(document.getElementById("statLive"), pos.size);
+        countUp(document.getElementById("statLive"), liveCount());
+        // Takip modu: izlenen araç her yeni konumda haritanın merkezinde kalır.
+        if (followId != null) {
+            const fp = pos.get(followId);
+            if (fp) live.panTo([fp.lat, fp.lon], { animate: true, duration: 0.5 });
+        }
         if (!fitted && pos.size > 0) {
             fitted = true;
             const b = L.latLngBounds([...pos.values()].map(p => [p.lat, p.lon])).pad(0.15);
             live.fitBounds(b); ctrl.fitBounds(b);
+        }
+    }
+
+    /** ts'i STALE_MS'ten eski olan konum bayat (çevrimdışı) sayılır. */
+    function isStaleAt(p, now) {
+        if (!p || !p.ts) return false;
+        const t = Date.parse(p.ts);
+        return !isNaN(t) && (now - t) > STALE_MS;
+    }
+
+    /** Canlı (bayat olmayan) araç sayısı. */
+    function liveCount() {
+        const now = Date.now();
+        let n = 0;
+        pos.forEach(p => { if (!isStaleAt(p, now)) n++; });
+        return n;
+    }
+
+    /**
+     * Periyodik tarama: yeni konum GELMESE de (ör. telefon takibi durunca) bayatlayan
+     * araçların işaretini soluklaştırır ve canlı sayacını günceller. Broadcast yalnızca
+     * DEĞİŞEN konumları gönderdiği için, duran bir aracın çevrimdışına düşmesi ancak
+     * böyle bir zamanlayıcıyla görünür olur.
+     */
+    function sweepStale() {
+        const now = Date.now();
+        liveMarkers.forEach((m, id) => {
+            if (m._alerting) return;
+            m.setOpacity(isStaleAt(pos.get(id), now) ? 0.35 : 1);
+        });
+        countUp(document.getElementById("statLive"), liveCount());
+        if (selected != null) refreshSelStatus(now);
+    }
+
+    /** Seçili araç bayatladıysa detay panelinde "çevrimdışı" rozetini göster/gizle. */
+    function refreshSelStatus(now) {
+        const badge = document.getElementById("selOffline");
+        if (!badge) return;
+        badge.style.display = isStaleAt(pos.get(selected), now) ? "inline-block" : "none";
+    }
+
+    /** Canlı haritayı bir araca kilitle/serbest bırak; kilitliyken araç merkezde kalır. */
+    function toggleFollow(vehicleId) {
+        followId = (followId === vehicleId) ? null : vehicleId;
+        const fb = document.getElementById("followBtn");
+        if (fb) fb.textContent = followId === vehicleId ? "🎯 Takibi durdur" : "🎯 Bu aracı takip et";
+        if (followId != null) {
+            const p = pos.get(followId);
+            if (p) live.setView([p.lat, p.lon], Math.max(live.getZoom(), 15), { animate: true });
         }
     }
 
@@ -334,7 +394,28 @@
             m.setLatLng([p.lat, p.lon]);
             if (!m._alerting) m.setIcon(icon);
         }
+        m.setOpacity(isStaleAt(p, Date.now()) ? 0.35 : 1);
+        drawAccuracy(p);
         m.bindPopup(popup(p));
+    }
+
+    /**
+     * GPS doğruluk çemberi: gerçek cihazın (telefon) bildirdiği accuracy yarıçapı
+     * metre cinsinden. Sentetik kaynakların accuracy'si yok → çember çizilmez.
+     */
+    function drawAccuracy(p) {
+        if (p.accuracy == null) return;
+        let c = accCircles.get(p.vehicleId);
+        if (!c) {
+            c = L.circle([p.lat, p.lon], {
+                radius: p.accuracy, color: "#3ba3ff", weight: 1,
+                opacity: 0.5, fillColor: "#3ba3ff", fillOpacity: 0.12, interactive: false
+            }).addTo(live);
+            accCircles.set(p.vehicleId, c);
+        } else {
+            c.setLatLng([p.lat, p.lon]);
+            c.setRadius(p.accuracy);
+        }
     }
 
     function drawCtrl(p) {
@@ -554,6 +635,7 @@
         document.getElementById("msgBox").style.display = v ? "block" : "none";
         document.getElementById("cmdBox").style.display = v ? "block" : "none";
         if (changedSelection) closeRoutePicker();
+        if (changedSelection) followId = null;   // yeni araç seçilince önceki takibi bırak
         if (changedSelection) {
             // Komut geçmişi araca özel: seçim değişince eski aracın anketini durdur, yoksa
             // panel bir aracın komutlarını gösterirken başkasınınkiyle güncellenir.
@@ -600,12 +682,19 @@
                 tankLine = `<div class="meta"${low ? ' style="color:var(--fuel-low);font-weight:600"' : ""}>` +
                     `${low ? "⚠ " : ""}Depo: %${p.fuelPct}${low ? " — istasyona yöneliyor" : ""}</div>`;
             }
-            info.innerHTML = `<b>${v.plate}</b>${heli}` +
+            const accLine = (p && p.accuracy != null)
+                ? `<div class="meta">📍 GPS doğruluk: ±${Math.round(p.accuracy)} m</div>` : "";
+            const offBadge = `<span id="selOffline" class="pill" style="display:none;background:var(--alert);color:#fff;margin-left:6px">ÇEVRİMDIŞI</span>`;
+            info.innerHTML = `<b>${v.plate}</b>${heli}${offBadge}` +
                 `<div class="meta" style="margin-top:4px">${v.model} · ${p ? p.speedKmh + " km/s" : "-"}${j ? " · " + journeyText(j) : ""}</div>` +
-                scoreLine + tankLine + fuelLine +
+                scoreLine + tankLine + fuelLine + accLine +
+                `<button id="followBtn" class="btn-ghost" style="width:100%;margin-top:8px">${followId === selected ? "🎯 Takibi durdur" : "🎯 Bu aracı takip et"}</button>` +
                 `<button id="detailBtn" class="btn-ghost" style="width:100%;margin-top:8px">Araç detayı ▸</button>`;
+            const fb = document.getElementById("followBtn");
+            if (fb) fb.addEventListener("click", () => toggleFollow(selected));
             const db = document.getElementById("detailBtn");
             if (db) db.addEventListener("click", () => openDrawer(selected));
+            refreshSelStatus(Date.now());
             if (p) ctrl.panTo([p.lat, p.lon]);
             if (changedSelection) showPlannedRoute(selected);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);

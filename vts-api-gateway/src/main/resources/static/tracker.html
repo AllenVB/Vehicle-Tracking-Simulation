@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#0b1220">
+  <title>VTS · Canlı GPS Takip</title>
+  <style>
+    :root {
+      --bg: #0b1220; --panel: #131c2e; --panel2: #1b2740; --line: #263352;
+      --fg: #e7edf7; --muted: #8ea0bd; --accent: #3ba3ff; --ok: #2ec782;
+      --warn: #ffb020; --bad: #ff5470;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh; padding: 16px; max-width: 520px; margin-inline: auto;
+    }
+    h1 { font-size: 18px; margin: 4px 0 2px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px; margin-bottom: 14px;
+    }
+    .plate {
+      display: inline-block; background: #ffd400; color: #10131a; font-weight: 800;
+      letter-spacing: 1px; padding: 6px 12px; border-radius: 7px; font-size: 18px;
+      border: 2px solid #0c1220;
+    }
+    .veh { color: var(--muted); font-size: 13px; margin-top: 8px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .metric { background: var(--panel2); border-radius: 11px; padding: 12px; }
+    .metric .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+    .metric .v { font-size: 22px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+    .metric .u { color: var(--muted); font-size: 12px; font-weight: 500; }
+    .big { grid-column: 1 / -1; }
+    .big .v { font-size: 40px; }
+    button {
+      width: 100%; border: 0; border-radius: 12px; padding: 16px; font-size: 17px;
+      font-weight: 700; color: #06101f; background: var(--accent); margin-top: 4px;
+    }
+    button.stop { background: var(--bad); color: #fff; }
+    button:disabled { opacity: .5; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 12px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+    .dot.live { background: var(--ok); box-shadow: 0 0 0 4px rgba(46,199,130,.18); }
+    .dot.err  { background: var(--bad); }
+    .dot.wait { background: var(--warn); }
+    .banner {
+      background: rgba(255,84,112,.12); border: 1px solid var(--bad); color: #ffd0d8;
+      border-radius: 11px; padding: 12px; font-size: 13px; margin-bottom: 14px;
+    }
+    .foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
+    code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>VTS · Canlı GPS Takip</h1>
+  <div class="sub">Bu telefon bir araç takip cihazıdır — konumu, hızı ve doğruluğu sunucuya gerçek zamanlı gönderir.</div>
+
+  <div id="insecure" class="banner" style="display:none">
+    ⚠️ GPS yalnızca güvenli bağlamda (HTTPS) çalışır. Bu sayfayı <code>https://</code> adresinden açın
+    (ör. cloudflared tüneli). Düz <code>http://</code> ile tarayıcı konumu engeller.
+  </div>
+
+  <div class="card">
+    <span class="plate" id="plate">34 GPS 001</span>
+    <div class="veh"><span id="veh">Telefon · Canlı GPS</span> · IMEI <span id="imei">—</span></div>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div class="metric big">
+        <div class="k">Hız</div>
+        <div class="v"><span id="speed">—</span> <span class="u">km/s</span></div>
+      </div>
+      <div class="metric">
+        <div class="k">Doğruluk</div>
+        <div class="v">±<span id="acc">—</span> <span class="u">m</span></div>
+      </div>
+      <div class="metric">
+        <div class="k">Yön</div>
+        <div class="v"><span id="head">—</span><span class="u">°</span></div>
+      </div>
+      <div class="metric">
+        <div class="k">Enlem</div>
+        <div class="v" style="font-size:16px"><span id="lat">—</span></div>
+      </div>
+      <div class="metric">
+        <div class="k">Boylam</div>
+        <div class="v" style="font-size:16px"><span id="lon">—</span></div>
+      </div>
+    </div>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">Hazır — Başlat'a bas.</span>
+    </div>
+  </div>
+
+  <button id="toggle">▶ Takibi Başlat</button>
+
+  <div class="foot">
+    Gönderilen: <span id="sent">0</span> · Hata: <span id="errs">0</span> · Son: <span id="last">—</span>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const IMEI = params.get('imei') || '990000000000001';
+    document.getElementById('imei').textContent = IMEI;
+    if (params.get('plate')) document.getElementById('plate').textContent = params.get('plate');
+
+    const $ = id => document.getElementById(id);
+    const dot = $('dot'), statusText = $('statusText'), toggle = $('toggle');
+    let watchId = null, sent = 0, errs = 0, lastSendAt = 0, wakeLock = null;
+    const MIN_INTERVAL_MS = 1000; // GPS bazen çok sık tetikler; en az 1 sn arayla gönder.
+
+    if (!window.isSecureContext && location.hostname !== 'localhost') {
+      $('insecure').style.display = 'block';
+    }
+
+    function setStatus(cls, text) {
+      dot.className = 'dot' + (cls ? ' ' + cls : '');
+      statusText.textContent = text;
+    }
+
+    async function start() {
+      if (!('geolocation' in navigator)) {
+        setStatus('err', 'Bu tarayıcı Geolocation desteklemiyor.');
+        return;
+      }
+      setStatus('wait', 'Konum izni bekleniyor…');
+      watchId = navigator.geolocation.watchPosition(onPos, onErr, {
+        enableHighAccuracy: true, maximumAge: 1000, timeout: 15000
+      });
+      toggle.textContent = '■ Takibi Durdur';
+      toggle.classList.add('stop');
+      requestWakeLock();
+    }
+
+    function stop() {
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      toggle.textContent = '▶ Takibi Başlat';
+      toggle.classList.remove('stop');
+      setStatus('', 'Durduruldu.');
+      releaseWakeLock();
+    }
+
+    toggle.onclick = () => (watchId == null ? start() : stop());
+
+    function onPos(pos) {
+      const c = pos.coords;
+      const speedKmh = (c.speed == null || isNaN(c.speed)) ? null : Math.round(c.speed * 3.6);
+      const heading  = (c.heading == null || isNaN(c.heading)) ? null : Math.round(c.heading);
+      const accuracy = (c.accuracy == null || isNaN(c.accuracy)) ? null : Math.round(c.accuracy * 10) / 10;
+
+      $('lat').textContent = c.latitude.toFixed(6);
+      $('lon').textContent = c.longitude.toFixed(6);
+      $('speed').textContent = speedKmh == null ? '0' : speedKmh;
+      $('head').textContent = heading == null ? '—' : heading;
+      $('acc').textContent = accuracy == null ? '—' : accuracy;
+
+      const now = Date.now();
+      if (now - lastSendAt < MIN_INTERVAL_MS) return;
+      lastSendAt = now;
+
+      send({
+        imei: IMEI,
+        ts: new Date(pos.timestamp).toISOString(),
+        lat: c.latitude,
+        lon: c.longitude,
+        speedKmh: speedKmh,
+        heading: heading,
+        accuracy: accuracy
+      });
+    }
+
+    async function send(body) {
+      try {
+        const res = await fetch('/api/v1/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          keepalive: true
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        sent++;
+        $('sent').textContent = sent;
+        $('last').textContent = new Date().toLocaleTimeString('tr-TR');
+        setStatus('live', 'Canlı — sunucuya akıyor.');
+      } catch (e) {
+        errs++;
+        $('errs').textContent = errs;
+        setStatus('err', 'Gönderim hatası: ' + e.message);
+      }
+    }
+
+    function onErr(err) {
+      const msg = {
+        1: 'Konum izni reddedildi. Tarayıcı ayarlarından bu siteye konum izni verin.',
+        2: 'Konum alınamıyor (sinyal yok).',
+        3: 'Konum zaman aşımına uğradı.'
+      }[err.code] || err.message;
+      setStatus('err', msg);
+    }
+
+    // Ekranı açık tut (takip sırasında uyumasın); desteklenmezse sessizce geç.
+    async function requestWakeLock() {
+      try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+    }
+    function releaseWakeLock() { try { wakeLock && wakeLock.release(); wakeLock = null; } catch (e) {} }
+    document.addEventListener('visibilitychange', () => {
+      if (wakeLock == null && watchId != null && document.visibilityState === 'visible') requestWakeLock();
+    });
+  </script>
+</body>
+</html>

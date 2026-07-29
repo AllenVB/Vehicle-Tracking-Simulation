@@ -14,7 +14,7 @@ class LiveMapStateTest {
     private final LiveMapState state = new LiveMapState();
 
     private Position at(long id, double lat, double lon) {
-        return new Position(id, lat, lon, 50, 90, 80, Instant.parse("2026-07-13T10:00:00Z"));
+        return new Position(id, lat, lon, 50, 90, 80, 8.0, Instant.parse("2026-07-13T10:00:00Z"));
     }
 
     @Test
@@ -42,9 +42,9 @@ class LiveMapStateTest {
      */
     @Test
     void anOlderReadingDoesNotMoveTheMarkerBackwards() {
-        Position current = new Position(1L, 41.0, 29.0, 50, 90, 80,
+        Position current = new Position(1L, 41.0, 29.0, 50, 90, 80, 8.0,
                 Instant.parse("2026-07-22T10:00:00Z"));
-        Position buffered = new Position(1L, 39.0, 32.0, 60, 180, 75,
+        Position buffered = new Position(1L, 39.0, 32.0, 60, 180, 75, 8.0,
                 Instant.parse("2026-07-22T08:00:00Z"));
 
         state.update(current);

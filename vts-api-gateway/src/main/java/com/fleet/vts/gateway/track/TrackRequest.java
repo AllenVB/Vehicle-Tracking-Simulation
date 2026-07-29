@@ -1,4 +1,4 @@
-package com.fleet.vts.ingestion.adapter.in.web;
+package com.fleet.vts.gateway.track;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -10,10 +10,15 @@ import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
 
 /**
- * Inbound HTTP telemetry payload. Bean Validation guards structural validity;
- * {@code ts} is optional and defaults to server time when absent.
+ * A single GPS fix posted by the in-browser phone tracker.
+ *
+ * <p>Field names mirror ingestion's {@code TelemetryRequest} exactly, because this record is
+ * forwarded verbatim (as JSON) to the ingestion HTTP endpoint — the gateway is only a public,
+ * auth-free door for a real device so the phone talks to one origin (no CORS, no JWT). The
+ * phone supplies real GPS values: {@code speedKmh} from {@code coords.speed} (m/s converted),
+ * {@code heading} from {@code coords.heading}, {@code accuracy} from {@code coords.accuracy}.
  */
-public record TelemetryRequest(
+public record TrackRequest(
 
         @NotBlank
         String imei,
@@ -32,25 +37,10 @@ public record TelemetryRequest(
         @Min(0) @Max(359)
         Integer heading,
 
-        // GPS horizontal accuracy in metres (Geolocation coords.accuracy). Optional:
-        // a device that cannot estimate it leaves it unset. Non-negative; no upper
-        // bound because a poor fix can legitimately report hundreds of metres.
         @DecimalMin("0.0")
         Double accuracy,
 
         @Min(0) @Max(100)
-        Integer battery,
-
-        @Min(0) @Max(100)
-        Integer fuelPct,
-
-        Boolean engineOn,
-
-        Boolean ignition,
-
-        @Min(0)
-        Long odometerKm,
-
-        String correlationId
+        Integer battery
 ) {
 }

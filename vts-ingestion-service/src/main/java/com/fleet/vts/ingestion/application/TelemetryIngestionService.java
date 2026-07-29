@@ -98,6 +98,7 @@ public class TelemetryIngestionService implements TelemetryInboundPort {
                 .lon(r.lon())
                 .speedKmh(r.speedKmh())
                 .heading(r.heading())
+                .accuracy(r.accuracy())
                 .battery(r.battery())
                 .fuelPct(r.fuelPct())
                 .engineOn(r.engineOn())
