@@ -7,6 +7,7 @@ import com.fleet.vts.gateway.web.dto.FuelStationDto;
 import com.fleet.vts.gateway.web.dto.GeofenceDto;
 import com.fleet.vts.gateway.web.dto.TelemetryBucketDto;
 import com.fleet.vts.gateway.web.dto.TrackPointDto;
+import com.fleet.vts.gateway.web.dto.TrackedVehicleDto;
 import com.fleet.vts.gateway.web.dto.TripPointDto;
 import com.fleet.vts.gateway.web.dto.TripSummaryDto;
 import com.fleet.vts.gateway.web.dto.VehicleCategoryDto;
@@ -308,6 +309,31 @@ public class ReportingQueryRepository {
                         rs.getDouble("lon"),
                         rs.getObject("speed_kmh", Integer.class)),
                 tripId, tenantId);
+    }
+
+    /**
+     * The phone-enrolled vehicles only — never the auto-seeded demo fleet — each with a 1..N
+     * {@code trackId} by enrollment order. A vehicle is "tracked" when it has a device the
+     * enrollment flow created (model {@code 'Phone Browser GPS'}). This is what the left bar and
+     * live map list, so the system follows only QR-added vehicles.
+     */
+    public List<TrackedVehicleDto> findTrackedVehicles(long tenantId) {
+        return jdbc.query("""
+                SELECT v.id, v.plate, v.make, v.model, v.type,
+                       row_number() OVER (ORDER BY v.id) AS track_id
+                FROM vehicle v
+                JOIN device d ON d.vehicle_id = v.id AND d.model = 'Phone Browser GPS'
+                WHERE v.tenant_id = ?
+                ORDER BY v.id
+                """,
+                (rs, n) -> new TrackedVehicleDto(
+                        rs.getLong("id"),
+                        rs.getLong("track_id"),
+                        rs.getString("plate"),
+                        rs.getString("make"),
+                        rs.getString("model"),
+                        rs.getString("type")),
+                tenantId);
     }
 
     /**

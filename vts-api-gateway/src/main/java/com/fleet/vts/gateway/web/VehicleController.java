@@ -5,6 +5,7 @@ import com.fleet.vts.gateway.repository.ReportingQueryRepository;
 import com.fleet.vts.gateway.repository.VehicleRepository;
 import com.fleet.vts.gateway.security.CurrentUser;
 import com.fleet.vts.gateway.web.dto.TrackPointDto;
+import com.fleet.vts.gateway.web.dto.TrackedVehicleDto;
 import com.fleet.vts.gateway.web.dto.VehicleDto;
 import com.fleet.vts.gateway.web.dto.VehicleRequest;
 import com.fleet.vts.gateway.web.mapper.VehicleMapper;
@@ -46,6 +47,12 @@ public class VehicleController {
         this.mapper = mapper;
         this.jdbc = jdbc;
         this.reporting = reporting;
+    }
+
+    /** Phone-enrolled vehicles only (QR-added), numbered 1..N — the left bar's list. */
+    @GetMapping("/tracked")
+    public List<TrackedVehicleDto> tracked(@AuthenticationPrincipal Jwt jwt) {
+        return reporting.findTrackedVehicles(CurrentUser.tenantId(jwt));
     }
 
     /** Today's position trail (breadcrumb) for the live map's point-tracking of one vehicle. */

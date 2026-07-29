@@ -437,6 +437,12 @@
     #pairPanel .pp-hint { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.35; }
     #pairPanel.confirmed { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(29,158,117,.35), 0 10px 28px rgba(0,0,0,.45); }
     #pairPanel.confirmed .pp-hint { color: var(--accent); font-weight: 700; }
+
+    /* Sadeleştirme: sol panelde yalnızca VTS filo başlığı, Araçlar ve İhlaller kalsın.
+       Sürücü skorları, Bakım, Yasak bölgeler ve operatör mesaj/komut kutuları gizli. */
+    #ovBtn, #scoreSection, #maintSection, #zoneSection,
+    #ctrl .hint, #msgBox, #cmdBox { display: none !important; }
+    .stats .stat:nth-child(4), .stats .stat:nth-child(5) { display: none !important; }
 </style>
 </head>
 <body>
@@ -458,9 +464,11 @@
     <div class="sect">Araçlar</div>
     <div id="vehicleList"></div>
 
+    <div id="scoreSection">
     <div class="rz" data-rz="scoreList" title="Sürükle: sürücü skorları panelini büyüt/küçült"></div>
     <div class="sect">Sürücü skorları <span style="text-transform:none;color:var(--muted)">(30 gün)</span></div>
     <div id="scoreList"><div class="empty">Puanlanmış sefer bekleniyor…</div></div>
+    </div>
 
     <div class="rz" data-rz="alertList" title="Sürükle: ihlal panelini büyüt/küçült"></div>
     <div class="sect">İhlaller · toplam ceza <span id="fineTotal">0 ₺</span></div>
@@ -507,11 +515,15 @@
         </div>
     </div>
 
+    <div id="maintSection">
     <div class="sect">Bakım <span id="maintCount" style="text-transform:none;color:var(--muted)"></span></div>
     <div id="maintList"><div class="empty">Yaklaşan bakım yok.</div></div>
+    </div>
 
+    <div id="zoneSection">
     <div class="sect">Yasak bölgeler <span id="zoneCount" style="text-transform:none;color:var(--muted)"></span></div>
     <div id="zoneList"><div class="empty">Tanımlı bölge yok.</div></div>
+    </div>
 </aside>
 
 <div id="vehDrawer">

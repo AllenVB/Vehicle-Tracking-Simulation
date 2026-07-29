@@ -73,6 +73,9 @@
       text-align: center; padding: 16px 14px; box-shadow: 0 6px 20px rgba(255,84,112,.5);
       transform: translateY(-110%); transition: transform .25s ease; }
     #vio.show { transform: translateY(0); }
+    #vioLog .vlog { font-size: 13px; padding: 9px 11px; border-radius: 9px; margin-bottom: 6px;
+      background: rgba(255,84,112,.12); border: 1px solid rgba(255,84,112,.4); color: #ffd0d8; }
+    #vioLog .vlog .t { color: var(--muted); font-size: 11px; }
   </style>
 </head>
 <body>
@@ -165,6 +168,11 @@
   </div>
 
   <button id="toggle">▶ Takibi Başlat</button>
+
+  <div class="card" id="vioCard" style="display:none">
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">İhlal uyarıları</div>
+    <div id="vioLog"></div>
+  </div>
 
   <div class="foot">
     Gönderilen: <span id="sent">0</span> · Hata: <span id="errs">0</span> · Son: <span id="last">—</span>
@@ -343,6 +351,14 @@
       if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
       clearTimeout(warn._t);
       warn._t = setTimeout(() => el.classList.remove('show'), 4500);
+      // Mesaj olarak da bildir: kalıcı uyarı listesi.
+      $('vioCard').style.display = 'block';
+      const item = document.createElement('div');
+      item.className = 'vlog';
+      item.innerHTML = '⚠ ' + msg + ' <span class="t">· ' + new Date().toLocaleTimeString('tr-TR') + '</span>';
+      const log = $('vioLog');
+      log.prepend(item);
+      while (log.children.length > 8) log.removeChild(log.lastChild);
     }
 
     function onErr(err) {

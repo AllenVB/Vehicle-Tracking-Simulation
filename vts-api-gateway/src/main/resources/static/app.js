@@ -199,8 +199,40 @@
     // ── Bugünün konum izi (breadcrumb / nokta takibi) ────────────────────────
     // Seçili aracın bugünkü konumları noktalarla + kesikli çizgiyle çizilir; canlı
     // konum geldikçe iz uzar. "O günki konum verileri ile yer değiştirme" bu.
-    let trailLayer = null, trailLine = null, trailVehicle = null;
-    const trailPts = [];
+    // İhlal eşikleri (telefondakiyle aynı): hız>82, ani ≥40 km/s (saniyede) düşüş.
+    const VIO_SPEED = 82, VIO_DROP = 40;
+    let trailLayer = null, trailVehicle = null, trailPrev = null;
+
+    /** Bir noktanın ihlal sebepleri (boş dizi = ihlal yok). */
+    function trailViolations(prev, cur) {
+        const r = [];
+        if (cur.speedKmh != null && cur.speedKmh > VIO_SPEED) r.push("Hız aşımı: " + cur.speedKmh + " km/s");
+        if (prev && prev.speedKmh != null && cur.speedKmh != null && prev.ts && cur.ts) {
+            const dt = (new Date(cur.ts) - new Date(prev.ts)) / 1000;
+            if (dt > 0.2 && dt <= 5) {
+                const drop = prev.speedKmh - cur.speedKmh;
+                if (drop / dt >= VIO_DROP) r.push("Sert fren: " + Math.round(drop) + " km/s ani düşüş");
+            }
+        }
+        return r;
+    }
+
+    /** İzin bir segmentini çizer: ihlalliyse KIRMIZI + sebep tooltip'i, değilse mavi kesikli. */
+    function trailAdd(prev, cur) {
+        if (!trailLayer) return;
+        const reasons = trailViolations(prev, cur);
+        const red = reasons.length > 0;
+        L.circleMarker([cur.lat, cur.lon], { radius: red ? 4 : 2.5, color: red ? "#ff4d4d" : "#3ba3ff",
+            weight: 1, fillColor: red ? "#ff4d4d" : "#3ba3ff", fillOpacity: .85, interactive: red })
+            .addTo(trailLayer);
+        if (prev) {
+            const seg = L.polyline([[prev.lat, prev.lon], [cur.lat, cur.lon]], red
+                ? { color: "#ff4d4d", weight: 5, opacity: .95 }
+                : { color: "#3ba3ff", weight: 2, opacity: .5, dashArray: "1 6", lineCap: "round" })
+                .addTo(trailLayer);
+            if (red) seg.bindTooltip("⚠ İhlal — " + reasons.join(" · "), { sticky: true, direction: "top" });
+        }
+    }
 
     async function loadTrail(vehicleId) {
         clearTrail();
@@ -210,27 +242,23 @@
             if (!res.ok || vehicleId !== trailVehicle) return;
             const pts = await res.json();
             trailLayer = L.layerGroup().addTo(live);
-            pts.forEach(p => { trailPts.push([p.lat, p.lon]); addTrailDot(p.lat, p.lon); });
-            trailLine = L.polyline(trailPts, { color: "#3ba3ff", weight: 2, opacity: .55,
-                dashArray: "1 6", lineCap: "round" }).addTo(trailLayer);
+            let prev = null;
+            pts.forEach(p => { trailAdd(prev, p); prev = p; });
+            trailPrev = prev;
         } catch (_) { /* yoksay */ }
     }
-    function addTrailDot(lat, lon) {
-        if (!trailLayer) return;
-        L.circleMarker([lat, lon], { radius: 2.5, color: "#3ba3ff", weight: 1,
-            fillColor: "#3ba3ff", fillOpacity: .85, interactive: false }).addTo(trailLayer);
-    }
+
     function extendTrail(p) {
         if (p.vehicleId !== trailVehicle || !trailLayer) return;
-        const last = trailPts[trailPts.length - 1];
-        if (last && last[0] === p.lat && last[1] === p.lon) return;
-        trailPts.push([p.lat, p.lon]);
-        addTrailDot(p.lat, p.lon);
-        if (trailLine) trailLine.setLatLngs(trailPts);
+        const cur = { lat: p.lat, lon: p.lon, speedKmh: p.speedKmh, ts: p.ts };
+        if (trailPrev && trailPrev.lat === cur.lat && trailPrev.lon === cur.lon) return;
+        trailAdd(trailPrev, cur);
+        trailPrev = cur;
     }
+
     function clearTrail() {
         if (trailLayer) live.removeLayer(trailLayer);
-        trailLayer = null; trailLine = null; trailVehicle = null; trailPts.length = 0;
+        trailLayer = null; trailVehicle = null; trailPrev = null;
     }
 
     // ── Başlat ──────────────────────────────────────────────────────────────
@@ -245,6 +273,7 @@
         loadScores();
         setInterval(loadScores, 60000);
         setInterval(sweepStale, 5000);   // konum akışı durunca aracı çevrimdışına düşür
+        setInterval(loadVehicles, 15000); // yeni QR ile eklenen araçlar listeye gelsin
         loadGeofences();
         loadFuelStations();
 
@@ -346,19 +375,22 @@
     }
 
     // ── Araç listesi ────────────────────────────────────────────────────────
+    // Sadece QR ile eklenen (telefon-enrolled) araçlar; otomatik seed filo GÖSTERİLMEZ.
+    // Numara plakadan/VIN'den değil, enrollment sırasına göre 1..N (trackId).
     async function loadVehicles() {
-        const res = await fetch("/api/v1/vehicles", { headers: auth() });
+        const res = await fetch("/api/v1/vehicles/tracked", { headers: auth() });
         if (!res.ok) return;
         const list = await res.json();
         const el = document.getElementById("vehicleList");
+        vehicles.clear();
+        byPlateNo.clear();
         el.innerHTML = "";
-        list.sort((a, b) => vinNo(a.vin) - vinNo(b.vin));
         list.forEach(v => {
-            const no = vinNo(v.vin);
+            const no = v.trackId;
             vehicles.set(v.id, {
                 plate: v.plate, plateNo: no, type: v.type,
                 model: [v.make, v.model].filter(Boolean).join(" "),
-                driverId: v.currentDriverId
+                driverId: null
             });
             byPlateNo.set(no, v.id);
             const row = document.createElement("div");
@@ -367,12 +399,15 @@
             const model = vehicles.get(v.id).model;
             row.innerHTML =
                 `<span class="tdot" style="--c:${TYPE_COLOR[v.type] || "#64748b"}"></span>` +
-                `<span class="vinfo"><b>${esc(v.plate)}</b>` +
+                `<span class="vinfo"><b>#${no} · ${esc(v.plate)}</b>` +
                 `<div class="meta" data-model="${esc(model)}">${esc(model)}</div></span>` +
                 `<span class="vstate"></span><span class="vscore"></span>`;
             row.addEventListener("click", () => { document.getElementById("plateNo").value = no; select(v.id); });
             el.appendChild(row);
         });
+        if (!list.length) {
+            el.innerHTML = '<div class="empty">Henüz araç yok — telefondan QR ile ekle.</div>';
+        }
         countUp(document.getElementById("statTotal"), list.length);
     }
 
@@ -405,6 +440,9 @@
     function apply(list) {
         list.forEach(p => {
             if (p.lat == null || p.lon == null) return;
+            // Yalnızca QR ile eklenen (takip edilen) araçlar haritada çizilir; canlı
+            // durumda kalan seed/eski araçların konumları yok sayılır.
+            if (!vehicles.has(p.vehicleId)) return;
             pos.set(p.vehicleId, p);
             drawLive(p);
             drawCtrl(p);
