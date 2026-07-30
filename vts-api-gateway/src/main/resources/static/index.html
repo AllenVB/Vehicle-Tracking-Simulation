@@ -487,6 +487,27 @@
         border-radius: 11px; background: rgba(0,0,0,.12); }
     #alertFilter { padding: 8px 10px; }
 </style>
+<style>
+/* ── FleetFlow tema (Stitch tasarımına göre): koyu-teal, cam paneller, neon teal ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&display=swap');
+:root {
+  --bg:#0d1513; --panel:#19211f; --panel-2:#232c29; --line:rgba(255,255,255,.10);
+  --text:#dbe5e0; --muted:#b9cac4; --accent:#00f5d4; --alert:#ffb4ab; --fuel-low:#ffd651;
+}
+html, body { font-family: "Inter", system-ui, -apple-system, sans-serif; }
+body { background: radial-gradient(1100px 520px at 82% -12%, rgba(0,245,212,.07), transparent), var(--bg); }
+#bar { background: rgba(13,21,19,.72); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-right: 1px solid rgba(255,255,255,.10); }
+.stats .stat { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.07) !important; }
+.stats .stat:nth-child(2) b { color: var(--accent); }
+#vehicleList .row.sel { background: rgba(0,245,212,.14) !important; border-color: var(--accent) !important;
+  box-shadow: inset 3px 0 0 0 var(--accent), 0 0 16px rgba(0,245,212,.22) !important; }
+.maplabel, #daySelect, #histLegend, #pairPanel { background: rgba(13,21,19,.66) !important;
+  border: 1px solid rgba(255,255,255,.12) !important; }
+.btn-send { background: var(--accent) !important; color: #00201a !important; }
+.fbtn.on { background: var(--accent) !important; color: #00201a !important; border-color: var(--accent) !important; }
+#pairPanel.confirmed { box-shadow: 0 0 0 2px rgba(0,245,212,.4), 0 10px 28px rgba(0,0,0,.45) !important; }
+</style>
 </head>
 <body>
 
