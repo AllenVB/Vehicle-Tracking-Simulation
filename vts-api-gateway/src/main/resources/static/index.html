@@ -123,9 +123,12 @@
         #mapLive { background: #0b1016; }
         #mapCtrl { background: #e9e4dc; cursor: crosshair; }
         /* Sağ üstte: sol üstte Leaflet'in zoom kontrolü var, üst üste binmesin. */
-        .maplabel { position: absolute; top: 10px; right: 10px; z-index: 500;
-                    background: rgba(15,23,32,.82); color: #fff; font-size: 11px; font-weight: 600;
-                    padding: 5px 10px; border-radius: 6px; letter-spacing: .3px; }
+        .maplabel { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 500;
+                    background: rgba(15,23,32,.72); color: #fff; font-size: 11px; font-weight: 700;
+                    padding: 6px 14px; border-radius: 999px; letter-spacing: .3px; white-space: nowrap;
+                    max-width: 82%; overflow: hidden; text-overflow: ellipsis;
+                    backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.08);
+                    box-shadow: 0 4px 14px rgba(0,0,0,.3); }
 
         /* Marker'lar — tipe göre logo, yöne dönük */
         .veh-mk { position: relative; width: 32px; height: 32px; }
@@ -443,6 +446,46 @@
     #ovBtn, #scoreSection, #maintSection, #zoneSection,
     #ctrl .hint, #msgBox, #cmdBox { display: none !important; }
     .stats .stat:nth-child(4), .stats .stat:nth-child(5) { display: none !important; }
+    /* Sağ harita geçmiş rotaya döndü: operatör butonları/panelleri kaldırıldı, yerine gün seçici. */
+    #routeBtn, #zoneBtn, #nearBtn, #zonePicker, #routePicker, #nearPanel { display: none !important; }
+    #daySelect { position: absolute; bottom: 12px; right: 12px; z-index: 600; padding: 9px 14px;
+        border-radius: 999px; background: rgba(19,28,46,.9); backdrop-filter: blur(6px);
+        color: var(--text); border: 1px solid var(--line); font-size: 13px; font-weight: 600;
+        box-shadow: 0 6px 18px rgba(0,0,0,.4); cursor: pointer; }
+    #daySelect:hover { border-color: var(--accent); }
+    #histLegend { position: absolute; bottom: 10px; left: 10px; z-index: 500; padding: 6px 10px;
+        border-radius: 8px; background: rgba(15,23,32,.82); color: var(--text); border: 1px solid var(--line);
+        font-size: 12px; }
+
+    /* ── Modern sol panel ─────────────────────────────────────────────────── */
+    #bar { background: linear-gradient(180deg, #121b28, #0e1620); }
+    #bar > header { padding: 16px 16px 13px; }
+    #bar h1 { font-size: 15px; font-weight: 800; letter-spacing: .2px; }
+    #statusLine { font-size: 11px; margin-top: 4px; }
+    .stats { gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
+    .stats .stat { background: linear-gradient(180deg, #1b2735, #141d29); border: 1px solid #24313f;
+        border-radius: 12px; padding: 11px 6px; }
+    .stats .stat b { font-size: 21px; font-weight: 800; }
+    .stats .stat span { font-size: 9px; letter-spacing: .5px; }
+    .sect { font-size: 10px; font-weight: 700; letter-spacing: .9px; color: #6f8398;
+        padding: 15px 16px 7px; text-transform: uppercase; }
+    #vehicleList { padding: 2px 8px 6px; }
+    #vehicleList .row { border: 1px solid transparent; border-radius: 11px; margin: 4px 0;
+        padding: 10px 12px; transition: background .12s ease, border-color .12s ease; }
+    #vehicleList .row:hover { background: #16222f; border-color: #26333f; }
+    #vehicleList .row.sel { background: linear-gradient(90deg, rgba(59,163,255,.18), transparent);
+        border-color: rgba(59,163,255,.55); box-shadow: inset 3px 0 0 0 var(--accent); }
+    #vehicleList .row b { font-size: 13px; font-weight: 700; }
+    #vehicleList .empty, #alertList .empty { color: var(--muted); font-size: 12px; padding: 14px 6px; }
+    #selInfo { margin: 4px 12px; }
+
+    /* Tut-çek: yerinde büyüt/küçült (native resize) — sürükleyince YERİ KAYMAZ, sadece boyu değişir.
+       Eski sürükle-kolları (.rz) kaldırıldı. */
+    .rz { display: none !important; }
+    #alertList { flex: 0 0 auto !important; height: 210px; min-height: 90px; max-height: 55vh;
+        resize: vertical; overflow-y: auto; margin: 4px 8px 8px; border: 1px solid var(--line);
+        border-radius: 11px; background: rgba(0,0,0,.12); }
+    #alertFilter { padding: 8px 10px; }
 </style>
 </head>
 <body>
@@ -566,8 +609,10 @@
 </div>
 
 <div class="mapWrap">
-    <div class="maplabel">OPERATÖR · konum değiştir (çift tık)</div>
+    <div class="maplabel">GEÇMİŞ ROTA · gün seç</div>
     <div id="mapCtrl" class="map"></div>
+    <select id="daySelect" title="Geçmiş gün seç"></select>
+    <div id="histLegend">🟢 durak · 🔴 ihlal · 🔵 normal seyir</div>
     <button id="routeBtn" class="map-fab" style="display:none">🗺️ Rota Oluştur</button>
     <button id="zoneBtn" class="map-fab">⬡ Bölge Çiz</button>
     <button id="nearBtn" class="map-fab">📍 En yakın araç</button>

@@ -201,10 +201,23 @@
     // konum geldikçe iz uzar. "O günki konum verileri ile yer değiştirme" bu.
     // İhlal eşikleri (telefondakiyle aynı): hız>82, ani ≥40 km/s (saniyede) düşüş.
     const VIO_SPEED = 82, VIO_DROP = 40;
-    let trailLayer = null, trailVehicle = null, trailPrev = null;
+    // SAĞ harita = GEÇMİŞ rota. Seçili araç + seçili günün yolu; ihlalli segment KIRMIZI, normal mavi.
+    // SOL harita canlı kalır (yalnızca o anki konum). Geçmiz burada, ctrl haritasında çizilir.
+    let histLayer = null, histVehicle = null, histPrev = null, histDay = 0;
+
+    function currentDay() {
+        const el = document.getElementById("daySelect");
+        return el ? (parseInt(el.value, 10) || 0) : 0;
+    }
+
+    // Gün etiketleri gerçek tarihle: "30 Tem Çar" (dün/2 gün önce yerine).
+    function dayLabel(daysAgo) {
+        const dt = new Date(Date.now() - daysAgo * 86400000);
+        return dt.toLocaleDateString("tr-TR", { day: "2-digit", month: "short", weekday: "short" });
+    }
 
     /** Bir noktanın ihlal sebepleri (boş dizi = ihlal yok). */
-    function trailViolations(prev, cur) {
+    function histViolations(prev, cur) {
         const r = [];
         if (cur.speedKmh != null && cur.speedKmh > VIO_SPEED) r.push("Hız aşımı: " + cur.speedKmh + " km/s");
         if (prev && prev.speedKmh != null && cur.speedKmh != null && prev.ts && cur.ts) {
@@ -217,48 +230,107 @@
         return r;
     }
 
-    /** İzin bir segmentini çizer: ihlalliyse KIRMIZI + sebep tooltip'i, değilse mavi kesikli. */
-    function trailAdd(prev, cur) {
-        if (!trailLayer) return;
-        const reasons = trailViolations(prev, cur);
+    /** Rotanın bir segmentini çizer: ihlalliyse KIRMIZI + sebep tooltip'i, değilse mavi. */
+    function histAdd(prev, cur) {
+        if (!histLayer) return;
+        const reasons = histViolations(prev, cur);
         const red = reasons.length > 0;
         L.circleMarker([cur.lat, cur.lon], { radius: red ? 4 : 2.5, color: red ? "#ff4d4d" : "#3ba3ff",
             weight: 1, fillColor: red ? "#ff4d4d" : "#3ba3ff", fillOpacity: .85, interactive: red })
-            .addTo(trailLayer);
+            .addTo(histLayer);
         if (prev) {
             const seg = L.polyline([[prev.lat, prev.lon], [cur.lat, cur.lon]], red
                 ? { color: "#ff4d4d", weight: 5, opacity: .95 }
-                : { color: "#3ba3ff", weight: 2, opacity: .5, dashArray: "1 6", lineCap: "round" })
-                .addTo(trailLayer);
+                : { color: "#3ba3ff", weight: 3, opacity: .7, lineCap: "round" })
+                .addTo(histLayer);
             if (red) seg.bindTooltip("⚠ İhlal — " + reasons.join(" · "), { sticky: true, direction: "top" });
         }
     }
 
-    async function loadTrail(vehicleId) {
-        clearTrail();
-        trailVehicle = vehicleId;
+    async function fetchDay(vehicleId, daysAgo) {
+        const res = await fetch(`/api/v1/vehicles/${vehicleId}/track?daysAgo=${daysAgo}`, { headers: auth() });
+        return res.ok ? await res.json() : [];
+    }
+
+    // autoFind=true: seçilen gün boşsa veri olan en yakın geçmiş günü otomatik bulur — araç
+    // seçince kullanıcı elle "Dün" seçmeden rotayı görsün diye (bugün genelde boş oluyor).
+    async function loadHistory(vehicleId, daysAgo, autoFind) {
+        clearHistory();
+        if (vehicleId == null) { setHistLabel(null, daysAgo, 0); return; }
+        histVehicle = vehicleId; histDay = daysAgo;
         try {
-            const res = await fetch(`/api/v1/vehicles/${vehicleId}/track-today`, { headers: auth() });
-            if (!res.ok || vehicleId !== trailVehicle) return;
-            const pts = await res.json();
-            trailLayer = L.layerGroup().addTo(live);
+            let pts = await fetchDay(vehicleId, daysAgo);
+            if (autoFind && pts.length === 0) {
+                for (let d = daysAgo + 1; d <= 6; d++) {
+                    const p2 = await fetchDay(vehicleId, d);
+                    if (p2.length) {
+                        daysAgo = d; histDay = d; pts = p2;
+                        const sel = document.getElementById("daySelect");
+                        if (sel) sel.value = String(d);
+                        break;
+                    }
+                }
+            }
+            if (vehicleId !== histVehicle) return;
+            histLayer = L.layerGroup().addTo(ctrl);
+            ctrl.invalidateSize();   // sağ harita 0-boyutla açıldıysa düzelt
             let prev = null;
-            pts.forEach(p => { trailAdd(prev, p); prev = p; });
-            trailPrev = prev;
+            pts.forEach(p => { histAdd(prev, p); prev = p; });
+            histPrev = prev;
+            markStops(pts);   // durakları yeşil işaretle (süreyle)
+            if (pts.length) ctrl.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])).pad(0.2));
+            setHistLabel(vehicleId, daysAgo, pts.length);
         } catch (_) { /* yoksay */ }
     }
 
-    function extendTrail(p) {
-        if (p.vehicleId !== trailVehicle || !trailLayer) return;
+    // Bugün seçiliyken canlı gelen konum geçmiş rotayı da uzatır.
+    function extendHistory(p) {
+        if (histDay !== 0 || p.vehicleId !== histVehicle || !histLayer) return;
         const cur = { lat: p.lat, lon: p.lon, speedKmh: p.speedKmh, ts: p.ts };
-        if (trailPrev && trailPrev.lat === cur.lat && trailPrev.lon === cur.lon) return;
-        trailAdd(trailPrev, cur);
-        trailPrev = cur;
+        if (histPrev && histPrev.lat === cur.lat && histPrev.lon === cur.lon) return;
+        histAdd(histPrev, cur);
+        histPrev = cur;
     }
 
-    function clearTrail() {
-        if (trailLayer) live.removeLayer(trailLayer);
-        trailLayer = null; trailVehicle = null; trailPrev = null;
+    function clearHistory() {
+        if (histLayer) ctrl.removeLayer(histLayer);
+        histLayer = null; histVehicle = null; histPrev = null;
+    }
+
+    // Durak tespiti: hız ≤3 km/s ile geçen ardışık noktalar bir "durak"tır; en az 2 dk
+    // süren duraklar YEŞİL noktayla işaretlenir, tooltip'te ne kadar durduğu yazar.
+    const STOP_SPEED = 3, MIN_STOP_SEC = 120;
+    function markStops(pts) {
+        if (!histLayer) return;
+        let i = 0;
+        while (i < pts.length) {
+            if ((pts[i].speedKmh || 0) <= STOP_SPEED) {
+                let j = i;
+                while (j + 1 < pts.length && (pts[j + 1].speedKmh || 0) <= STOP_SPEED) j++;
+                const durSec = (new Date(pts[j].ts) - new Date(pts[i].ts)) / 1000;
+                if (durSec >= MIN_STOP_SEC) {
+                    const mid = pts[Math.floor((i + j) / 2)];
+                    const mins = Math.max(1, Math.round(durSec / 60));
+                    const t = new Date(pts[i].ts).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+                    L.circleMarker([mid.lat, mid.lon], { radius: 7, color: "#1f9d55", weight: 2,
+                        fillColor: "#2ecc71", fillOpacity: .85, zIndexOffset: 500 })
+                        .bindTooltip(`🅿️ Durak · ${mins} dk (${t})`, { direction: "top" })
+                        .addTo(histLayer);
+                }
+                i = j + 1;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    function setHistLabel(vehicleId, daysAgo, count) {
+        const lbl = document.querySelectorAll(".mapWrap .maplabel")[1];
+        if (!lbl) return;
+        if (vehicleId == null) { lbl.textContent = "GEÇMİŞ ROTA · soldan araç seç"; return; }
+        const v = vehicles.get(vehicleId);
+        const dayTxt = dayLabel(daysAgo);
+        lbl.textContent = `GEÇMİŞ ROTA · #${v ? v.plateNo : "?"} ${v ? v.plate : ""} · ${dayTxt} · ${count} nokta`;
     }
 
     // ── Başlat ──────────────────────────────────────────────────────────────
@@ -274,6 +346,19 @@
         setInterval(loadScores, 60000);
         setInterval(sweepStale, 5000);   // konum akışı durunca aracı çevrimdışına düşür
         setInterval(loadVehicles, 15000); // yeni QR ile eklenen araçlar listeye gelsin
+
+        // Sağ harita gün seçici (Bugün..6 gün önce): seçili aracın o günkü rotasını çizer.
+        const daySel = document.getElementById("daySelect");
+        if (daySel) {
+            for (let d = 0; d <= 6; d++) {
+                const o = document.createElement("option");
+                o.value = String(d);
+                o.textContent = d === 0 ? "Bugün · " + dayLabel(0) : dayLabel(d);
+                daySel.appendChild(o);
+            }
+            daySel.addEventListener("change", () => { if (selected != null) loadHistory(selected, currentDay(), false); });
+        }
+        setHistLabel(null, 0, 0);
         loadGeofences();
         loadFuelStations();
 
@@ -444,8 +529,8 @@
             // durumda kalan seed/eski araçların konumları yok sayılır.
             if (!vehicles.has(p.vehicleId)) return;
             pos.set(p.vehicleId, p);
-            drawLive(p);
-            drawCtrl(p);
+            drawLive(p);          // sol harita: canlı konum
+            extendHistory(p);     // sağ harita: bugün seçiliyse geçmiş rotayı uzat
         });
         countUp(document.getElementById("statLive"), liveCount());
         // Takip modu: izlenen araç her yeni konumda haritanın merkezinde kalır.
@@ -822,13 +907,12 @@
             if (db) db.addEventListener("click", () => openDrawer(selected));
             refreshSelStatus(Date.now());
             if (p) ctrl.panTo([p.lat, p.lon]);
-            if (changedSelection) showPlannedRoute(selected);
-            if (changedSelection) loadTrail(selected);
+            if (changedSelection) loadHistory(selected, currentDay(), true);
             const row = document.querySelector(`#vehicleList .row[data-vid="${selected}"]`);
             if (row) row.scrollIntoView({ block: "nearest" });
         } else {
             info.textContent = "";
-            clearTrail();
+            clearHistory();
         }
     }
 
@@ -901,7 +985,7 @@
                 speedKmh: r.speedKmh != null ? Math.round(r.speedKmh) : (pos.get(selected) || {}).speedKmh
             };
             pos.set(selected, p);
-            drawLive(p); drawCtrl(p); select(selected);
+            drawLive(p); select(selected);
             // Hedefe yeni rota çizildi; select() yalnızca seçim değişince çiziyor.
             showPlannedRoute(selected);
 

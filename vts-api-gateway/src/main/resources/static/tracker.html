@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="theme-color" content="#0b1220">
   <title>VTS · Canlı GPS Takip</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
     :root {
       --bg: #0b1220; --panel: #131c2e; --panel2: #1b2740; --line: #263352;
@@ -76,6 +77,15 @@
     #vioLog .vlog { font-size: 13px; padding: 9px 11px; border-radius: 9px; margin-bottom: 6px;
       background: rgba(255,84,112,.12); border: 1px solid rgba(255,84,112,.4); color: #ffd0d8; }
     #vioLog .vlog .t { color: var(--muted); font-size: 11px; }
+    /* Mini harita (mobilde canlı konum) */
+    #miniMap { height: 230px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); margin-bottom: 14px; }
+    .leaflet-container { background: #0b1220; }
+    /* Hız modu (şehir içi/dışı/otoyol → farklı limit) */
+    .modes { display: flex; gap: 8px; margin-bottom: 14px; }
+    .modes button { flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 700; border-radius: 11px; margin: 0;
+      background: var(--panel2); color: var(--muted); border: 1px solid var(--line); line-height: 1.25; }
+    .modes button small { display: block; font-size: 11px; font-weight: 600; opacity: .8; }
+    .modes button.on { background: var(--accent); color: #06101f; border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -138,6 +148,14 @@
     <div class="veh"><span id="veh">Telefon · Canlı GPS</span> · IMEI <span id="imei">—</span></div>
   </div>
 
+  <div id="miniMap"></div>
+
+  <div class="modes">
+    <button data-mode="city" class="on">Şehir içi <small>50 km/s</small></button>
+    <button data-mode="rural">Şehir dışı <small>90 km/s</small></button>
+    <button data-mode="hw">Otoyol <small>120 km/s</small></button>
+  </div>
+
   <div class="card">
     <div class="grid">
       <div class="metric big">
@@ -178,6 +196,7 @@
     Gönderilen: <span id="sent">0</span> · Hata: <span id="errs">0</span> · Son: <span id="last">—</span>
   </div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const params = new URLSearchParams(location.search);
     const PAIR = params.get('pair');
@@ -276,10 +295,35 @@
 
     function setStatus(cls, text) { dot.className = 'dot' + (cls ? ' ' + cls : ''); statusText.textContent = text; }
 
+    // ── Mini harita (mobilde canlı konum) ───────────────────────────────────
+    let miniMap = null, miniMarker = null, miniAcc = null;
+    function initMiniMap() {
+      if (miniMap || typeof L === 'undefined') return;
+      miniMap = L.map('miniMap', { zoomControl: true, attributionControl: false }).setView([41.02, 29.0], 11);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(miniMap);
+    }
+    function updateMiniMap(lat, lon, acc) {
+      if (!miniMap) initMiniMap();
+      if (!miniMap) return;
+      const ll = [lat, lon];
+      if (!miniMarker) { miniMarker = L.marker(ll).addTo(miniMap); miniMap.setView(ll, 16); }
+      else { miniMarker.setLatLng(ll); miniMap.panTo(ll); }
+      if (acc != null) {
+        if (!miniAcc) miniAcc = L.circle(ll, { radius: acc, color: '#3ba3ff', weight: 1, fillColor: '#3ba3ff', fillOpacity: .12 }).addTo(miniMap);
+        else { miniAcc.setLatLng(ll); miniAcc.setRadius(acc); }
+      }
+    }
+    function notify(msg) {
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('⚠ İHLAL YAPTINIZ', { body: msg, tag: 'vio' }); } catch (e) {}
+    }
+    initMiniMap();
+
     async function start() {
       if (!IMEI) { setStatus('err', 'Önce araç bilgisi kaydedilmeli.'); return; }
       if (!('geolocation' in navigator)) { setStatus('err', 'Bu tarayıcı Geolocation desteklemiyor.'); return; }
       setStatus('wait', 'Konum izni bekleniyor…');
+      if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+      if (miniMap) setTimeout(() => miniMap.invalidateSize(), 250);
       watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
       toggle.textContent = '■ Takibi Durdur'; toggle.classList.add('stop');
       requestWakeLock();
@@ -301,6 +345,7 @@
       $('speed').textContent = speedKmh == null ? '0' : speedKmh;
       $('head').textContent = heading == null ? '—' : heading;
       $('acc').textContent = accuracy == null ? '—' : accuracy;
+      updateMiniMap(c.latitude, c.longitude, accuracy);
       checkViolations(speedKmh, pos.timestamp);
       const now = Date.now();
       if (now - lastSendAt < MIN_INTERVAL_MS) return;
@@ -309,28 +354,59 @@
              speedKmh: speedKmh, heading: heading, accuracy: accuracy });
     }
 
+    // Offline-first: her konum önce kuyruğa girer; çevrimiçiyken hemen, çevrimdışıyken bağlantı
+    // gelince toplu gönderilir. Kuyruk localStorage'da — uygulama kapansa da kaybolmaz.
+    const queue = JSON.parse(localStorage.getItem('vts_queue') || '[]');
+    let flushing = false;
     async function send(body) {
-      try {
-        const res = await fetch('/api/v1/track', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        sent++; $('sent').textContent = sent; $('last').textContent = new Date().toLocaleTimeString('tr-TR');
-        setStatus('live', 'Canlı — sunucuya akıyor.');
-      } catch (e) {
-        errs++; $('errs').textContent = errs; setStatus('err', 'Gönderim hatası: ' + e.message);
-      }
+      queue.push(body);
+      if (queue.length > 1000) queue.splice(0, queue.length - 1000);
+      flush();
     }
+    async function flush() {
+      if (flushing) return;
+      flushing = true;
+      while (queue.length) {
+        try {
+          const res = await fetch('/api/v1/track', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(queue[0]), keepalive: true
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          queue.shift(); sent++;
+          $('sent').textContent = sent; $('last').textContent = new Date().toLocaleTimeString('tr-TR');
+          setStatus('live', 'Canlı — akıyor' + (queue.length ? ' · ' + queue.length + ' kuyrukta' : ''));
+        } catch (e) {
+          errs++; $('errs').textContent = errs;
+          localStorage.setItem('vts_queue', JSON.stringify(queue));
+          setStatus('wait', 'Çevrimdışı — ' + queue.length + ' konum kuyrukta, bağlanınca gönderilecek');
+          flushing = false; return;
+        }
+      }
+      localStorage.removeItem('vts_queue');
+      flushing = false;
+    }
+    window.addEventListener('online', flush);
 
     // ── İhlal tespiti (client-side, anlık) ──────────────────────────────────
     // Hız > 82 km/s  → hız aşımı.  Ani yavaşlama ≥ 40 km/s (saniyede) → sert fren.
-    const SPEED_LIMIT = 82, HARSH_DROP_PER_SEC = 40;
+    const HARSH_DROP_PER_SEC = 40;
+    // Şehir içi/dışı/otoyol farklı limit — sürücü seçer, telefonda kalıcı kalır.
+    const SPEED_LIMITS = { city: 50, rural: 90, hw: 120 };
+    let speedMode = localStorage.getItem('vts_speed_mode') || 'city';
+    function speedLimit() { return SPEED_LIMITS[speedMode] || 90; }
+    document.querySelectorAll('.modes button').forEach(b => {
+      b.classList.toggle('on', b.dataset.mode === speedMode);
+      b.onclick = () => {
+        speedMode = b.dataset.mode; localStorage.setItem('vts_speed_mode', speedMode);
+        document.querySelectorAll('.modes button').forEach(x => x.classList.toggle('on', x.dataset.mode === speedMode));
+      };
+    });
     let vPrevSpeed = null, vPrevTs = null;
     const vLast = {};
     function checkViolations(speedKmh, tsMs) {
       const now = tsMs || Date.now();
-      if (speedKmh != null && speedKmh > SPEED_LIMIT) {
-        warn('speed', 'Hız aşımı! ' + speedKmh + ' km/s (limit ' + SPEED_LIMIT + ')');
+      if (speedKmh != null && speedKmh > speedLimit()) {
+        warn('speed', 'Hız aşımı! ' + speedKmh + ' km/s (limit ' + speedLimit() + ')');
       }
       if (vPrevSpeed != null && speedKmh != null && vPrevTs != null) {
         const dt = (now - vPrevTs) / 1000;
@@ -349,6 +425,7 @@
       el.textContent = '⚠ İHLAL YAPTINIZ — ' + msg;
       el.classList.add('show');
       if (navigator.vibrate) navigator.vibrate([250, 120, 250]);
+      notify(msg);
       clearTimeout(warn._t);
       warn._t = setTimeout(() => el.classList.remove('show'), 4500);
       // Mesaj olarak da bildir: kalıcı uyarı listesi.

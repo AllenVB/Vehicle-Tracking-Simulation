@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -55,10 +56,14 @@ public class VehicleController {
         return reporting.findTrackedVehicles(CurrentUser.tenantId(jwt));
     }
 
-    /** Today's position trail (breadcrumb) for the live map's point-tracking of one vehicle. */
-    @GetMapping("/{id}/track-today")
-    public List<TrackPointDto> trackToday(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id) {
-        return reporting.findTodayPositions(CurrentUser.tenantId(jwt), id);
+    /**
+     * One day's route for a vehicle — the right map's history view. {@code daysAgo} 0 = today
+     * (the last-24h path), up to a week back for the day picker. Clamped to the retention window.
+     */
+    @GetMapping("/{id}/track")
+    public List<TrackPointDto> track(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
+                                     @RequestParam(defaultValue = "0") int daysAgo) {
+        return reporting.findDayPositions(CurrentUser.tenantId(jwt), id, Math.clamp(daysAgo, 0, 29));
     }
 
     @GetMapping

@@ -337,15 +337,19 @@ public class ReportingQueryRepository {
     }
 
     /**
-     * A vehicle's positions since local midnight — the map's "today" breadcrumb. Straight off
-     * the raw hypertable (indexed by {@code (vehicle_id, ts)}), unwrapping the PostGIS point.
+     * A vehicle's positions for one local calendar day, {@code daysAgo} back (0 = today). Straight
+     * off the raw hypertable (indexed by {@code (vehicle_id, ts)}), unwrapping the PostGIS point.
+     * The right map draws this as the day's route; telemetry is retained well past a week, so the
+     * day picker can walk back through the whole retention window.
      */
-    public List<TrackPointDto> findTodayPositions(long tenantId, long vehicleId) {
+    public List<TrackPointDto> findDayPositions(long tenantId, long vehicleId, int daysAgo) {
         return jdbc.query("""
                 SELECT ts, ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon, speed_kmh
                 FROM telemetry
                 WHERE tenant_id = ? AND vehicle_id = ?
-                  AND ts >= date_trunc('day', now()) AND location IS NOT NULL
+                  AND ts >= date_trunc('day', now()) - make_interval(days => ?)
+                  AND ts <  date_trunc('day', now()) - make_interval(days => ? - 1)
+                  AND location IS NOT NULL
                 ORDER BY ts
                 """,
                 (rs, n) -> new TrackPointDto(
@@ -353,7 +357,7 @@ public class ReportingQueryRepository {
                         rs.getDouble("lat"),
                         rs.getDouble("lon"),
                         rs.getObject("speed_kmh", Integer.class)),
-                tenantId, vehicleId);
+                tenantId, vehicleId, daysAgo, daysAgo);
     }
 
     private static Instant toInstant(OffsetDateTime value) {
