@@ -4,16 +4,10 @@ Olay tabanlı (event-driven) filo telematik platformu. Simüle edilen araç ciha
 gelen telemetri; **ingestion → Kafka → işleme/analitik → bildirim → API ağ geçidi**
 hattı boyunca akar ve **gerçek harita üzerinde canlı** izlenir.
 
-- **Tasarım hedefi:** 1000 araç, ~1000 mesaj/saniye, günde ~86M satır.
-- **Çalışma (dev) hedefi:** Türkiye geneli 100 araç, 1 sn tick.
-- **İlke:** Ölçek yalnızca konfigürasyondan gelir; mimari baştan doğru kurulur.
 
-Teknoloji: **Java 21 · Spring Boot 3.3 · Apache Kafka (KRaft) · Kafka Streams ·
-TimescaleDB + PostGIS · Redis · Leaflet · çok modüllü Maven monorepo.**
-
----
-
-<img width="1920" height="1000" alt="ats" src="https://github.com/user-attachments/assets/41450fa4-e215-4e25-ae8f-3d12a3c3184e" />
+<img width="1920" height="1001" alt="ff1" src="https://github.com/user-attachments/assets/83f6d979-179e-4a04-aef3-9b5667a3b69c" />
+<img width="1920" height="1004" alt="ff geçmiş" src="https://github.com/user-attachments/assets/d8749096-2672-448c-abe5-ee479fd4e2e6" />
+<img width="1920" height="1009" alt="ff filo" src="https://github.com/user-attachments/assets/7a1b5a85-beaf-4856-9d63-47ee80b6ca78" />
 
 
 - **Sol (2/12) — Filo barı:** araç listesi, **sürücü skorları (10 üzerinden)**, canlı ihlaller,
