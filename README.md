@@ -10,46 +10,8 @@ hattı boyunca akar ve **gerçek harita üzerinde canlı** izlenir.
 <img width="1920" height="1009" alt="ff filo" src="https://github.com/user-attachments/assets/7a1b5a85-beaf-4856-9d63-47ee80b6ca78" />
 
 
-- **Sol (2/12) — Filo barı:** araç listesi, **sürücü skorları (10 üzerinden)**, canlı ihlaller,
-  seçim ve kontrol kutusu. Seçilen araçta **güncel puan** ayrıca gösterilir — 8+ yeşil,
-  6–7 sarı, altı kırmızı.
-- **Orta (5/12) — Canlı harita** (OpenStreetMap): 105 araç **gerçek yollarda** (OSRM rotaları).
-  Her araç **tipine göre renkli logo** ile gösterilir — otomobil (mavi) · tır (sarı) · motor
-  (beyaz) · helikopter (mor) — gittiği yöne döner; ihlalde kırmızıya boyanır. Haritada
-  **benzin istasyonları** (⛽) da işaretlidir. Bir araç seçilince **gideceği rota** akan
-  kesikli çizgiyle çizilir ve **en yakın benzin istasyonu mesafesi** gösterilir. Araca
-  tıklanınca açılan balonda plaka, hız, hedef ve **aracı kullanan sürücünün puanı** yer alır.
-- **Sağ (5/12) — Operatör haritası** (CartoDB): aracı seç, yeni konuma **çift tıkla**.
-  Kara aracı yalnızca **yol üzerine** taşınabilir; yol dışına tıklanırsa *"bu noktaya
-  gidilemiyor"* uyarısı çıkar ve araç **yerinde kalır**. Helikopterler her yere konabilir.
-  Taşınan araç **durmaz** ve görevi iptal olmaz: bırakıldığı noktadan **eski hedefine**
-  kendi hızıyla devam eder, varır, puanlanır, sonra yeni rota alır.
-  Değişiklik gerçek telemetri hattından geçip **~0.1 sn içinde sol haritaya** yansır.
-- **İhlaller** Türkçe adı ve **TL cinsinden cezasıyla** listelenir; toplam ceza barın üstünde
-  görünür. Araçların çoğu limitlere uyduğu için akış seyrektir (saniyeler içinde sel değil).
-- **Cihaza komut** (⛔): seçili araca Codec 12 komutu gönderilir — konum sorgula, cihaz
-  bilgisi al, **röleyi kes**. Komutun durumu panelde canlı ilerler.
-- **Bölge çiz** (⬡): operatör haritasına tıklayarak yasak bölge poligonu kurulur ve kaydedilir.
-  Kural motoru en geç bir dakika içinde devreye alır: **yasak bölgeye giren araç (içeride olan
-  dâhil) `GEOFENCE_ENTER` ihlali alır** (CRITICAL) ve bu ihlal listede, haritada ve puanda görünür.
-- **Seferi oynat** (▶): biten bir yolculuk, kırıntılarının **kendi zaman damgalarıyla**
-  haritada oynatılır; zaman çubuğuyla ileri geri sarılır.
-- **Bakım**: gerçek kilometre sayacına göre yaklaşan/geçmiş bakımlar barın altında listelenir,
-  "Yapıldı" ile kayda geçer ve bir sonraki periyoda yuvarlanır. Periyodik aralık **10.000 km**;
-  aracın balonunda **`1234/10000 km`** olarak ilerleme gösterilir. Aralığı geçen araç bir
-  **`MAINTENANCE_OVERDUE` ihlali** üretir (aşağıya bakın).
-- **İhlal geçmişi + filtre**: liste yalnızca canlı akış değil — araç/kural/güne göre süzülüp
-  keyset sayfalamayla geçmişe gidilebilir.
-- **Araç detayı** (▸): araca ait son seferler (oynatma), komut geçmişi, bakım durumu ve
-  uyarılar sağdan açılan tek panelde toplanır.
-- **Bölge yönetimi**: çizilen yasak bölgeler listelenir, tıklanınca haritada odaklanılır,
-  "Sil" ile pasifleştirilir (kayıt silinmez — ihlal geçmişi referans verir).
-- **Genel bakış** (📊 Özet): filo durum dağılımı, bakım ve son 7 günün ihlal türü kırılımı
-  tek modalda.
 
 ### Operatör: rota oluşturma ve araç uyarıları
-
-![Rota oluşturma ve araç uyarısı](docs/screenshots/vts-mesaj-rota.png)
 
 
 
