@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Hanken+Grotesk:wght@600;700;800&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "error": "#ffb4ab",
+                    "surface-dim": "#131313",
+                    "on-primary-container": "#00422b",
+                    "surface-container": "#201f1f",
+                    "tertiary": "#ffb3af",
+                    "on-surface": "#e5e2e1",
+                    "on-secondary-container": "#00452e",
+                    "on-tertiary-fixed": "#410005",
+                    "background": "#131313",
+                    "surface-container-lowest": "#0e0e0e",
+                    "on-tertiary": "#650911",
+                    "surface-bright": "#393939",
+                    "on-secondary": "#003825",
+                    "secondary-container": "#00bd85",
+                    "surface-variant": "#353534",
+                    "surface-container-high": "#2a2a2a",
+                    "primary-fixed-dim": "#4edea3",
+                    "secondary-fixed-dim": "#45dfa4",
+                    "on-background": "#e5e2e1",
+                    "inverse-primary": "#006c49",
+                    "on-primary": "#003824",
+                    "on-error-container": "#ffdad6",
+                    "outline-variant": "#3c4a42",
+                    "on-tertiary-fixed-variant": "#842225",
+                    "outline": "#86948a",
+                    "on-primary-fixed": "#002113",
+                    "error-container": "#93000a",
+                    "tertiary-fixed-dim": "#ffb3af",
+                    "primary": "#4edea3",
+                    "surface": "#131313",
+                    "primary-container": "#10b981",
+                    "on-error": "#690005",
+                    "on-secondary-fixed-variant": "#005137",
+                    "surface-tint": "#4edea3",
+                    "secondary": "#45dfa4",
+                    "on-tertiary-container": "#711419",
+                    "inverse-surface": "#e5e2e1",
+                    "tertiary-fixed": "#ffdad7",
+                    "surface-container-low": "#1c1b1b",
+                    "secondary-fixed": "#68fcbf",
+                    "inverse-on-surface": "#313030",
+                    "surface-container-highest": "#353534",
+                    "primary-fixed": "#6ffbbe",
+                    "on-primary-fixed-variant": "#005236",
+                    "tertiary-container": "#fc7c78",
+                    "on-surface-variant": "#bbcabf",
+                    "on-secondary-fixed": "#002114"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "xs": "8px",
+                    "md": "24px",
+                    "gutter": "24px",
+                    "margin-desktop": "48px",
+                    "margin-mobile": "16px",
+                    "sm": "16px",
+                    "xl": "64px",
+                    "base": "4px",
+                    "lg": "40px"
+            },
+            "fontFamily": {
+                    "body-sm": ["Inter"],
+                    "headline-lg": ["Hanken Grotesk"],
+                    "label-md": ["Geist"],
+                    "headline-xl": ["Hanken Grotesk"],
+                    "label-sm": ["Geist"],
+                    "headline-lg-mobile": ["Hanken Grotesk"],
+                    "body-md": ["Inter"]
+            },
+            "fontSize": {
+                    "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "label-md": ["14px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "headline-xl": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "label-sm": ["12px", {"lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #131313;
+            color: #e5e2e1;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .glass-card {
+            background: rgba(30, 30, 30, 0.8);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(78, 222, 163, 0.1);
+        }
+        .severity-high {
+            border-left: 4px solid #ffb4ab;
+            box-shadow: -10px 0 20px -10px rgba(255, 180, 171, 0.3);
+        }
+        .severity-medium {
+            border-left: 4px solid #fc7c78;
+        }
+        .severity-low {
+            border-left: 4px solid #4edea3;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .active-tab-shadow {
+            box-shadow: 0 0 15px rgba(78, 222, 163, 0.4);
+        }
+        @keyframes subtle-glow {
+            0%, 100% { opacity: 0.8; }
+            50% { opacity: 1; }
+        }
+        .animate-glow {
+            animation: subtle-glow 3s infinite ease-in-out;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body-md text-body-md overflow-x-hidden pb-32">
+<!-- Top App Bar -->
+<header class="fixed top-0 w-full bg-surface/80 dark:bg-surface/80 backdrop-blur-xl z-50 flex justify-between items-center px-margin-mobile h-16 border-b border-white/10 shadow-sm">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center overflow-hidden border border-primary/20">
+<img class="w-full h-full object-cover" data-alt="A high-quality professional portrait of a fleet logistics manager in a modern tech-focused environment. The lighting is dramatic and cool-toned with emerald green neon accents reflecting off glass surfaces. The style is ultra-detailed, cinematically lit, with a shallow depth of field, fitting a premium dark SaaS application aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDf6Labi2nwsokXC-Ar-WqKMFZdyCrPUCyD1DBT6sgW8uELxE_4Y_Q2COFR6t-QJDSa8Kn7gwT0tXcU2bYnrxxn5Y-rZ7ERK8JWxHI-AXQDx4M1pdJX5TFIaCMUs7TEe_ZMOsryqyUe6f3s36W27G1pFOHZE6Wf_5ZVi5Upii-GHJX2CJSsaNlynOiXLVnCQul8_iyKzjK2nvKU-XuEsyOOmBV6U24KsLsDR8axz0xbQP-XxJK2P-3m"/>
+</div>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-primary">FleetSync</h1>
+</div>
+<button class="w-10 h-10 flex items-center justify-center rounded-full text-on-surface-variant hover:opacity-80 transition-opacity active:scale-95 transition-transform">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</header>
+<!-- Main Content -->
+<main class="mt-20 px-margin-mobile space-y-6">
+<!-- Screen Title Section -->
+<div class="flex flex-col gap-1">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-on-surface">Bildirimler ve İhlaller</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Son 24 saat içindeki kritik uyarılar ve rota güncellemeleri.</p>
+</div>
+<!-- Filter Chips -->
+<div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+<span class="bg-primary text-on-primary px-4 py-1.5 rounded-full font-label-sm text-label-sm whitespace-nowrap">Hepsi</span>
+<span class="bg-surface-container text-on-surface-variant border border-white/5 px-4 py-1.5 rounded-full font-label-sm text-label-sm whitespace-nowrap">Kritik</span>
+<span class="bg-surface-container text-on-surface-variant border border-white/5 px-4 py-1.5 rounded-full font-label-sm text-label-sm whitespace-nowrap">Hız İhlali</span>
+<span class="bg-surface-container text-on-surface-variant border border-white/5 px-4 py-1.5 rounded-full font-label-sm text-label-sm whitespace-nowrap">Rota</span>
+</div>
+<!-- Notification List -->
+<div class="space-y-4">
+<!-- Violation Card: Critical Overspeed -->
+<div class="glass-card severity-high rounded-xl p-4 flex gap-4 items-start active:scale-[0.98] transition-transform duration-200">
+<div class="p-2 bg-error-container rounded-lg text-error">
+<span class="material-symbols-outlined" data-icon="speed" style="font-variation-settings: 'FILL' 1;">speed</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between items-start">
+<h3 class="font-label-md text-label-md text-on-surface">Overspeed Warning</h3>
+<span class="font-label-sm text-label-sm text-on-surface-variant">09:42</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Araç 34 ABC 123, 80km/s limitini aşarak 112km/s hıza ulaştı.</p>
+<div class="mt-3 flex items-center gap-4">
+<div class="flex items-center gap-1 text-error">
+<span class="material-symbols-outlined text-[16px]" data-icon="report">report</span>
+<span class="font-label-sm text-label-sm">Yüksek Risk</span>
+</div>
+<button class="font-label-sm text-label-sm text-primary underline underline-offset-4">Detaylar</button>
+</div>
+</div>
+</div>
+<!-- Violation Card: Route Deviation -->
+<div class="glass-card severity-medium rounded-xl p-4 flex gap-4 items-start active:scale-[0.98] transition-transform duration-200">
+<div class="p-2 bg-tertiary-container rounded-lg text-on-tertiary-container">
+<span class="material-symbols-outlined" data-icon="alt_route" style="font-variation-settings: 'FILL' 1;">alt_route</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between items-start">
+<h3 class="font-label-md text-label-md text-on-surface">Route Deviation</h3>
+<span class="font-label-sm text-label-sm text-on-surface-variant">08:15</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Araç planlanan lojistik rotasından saptı. Yeni konum: Dudullu Mevkii.</p>
+<div class="mt-3 flex items-center gap-4">
+<div class="flex items-center gap-1 text-tertiary">
+<span class="material-symbols-outlined text-[16px]" data-icon="info">info</span>
+<span class="font-label-sm text-label-sm">Orta Seviye</span>
+</div>
+<button class="font-label-sm text-label-sm text-primary underline underline-offset-4">Haritada Gör</button>
+</div>
+</div>
+</div>
+<!-- Alert Card: Maintenance -->
+<div class="glass-card severity-low rounded-xl p-4 flex gap-4 items-start active:scale-[0.98] transition-transform duration-200">
+<div class="p-2 bg-secondary-container/20 rounded-lg text-primary">
+<span class="material-symbols-outlined" data-icon="build" style="font-variation-settings: 'FILL' 1;">build</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between items-start">
+<h3 class="font-label-md text-label-md text-on-surface">Bakım Hatırlatması</h3>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Dün</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Araç 34 DEF 456 periyodik bakımı için son 500km.</p>
+<div class="mt-3 flex items-center gap-4">
+<div class="flex items-center gap-1 text-primary">
+<span class="material-symbols-outlined text-[16px]" data-icon="check_circle">check_circle</span>
+<span class="font-label-sm text-label-sm">Planlı Uyarı</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Violation Card: Hard Braking -->
+<div class="glass-card severity-medium rounded-xl p-4 flex gap-4 items-start active:scale-[0.98] transition-transform duration-200">
+<div class="p-2 bg-tertiary-container rounded-lg text-on-tertiary-container">
+<span class="material-symbols-outlined" data-icon="emergency_home" style="font-variation-settings: 'FILL' 1;">emergency_home</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between items-start">
+<h3 class="font-label-md text-label-md text-on-surface">Ani Fren İhlali</h3>
+<span class="font-label-sm text-label-sm text-on-surface-variant">07:50</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">E-5 Karayolu üzerinde sert frenleme tespit edildi. G-Force: 0.8g.</p>
+<div class="mt-3 flex items-center gap-4">
+<div class="flex items-center gap-1 text-tertiary">
+<span class="material-symbols-outlined text-[16px]" data-icon="warning">warning</span>
+<span class="font-label-sm text-label-sm">Güvenli Sürüş</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Atmospheric Visual Element -->
+<div class="relative w-full h-40 rounded-2xl overflow-hidden mt-8 border border-white/5">
+<div class="absolute inset-0 bg-gradient-to-t from-surface to-transparent z-10"></div>
+<img class="w-full h-full object-cover" data-alt="A wide cinematic shot of a dark highway at night with long exposure light trails of trucks and cars in vibrant emerald green and white. The aesthetic is sleek, high-tech, and professional, with a deep charcoal and navy sky. The lighting is sophisticated, emphasizing speed and connectivity in a modern logistics network." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDuRf9Os33aadP58l2FnPIO5ZKyu0k8vl6hSZu1HE74B5IFeUXeT3exhDopCGq13IVsSFlDfRGn8VSCxpSr8kEROvxsCw71B5JhZICCYVX1oGXXoTaYb6m4HKPS52h4HKTP4mM40lKGLNUl8-fC6AyPPL4ZIoc_bSitUatELc_GcM13Jpw60ZtU6WVnW1T_RZJnZ_9UsG8gzBT_uoL4X6x5hQISGvtHGK7TwvVITL6jhcJRNNYVj62r"/>
+<div class="absolute bottom-4 left-4 z-20">
+<h4 class="font-label-md text-label-md text-white">Sürüş Güvenlik Skoru</h4>
+<div class="flex items-center gap-2 mt-1">
+<div class="h-1.5 w-32 bg-white/20 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[88%]"></div>
+</div>
+<span class="text-primary font-bold">88/100</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 bg-surface-container/90 dark:bg-surface-container/90 backdrop-blur-xl flex justify-around items-center px-4 py-3 pb-safe border-t border-white/5 shadow-[0_-4px_20px_rgba(78,222,163,0.1)] rounded-t-xl">
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="map">map</span>
+<span class="font-label-sm text-label-sm mt-1">Map</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-full px-4 py-1 active:scale-90 duration-200 active-tab-shadow" href="#">
+<div class="relative">
+<span class="material-symbols-outlined" data-icon="notifications" style="font-variation-settings: 'FILL' 1;">notifications</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-error rounded-full animate-glow"></span>
+</div>
+<span class="font-label-sm text-label-sm mt-0.5">Alerts</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-label-sm text-label-sm mt-1">Profile</span>
+</a>
+</nav>
+<script>
+        // Micro-interactions for the cards
+        document.querySelectorAll('.glass-card').forEach(card => {
+            card.addEventListener('touchstart', () => {
+                card.style.transform = 'scale(0.98)';
+            });
+            card.addEventListener('touchend', () => {
+                card.style.transform = 'scale(1)';
+            });
+        });
+
+        // Simple scroll observer for the header shadow
+        window.addEventListener('scroll', () => {
+            const header = document.querySelector('header');
+            if (window.scrollY > 20) {
+                header.classList.add('shadow-lg', 'bg-surface/95');
+            } else {
+                header.classList.remove('shadow-lg', 'bg-surface/95');
+            }
+        });
+    </script>
+</body></html>

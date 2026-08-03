@@ -1,726 +1,311 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VTS · Canlı Filo Haritası</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <style>
-        :root {
-            --bg: #0f1720; --panel: #16212e; --panel-2: #1c2b3a; --line: #26384a;
-            --text: #e6edf3; --muted: #8aa0b4; --accent: #1d9e75; --alert: #e24b4a;
-            --manual: #e08a1d; --fuel-low: #ffc400;
-        }
-        * { box-sizing: border-box; }
-        html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-
-        /* 12 birim: 2 = filo barı, 5 = canlı harita, 5 = operatör haritası */
-        body { display: grid; grid-template-columns: 2fr 5fr 5fr;
-               background: var(--bg); color: var(--text); overflow: hidden; }
-
-        /* ── Sol: filo barı (2/12) ── */
-        #bar { border-right: 1px solid var(--line); background: var(--panel);
-               display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-        #bar header { padding: 14px 16px; border-bottom: 1px solid var(--line); }
-        #bar h1 { font-size: 14px; margin: 0; }
-        #bar .sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
-        .stats { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-        .stat { flex: 1; background: var(--panel-2); border: 1px solid var(--line);
-                border-radius: 7px; padding: 6px 4px; text-align: center; }
-        .stat b { display: block; font-size: 16px; }
-        .stat span { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
-
-        .sect { font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
-                color: var(--muted); padding: 10px 14px 5px; }
-        #vehicleList { flex: 1 1 auto; overflow-y: auto; min-height: 60px; }
-        #scoreList { flex: 0 0 20%; overflow-y: auto; border-top: 1px solid var(--line); }
-        #alertList { flex: 0 0 22%; overflow-y: auto; border-top: 1px solid var(--line); }
-
-        /* Tut-çek yeniden boyutlandırma kolu: sürücü skorları ve ihlal panelleri
-           yukarı/aşağı sürüklenerek büyütülüp küçültülüyor; boyut localStorage'da kalıyor. */
-        .rz { flex: 0 0 auto; height: 9px; cursor: row-resize; display: flex; align-items: center;
-              justify-content: center; background: var(--panel); touch-action: none; }
-        .rz::before { content: ""; width: 34px; height: 3px; border-radius: 2px; background: var(--line);
-              transition: background .15s ease, width .15s ease; }
-        .rz:hover::before, .rz.drag::before { background: var(--accent); width: 52px; }
-
-        /* Modern ince kaydırma çubuğu (tüm panel + modal + çekmece). */
-        * { scrollbar-width: thin; scrollbar-color: #2b4257 transparent; }
-        ::-webkit-scrollbar { width: 9px; height: 9px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #2b4257; border-radius: 6px; border: 2px solid transparent;
-              background-clip: padding-box; transition: background .15s ease; }
-        ::-webkit-scrollbar-thumb:hover { background: #3a5a78; background-clip: padding-box; }
-        .scoreRow { display: flex; align-items: center; gap: 8px; }
-        .scoreRow .rank { color: var(--muted); font-size: 10px; width: 14px; }
-        .scoreRow .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .scoreRow .sc { font-weight: 700; font-size: 13px; }
-        .sc.good { color: #5dcaa5; } .sc.mid { color: #f0997b; } .sc.bad { color: var(--alert); }
-        .row { padding: 7px 14px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 12px; }
-        .row:hover { background: var(--panel-2); }
-        .row.sel { background: #24405a; border-left: 3px solid var(--accent); }
-        .row .meta { color: var(--muted); font-size: 10px; margin-top: 2px; }
-        .alertRow { border-left: 3px solid var(--alert); }
-        .ar-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
-        .alertRow .code { color: #ffcaca; font-weight: 600; }
-        .alertRow .fine { color: #f5c518; font-weight: 700; font-size: 11px; white-space: nowrap; }
-        #fineTotal { color: #f5c518; font-weight: 700; text-transform: none; }
-
-        /* ── Kontrol kutusu (barın altı) ── */
-        #ctrl { border-top: 1px solid var(--line); padding: 10px 14px; background: var(--panel-2); }
-        #ctrl .hint { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
-        #ctrl input { width: 100%; margin-top: 6px; padding: 6px 9px; border-radius: 6px;
-                      border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 13px; }
-        #ctrl button { width: 100%; margin-top: 6px; padding: 6px; border: 0; border-radius: 6px;
-                       background: var(--panel); color: var(--text); border: 1px solid var(--line);
-                       font-size: 11.5px; cursor: pointer; }
-        #ctrl button:disabled { opacity: .45; cursor: default; }
-        #selInfo { font-size: 12px; margin-top: 6px; min-height: 16px; }
-        .pill { font-size: 9px; padding: 1px 6px; border-radius: 9px; margin-left: 5px; }
-        .pill.heli { background: rgba(168,85,247,.22); color: #c4a5f7; }
-
-        /* Araca uyarı mesajı kutusu */
-        #msgBox { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
-        .msg-title { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 6px; }
-        #msgCat, #provinceSelect { width: 100%; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line);
-                     background: var(--panel); color: var(--text); font-size: 12.5px; }
-        #msgText { margin-top: 6px; }
-        .btn-send { width: 100%; margin-top: 6px; padding: 7px; border: 0; border-radius: 6px; background: var(--accent);
-                     color: #201607; font-weight: 700; font-size: 12px; cursor: pointer; }
-        .btn-send:hover { filter: brightness(1.08); }
-        .btn-ghost { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent;
-                     color: var(--text); font-size: 12px; cursor: pointer; }
-        #msgList { margin-top: 8px; max-height: 120px; overflow-y: auto; }
-        .msg-item { font-size: 11px; padding: 6px 8px; border-radius: 6px; background: var(--panel);
-                     border-left: 3px solid var(--accent); margin-bottom: 5px; }
-        .msg-item .mc { font-weight: 700; color: #ffd27f; }
-        .msg-item .mt { color: var(--muted); font-size: 9.5px; margin-top: 2px; }
-
-        /* Operatör harita: Rota Oluştur butonu + il seçici */
-        .map-fab { position: absolute; right: 12px; bottom: 14px; z-index: 600; padding: 9px 15px; border: 0;
-                   border-radius: 22px; background: var(--accent); color: #201607; font-weight: 700; font-size: 13px;
-                   cursor: pointer; box-shadow: 0 3px 10px rgba(0,0,0,.45); }
-        .map-fab:hover { filter: brightness(1.08); }
-        #routePicker { position: absolute; right: 12px; bottom: 14px; z-index: 601; width: 232px; padding: 12px;
-                   border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.55); }
-        .rp-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
-        .rp-actions { display: flex; gap: 6px; margin-top: 10px; }
-        .rp-actions .btn-send { margin-top: 0; }
-
-        /* Bildirim toast'ı */
-        #toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%) translateY(-160%);
-                 z-index: 3000; max-width: 520px; padding: 12px 18px; border-radius: 10px; background: #241c14;
-                 border: 1px solid var(--manual); color: var(--text); font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.55);
-                 transition: transform .35s ease; }
-        #toast.show { transform: translateX(-50%) translateY(0); }
-        #toast .tt { font-weight: 700; color: #ffd27f; }
-
-        /* ── Haritalar (5 + 5) ── */
-        .mapWrap { position: relative; min-width: 0; }
-        .mapWrap + .mapWrap { border-left: 1px solid var(--line); }
-        .map { width: 100%; height: 100%; }
-        #mapLive { background: #0b1016; }
-        #mapCtrl { background: #e9e4dc; cursor: crosshair; }
-        /* Sağ üstte: sol üstte Leaflet'in zoom kontrolü var, üst üste binmesin. */
-        .maplabel { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 500;
-                    background: rgba(15,23,32,.72); color: #fff; font-size: 11px; font-weight: 700;
-                    padding: 6px 14px; border-radius: 999px; letter-spacing: .3px; white-space: nowrap;
-                    max-width: 82%; overflow: hidden; text-overflow: ellipsis;
-                    backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.08);
-                    box-shadow: 0 4px 14px rgba(0,0,0,.3); }
-
-        /* Marker'lar — tipe göre logo, yöne dönük */
-        .veh-mk { position: relative; width: 32px; height: 32px; }
-        .veh-ico { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-                   transition: transform .9s linear; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
-        .veh-ico.alert { animation: pulse .6s ease-in-out 6 alternate; }
-        @keyframes pulse { to { filter: drop-shadow(0 0 8px var(--alert)); } }
-        /* Düşük yakıt: ihlal darbesinin aksine SONSUZ döner — bu bir olay bildirimi değil,
-           depo dolana kadar süren bir durum. Araç istasyona varıp doldurunca kendiliğinden söner. */
-        .veh-ico.lowfuel { animation: lowfuel 1s ease-in-out infinite alternate; }
-        @keyframes lowfuel {
-            from { filter: drop-shadow(0 0 2px var(--fuel-low)); }
-            to   { filter: drop-shadow(0 0 10px var(--fuel-low)) drop-shadow(0 0 16px var(--fuel-low)); }
-        }
-        .veh-badge { position: absolute; right: -3px; bottom: -1px; min-width: 15px; height: 15px; padding: 0 3px;
-                     border-radius: 8px; background: #16212e; color: #fff; border: 1px solid #fff;
-                     font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; }
-        .veh-mk.selected::before { content: ""; position: absolute; inset: -5px; border-radius: 50%;
-                     border: 2px solid #ffd27f; box-shadow: 0 0 8px #ffd27f; }
-
-        /* Benzin istasyonu ikonu (soluk, araçların altında) */
-        .fuel-mk { opacity: .8; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
-        .fuel-mk:hover { opacity: 1; }
-
-        /* Gideceği rota: akan kesikli çizgi + hedef bayrağı */
-        .route-flow { animation: dashmove .9s linear infinite; }
-        @keyframes dashmove { to { stroke-dashoffset: -20; } }
-        .dest-pin { width: 16px; height: 16px; border-radius: 50%; background: var(--c);
-                    border: 2px solid #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 40%, transparent), 0 1px 3px rgba(0,0,0,.5);
-                    animation: destpulse 1.4s ease-in-out infinite; }
-        @keyframes destpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.25); } }
-
-        /* Giriş */
-        #login { position: fixed; inset: 0; background: rgba(9,14,20,.93); display: flex;
-                 align-items: center; justify-content: center; z-index: 2000; }
-        #login .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-                       padding: 26px; width: 320px; }
-        #login h2 { margin: 0 0 4px; font-size: 18px; }
-        #login p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
-        #login label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
-        #login input { width: 100%; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line);
-                       background: var(--panel-2); color: var(--text); font-size: 14px; }
-        #login button { width: 100%; margin-top: 16px; padding: 10px; border: 0; border-radius: 7px;
-                        background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; cursor: pointer; }
-        #loginErr { color: var(--alert); font-size: 12px; margin-top: 8px; min-height: 14px; }
-
-        /* ── Cihaz komutları (Codec 12) ── */
-        #cmdBox { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
-        #cmdSelect { width: 100%; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line);
-                     background: var(--panel); color: var(--text); font-size: 12.5px; }
-        #cmdList { margin-top: 8px; max-height: 132px; overflow-y: auto; }
-        .cmd-item { font-size: 11px; padding: 5px 8px; border-radius: 6px; background: var(--panel);
-                    border-left: 3px solid var(--muted); margin-bottom: 4px; }
-        .cmd-item .cc { font-weight: 700; }
-        .cmd-item .cr { color: var(--muted); font-size: 9.5px; margin-top: 2px; word-break: break-all; }
-        /* Durum rengi tek bakışta ayırt edilebilsin: bekleyen gri, cevaplanan yeşil,
-           cevapsız kalan sarı, cihaz yoksa kırmızı. */
-        .cmd-item.st-PENDING   { border-left-color: #64748b; }
-        .cmd-item.st-SENT      { border-left-color: #38bdf8; }
-        .cmd-item.st-ANSWERED  { border-left-color: #34d399; }
-        .cmd-item.st-TIMEOUT   { border-left-color: #fbbf24; }
-        .cmd-item.st-NO_SESSION,
-        .cmd-item.st-FAILED    { border-left-color: var(--alert); }
-        .cmd-danger { color: #ff9b9b; }
-
-        /* ── Bakım ── */
-        #maintList { max-height: 150px; overflow-y: auto; }
-        .mt-item { display: flex; justify-content: space-between; align-items: center; gap: 6px;
-                   font-size: 11.5px; padding: 5px 8px; border-radius: 6px; background: var(--panel);
-                   margin-bottom: 4px; border-left: 3px solid #38bdf8; }
-        .mt-item.overdue { border-left-color: var(--alert); }
-        .mt-item .mn { color: var(--muted); font-size: 9.5px; }
-        .mt-done { padding: 3px 7px; font-size: 10px; border: 1px solid var(--line); border-radius: 5px;
-                   background: transparent; color: var(--text); cursor: pointer; }
-
-        /* ── Yolculuk oynatma ── */
-        #replayBar { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 700;
-                     display: none; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 10px;
-                     background: rgba(15,23,32,.92); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.5); }
-        #replayBar.on { display: flex; }
-        #replayRange { flex: 1; accent-color: var(--accent); }
-        #replayPlay { padding: 4px 10px; border: 0; border-radius: 6px; background: var(--accent);
-                      color: #201607; font-weight: 700; cursor: pointer; }
-        #replayClose { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
-                       background: transparent; color: var(--text); cursor: pointer; }
-        #replayLabel { font-size: 11px; color: var(--muted); min-width: 132px; }
-        .replay-mk { width: 14px; height: 14px; border-radius: 50%; background: #ffd27f;
-                     border: 2px solid #201607; box-shadow: 0 0 10px #ffd27f; }
-
-        /* ── Bölge çizimi ── */
-        #zoneBtn { right: 150px; }
-        #nearBtn { right: 288px; }
-
-        /* En yakın araç paneli (Redis GEO sonucu) — operatör haritasının sol altında. */
-        #nearPanel { position: absolute; left: 12px; bottom: 14px; z-index: 601; width: 236px; padding: 12px;
-                   border-radius: 10px; background: var(--panel); border: 1px solid var(--line);
-                   box-shadow: 0 6px 18px rgba(0,0,0,.55); }
-        .rp-hint { font-size: 10.5px; color: var(--muted); margin: 4px 0 8px; line-height: 1.4; }
-        #nearList { max-height: 200px; overflow-y: auto; }
-        .near-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 7px;
-                   border-radius: 6px; cursor: pointer; transition: background .12s ease; }
-        .near-item:hover { background: var(--panel-2); }
-        .near-item .nr { color: var(--muted); font-size: 10px; width: 15px; text-align: right; flex: 0 0 auto; }
-        .near-item .npl { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .near-item .nd { color: #7fd4b4; font-weight: 700; white-space: nowrap; }
-        .near-item .nassign { padding: 2px 8px; font-size: 10px; border: 1px solid var(--line); border-radius: 5px;
-                   background: transparent; color: var(--text); cursor: pointer; flex: 0 0 auto; }
-        .near-item .nassign:hover { background: var(--accent); color: #201607; border-color: var(--accent); }
-        /* Tıklanan "iş" noktası ve en yakın araçlara çizilen ışınlar. */
-        .job-pin { width: 16px; height: 16px; border-radius: 50%; background: #ffd27f; border: 2px solid #201607;
-                   box-shadow: 0 0 10px #ffd27f; }
-        #zonePicker { position: absolute; right: 12px; bottom: 14px; z-index: 601; width: 240px; padding: 12px;
-                   border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,.55); }
-        #zoneName, #zoneKind { width: 100%; margin-top: 6px; padding: 6px 9px; border-radius: 6px;
-                   border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12.5px; }
-        #zoneHint { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
-        #mapCtrl.drawing { cursor: cell; }
-
-        /* ── Filo barı: satırlar artık tek bakışta okunuyor ──
-           Önceki hâlinde her satır plaka + model metniydi; 105 aracın hangisinin yolda,
-           hangisinin park hâlinde, hangisinin sürücüsünün kötü puanlı olduğunu görmek için
-           tek tek tıklamak gerekiyordu. Şimdi bunlar satırın kendisinde. */
-        #vehicleList .row { display: flex; align-items: center; gap: 8px; }
-        .tdot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, #64748b);
-                box-shadow: 0 0 0 2px color-mix(in srgb, var(--c, #64748b) 28%, transparent);
-                flex: 0 0 auto; }
-        .vinfo { flex: 1; min-width: 0; }
-        .vinfo b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .vstate { font-size: 9px; padding: 2px 6px; border-radius: 8px; white-space: nowrap;
-                  background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
-        .vstate.moving { color: #7fd4b4; border-color: rgba(93,202,165,.35); }
-        .vstate.parked { color: #f0c078; border-color: rgba(240,192,120,.35); }
-        .vstate.waiting { color: #9aa7b4; }
-        .vstate.stopped { color: #ff9b9b; border-color: rgba(226,75,74,.45); }
-        .vscore { font-weight: 700; font-size: 12px; min-width: 26px; text-align: right; }
-
-        /* Sürücü skorunda çubuk: sayı sıralamayı verir, çubuk ARAYI verir --
-           9.4 ile 6.1 arasındaki fark iki basamağa bakmadan görünsün. */
-        .scoreRow .nm { position: relative; }
-        .scbar { height: 3px; border-radius: 2px; background: var(--line); margin-top: 4px; overflow: hidden; }
-        .scbar i { display: block; height: 100%; border-radius: 2px; background: #5dcaa5; }
-        .scbar i.mid { background: #f0997b; }
-        .scbar i.bad { background: var(--alert); }
-
-        /* İhlal satırı: şiddet soldaki şeritte, zaman "kaç dakika önce" olarak.
-           Saat 14:07:33 okunup şimdiki zamanla karşılaştırılacak bir şey; "2 dk önce" değil. */
-        .alertRow.sev-CRITICAL { border-left-color: #ff4d4d; }
-        .alertRow.sev-HIGH { border-left-color: #ff8c42; }
-        .alertRow.sev-MEDIUM { border-left-color: #f5c518; }
-        .alertRow.sev-LOW { border-left-color: #7aa7c7; }
-
-        /* Boş durumlar: boş bir kutu "veri yok" ile "bozuk" arasında ayrım yapmaz. */
-        .empty { padding: 12px 14px; color: var(--muted); font-size: 11px; font-style: italic; }
-
-        /* Harita lejantı: renklerin ne anlama geldiği haritanın üstünde yazsın,
-           README'de değil. */
-        #legend { position: absolute; left: 10px; bottom: 10px; z-index: 600; display: flex;
-                  flex-wrap: wrap; gap: 4px 10px; max-width: 320px; padding: 7px 10px;
-                  border-radius: 8px; background: rgba(15,23,32,.85); border: 1px solid var(--line);
-                  font-size: 10px; color: #cfd8e3; }
-        #legend span { display: flex; align-items: center; gap: 4px; }
-        #legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); display: block; }
-        #legend i.sq { border-radius: 2px; }
-
-        /* ── İhlal filtresi ── */
-        #alertFilter { display: flex; gap: 5px; padding: 6px 12px; flex-wrap: wrap; align-items: center; }
-        #alertFilter input, #alertFilter select { padding: 4px 7px; border-radius: 5px; border: 1px solid var(--line);
-            background: var(--panel); color: var(--text); font-size: 11px; }
-        #alertFilter input { width: 62px; }
-        #alertFilter .fbtn { padding: 4px 9px; border: 1px solid var(--line); border-radius: 5px;
-            background: transparent; color: var(--text); font-size: 11px; cursor: pointer; }
-        #alertFilter .fbtn.on { background: var(--accent); color: #201607; border-color: var(--accent); }
-        #alertMore { width: calc(100% - 24px); margin: 4px 12px 8px; padding: 6px; border: 1px dashed var(--line);
-            border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; display: none; }
-        #alertMore.on { display: block; }
-
-        /* ── Bölge yönetim listesi ── */
-        .gz-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 5px 12px; }
-        .gz-item .gz-dot { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
-        .gz-item .gz-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .gz-del { padding: 2px 7px; border: 1px solid var(--line); border-radius: 5px; background: transparent;
-            color: #ff9b9b; cursor: pointer; font-size: 11px; }
-
-        /* ── Araç detay çekmecesi (sağdan açılır) ── */
-        #vehDrawer { position: fixed; top: 0; right: 0; width: 340px; max-width: 90vw; height: 100%;
-            background: var(--panel); border-left: 1px solid var(--line); z-index: 1500;
-            transform: translateX(105%); transition: transform .25s ease; overflow-y: auto;
-            box-shadow: -8px 0 24px rgba(0,0,0,.5); }
-        #vehDrawer.on { transform: translateX(0); }
-        #vehDrawer header { display: flex; justify-content: space-between; align-items: center;
-            padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
-        #vehDrawer h3 { margin: 0; font-size: 15px; }
-        #vehDrawer .dsub { font-size: 11px; color: var(--muted); }
-        #drawerClose { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
-        .dsect { padding: 10px 16px; border-bottom: 1px solid var(--line); }
-        .dsect h4 { margin: 0 0 8px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
-        .dsect .drow { font-size: 12px; padding: 4px 0; display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.04); }
-        .dsect .drow:last-child { border-bottom: 0; }
-        .dsect .dmuted { color: var(--muted); font-size: 10.5px; }
-        .dbar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 6px; }
-        .dbar i { display: block; height: 100%; background: #5dcaa5; }
-        .dbar i.warn { background: #f0997b; } .dbar i.over { background: var(--alert); }
-        .dreplay { padding: 2px 7px; border: 1px solid var(--line); border-radius: 5px; background: transparent;
-            color: var(--text); cursor: pointer; font-size: 10px; }
-
-        /* ── Genel bakış modalı ── */
-        #ovBtn { border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 11px;
-            padding: 3px 9px; border-radius: 6px; cursor: pointer; }
-        #ovModal { position: fixed; inset: 0; background: rgba(9,14,20,.72); z-index: 1800; display: none;
-            align-items: center; justify-content: center; }
-        #ovModal.on { display: flex; }
-        #ovCard { width: 560px; max-width: 94vw; max-height: 88vh; overflow-y: auto; background: var(--panel);
-            border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
-        #ovCard header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-        #ovCard h2 { margin: 0; font-size: 17px; }
-        #ovClose { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
-        .ov-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
-        .ov-kpi { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; text-align: center; }
-        .ov-kpi b { display: block; font-size: 19px; }
-        .ov-kpi span { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
-        .ov-h { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 4px 0 8px; }
-        .ov-bars { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
-        .ov-bar { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
-        .ov-bar .lbl { width: 130px; flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ov-bar .track { flex: 1; height: 14px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
-        .ov-bar .track i { display: block; height: 100%; background: var(--accent); }
-        .ov-bar .n { width: 34px; text-align: right; flex: 0 0 auto; color: var(--muted); }
-
-        /* ══ Hareket ve cila ══════════════════════════════════════════════════
-           Kural: yalnızca transform/opacity, ya da nadir değişen küçük öğeler.
-           105 araç · 1 sn tık · 400+ marker'ın her-kare yolu (layout) ASLA
-           tetiklenmez; tüm hareket prefers-reduced-motion ile kapanır. */
-
-        /* Çubuklar soldan dolar (sürücü skoru, bakım ilerlemesi, genel bakış).
-           scaleX derleyicide çalışır — genişlik değil dönüşüm, yani layout yok. */
-        @keyframes growX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-        .scbar i, .dbar i, .ov-bar .track i {
-            transform-origin: left center;
-            animation: growX .7s cubic-bezier(.22, 1, .36, 1);
-        }
-
-        /* KPI sayıları: değer değiştiğinde hafif nabız (sınıfı JS yalnızca
-           gerçekten değişince ekler, her tıkta değil). */
-        @keyframes kpiPulse { 0%, 100% { transform: scale(1); } 35% { transform: scale(1.18); } }
-        .stat b.pulse, .ov-kpi b { animation: kpiPulse .5s ease; display: inline-block; }
-
-        /* Kartlar: yumuşak gölge + hover'da hafif kalkış (transform). */
-        .stat, .ov-kpi { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
-        .stat:hover, .ov-kpi:hover {
-            transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, .38); border-color: #33506b;
-        }
-
-        /* Bakım gecikmişse KPI kartı belirgin kırmızı vurgu + yavaş nabız —
-           "16 bakım yaklaşıyor" ile "3'ü gecikmiş" bir bakışta ayrılsın. */
-        .stat.maint-overdue { border-color: rgba(226, 75, 74, .55); animation: overdueGlow 2s ease-in-out infinite; }
-        @keyframes overdueGlow {
-            0%, 100% { box-shadow: 0 0 0 1px rgba(226, 75, 74, .18), 0 0 8px rgba(226, 75, 74, .16); }
-            50%      { box-shadow: 0 0 0 1px rgba(226, 75, 74, .48), 0 0 18px rgba(226, 75, 74, .42); }
-        }
-
-        /* Satır ve durum rozeti geçişleri pürüzsüz. */
-        .row { transition: background .12s ease, border-color .12s ease; }
-        .vstate { transition: color .2s ease, border-color .2s ease; }
-
-        /* Modal içeriği yumuşak girsin (çekmecenin kayması zaten var). */
-        @keyframes modalIn { from { transform: translateY(10px) scale(.985); opacity: 0; } to { transform: none; opacity: 1; } }
-        #ovModal.on #ovCard, #drvModal.on #drvCard { animation: modalIn .22s cubic-bezier(.22, 1, .36, 1); }
-
-        /* Kütüphanesiz SVG grafikler */
-        .chart { width: 100%; height: 130px; display: block; margin: 2px 0 14px; }
-        .spark { width: 120px; height: 30px; vertical-align: middle; }
-
-        /* Sürücü detay modalı — genel bakış modalıyla aynı iskelet */
-        #drvModal { position: fixed; inset: 0; background: rgba(9, 14, 20, .72); z-index: 1800; display: none;
-            align-items: center; justify-content: center; }
-        #drvModal.on { display: flex; }
-        #drvCard { width: 560px; max-width: 94vw; max-height: 88vh; overflow-y: auto; background: var(--panel);
-            border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
-        #drvCard header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-        #drvCard h2 { margin: 0; font-size: 17px; }
-        #drvClose { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
-        .drv-trip { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 6px 2px;
-            border-bottom: 1px solid rgba(255, 255, 255, .04); }
-        .drv-trip .dt-date { width: 88px; flex: 0 0 auto; }
-        .drv-trip .dt-meta { flex: 1; color: var(--muted); }
-        .drv-trip .dt-score { font-weight: 700; white-space: nowrap; }
-        /* Skor tablosu satırları artık tıklanabilir (sürücü detayına götürür). */
-        #scoreList .scoreRow { cursor: pointer; }
-
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after {
-                animation-duration: .001ms !important; animation-iteration-count: 1 !important;
-                transition-duration: .001ms !important;
-            }
-        }
-    </style>
-<style>
-    /* Telefon eşleştirme QR paneli — sağ üstte sabit. */
-    #pairPanel { position: fixed; top: 12px; right: 12px; z-index: 1200; width: 196px;
-        background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-        padding: 12px; box-shadow: 0 10px 28px rgba(0,0,0,.45); text-align: center; }
-    #pairPanel .pp-head { font-size: 12px; font-weight: 700; margin-bottom: 8px; }
-    #pairPanel .pp-x { position: absolute; top: 6px; right: 9px; cursor: pointer; color: var(--muted);
-        background: none; border: 0; font-size: 15px; }
-    #pairQr { background: #fff; border-radius: 8px; padding: 8px; display: flex; justify-content: center; min-height: 150px; align-items: center; }
-    #pairQr svg { width: 152px; height: 152px; display: block; }
-    #pairPanel .pp-code { font-size: 13px; margin-top: 9px; color: var(--muted); }
-    #pairPanel .pp-code b { color: var(--fuel-low); font-size: 22px; letter-spacing: 3px; vertical-align: middle; }
-    #pairPanel .pp-hint { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.35; }
-    #pairPanel.confirmed { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(29,158,117,.35), 0 10px 28px rgba(0,0,0,.45); }
-    #pairPanel.confirmed .pp-hint { color: var(--accent); font-weight: 700; }
-
-    /* Sadeleştirme: sol panelde yalnızca VTS filo başlığı, Araçlar ve İhlaller kalsın.
-       Sürücü skorları, Bakım, Yasak bölgeler ve operatör mesaj/komut kutuları gizli. */
-    #ovBtn, #scoreSection, #maintSection, #zoneSection,
-    #ctrl .hint, #msgBox, #cmdBox { display: none !important; }
-    .stats .stat:nth-child(4), .stats .stat:nth-child(5) { display: none !important; }
-    /* Sağ harita geçmiş rotaya döndü: operatör butonları/panelleri kaldırıldı, yerine gün seçici. */
-    #routeBtn, #zoneBtn, #nearBtn, #zonePicker, #routePicker, #nearPanel { display: none !important; }
-    #daySelect { position: absolute; bottom: 12px; right: 12px; z-index: 600; padding: 9px 14px;
-        border-radius: 999px; background: rgba(19,28,46,.9); backdrop-filter: blur(6px);
-        color: var(--text); border: 1px solid var(--line); font-size: 13px; font-weight: 600;
-        box-shadow: 0 6px 18px rgba(0,0,0,.4); cursor: pointer; }
-    #daySelect:hover { border-color: var(--accent); }
-    #histLegend { position: absolute; bottom: 10px; left: 10px; z-index: 500; padding: 6px 10px;
-        border-radius: 8px; background: rgba(15,23,32,.82); color: var(--text); border: 1px solid var(--line);
-        font-size: 12px; }
-
-    /* ── Modern sol panel ─────────────────────────────────────────────────── */
-    #bar { background: linear-gradient(180deg, #121b28, #0e1620); }
-    #bar > header { padding: 16px 16px 13px; }
-    #bar h1 { font-size: 15px; font-weight: 800; letter-spacing: .2px; }
-    #statusLine { font-size: 11px; margin-top: 4px; }
-    .stats { gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
-    .stats .stat { background: linear-gradient(180deg, #1b2735, #141d29); border: 1px solid #24313f;
-        border-radius: 12px; padding: 11px 6px; }
-    .stats .stat b { font-size: 21px; font-weight: 800; }
-    .stats .stat span { font-size: 9px; letter-spacing: .5px; }
-    .sect { font-size: 10px; font-weight: 700; letter-spacing: .9px; color: #6f8398;
-        padding: 15px 16px 7px; text-transform: uppercase; }
-    #vehicleList { padding: 2px 8px 6px; }
-    #vehicleList .row { border: 1px solid transparent; border-radius: 11px; margin: 4px 0;
-        padding: 10px 12px; transition: background .12s ease, border-color .12s ease; }
-    #vehicleList .row:hover { background: #16222f; border-color: #26333f; }
-    #vehicleList .row.sel { background: linear-gradient(90deg, rgba(59,163,255,.18), transparent);
-        border-color: rgba(59,163,255,.55); box-shadow: inset 3px 0 0 0 var(--accent); }
-    #vehicleList .row b { font-size: 13px; font-weight: 700; }
-    #vehicleList .empty, #alertList .empty { color: var(--muted); font-size: 12px; padding: 14px 6px; }
-    #selInfo { margin: 4px 12px; }
-
-    /* Tut-çek: yerinde büyüt/küçült (native resize) — sürükleyince YERİ KAYMAZ, sadece boyu değişir.
-       Eski sürükle-kolları (.rz) kaldırıldı. */
-    .rz { display: none !important; }
-    #alertList { flex: 0 0 auto !important; height: 210px; min-height: 90px; max-height: 55vh;
-        resize: vertical; overflow-y: auto; margin: 4px 8px 8px; border: 1px solid var(--line);
-        border-radius: 11px; background: rgba(0,0,0,.12); }
-    #alertFilter { padding: 8px 10px; }
-</style>
-<style>
-/* ── FleetFlow tema (Stitch tasarımına göre): koyu-teal, cam paneller, neon teal ── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
-.material-symbols-outlined { font-family:"Material Symbols Outlined"; font-weight:normal; font-size:18px;
-  line-height:1; vertical-align:-4px; margin-right:6px; color:var(--accent); }
-:root {
-  --bg:#0d1513; --panel:#19211f; --panel-2:#232c29; --line:rgba(255,255,255,.10);
-  --text:#dbe5e0; --muted:#b9cac4; --accent:#00f5d4; --alert:#ffb4ab; --fuel-low:#ffd651;
-}
-html, body { font-family: "Inter", system-ui, -apple-system, sans-serif; }
-body { background: radial-gradient(1100px 520px at 82% -12%, rgba(0,245,212,.07), transparent), var(--bg); }
-#bar { background: rgba(13,21,19,.72); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  border-right: 1px solid rgba(255,255,255,.10); }
-.stats .stat { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.07) !important; }
-.stats .stat:nth-child(2) b { color: var(--accent); }
-#vehicleList .row.sel { background: rgba(0,245,212,.14) !important; border-color: var(--accent) !important;
-  box-shadow: inset 3px 0 0 0 var(--accent), 0 0 16px rgba(0,245,212,.22) !important; }
-.maplabel, #daySelect, #histLegend, #pairPanel { background: rgba(13,21,19,.66) !important;
-  border: 1px solid rgba(255,255,255,.12) !important; }
-.btn-send { background: var(--accent) !important; color: #00201a !important; }
-.fbtn.on { background: var(--accent) !important; color: #00201a !important; border-color: var(--accent) !important; }
-#pairPanel.confirmed { box-shadow: 0 0 0 2px rgba(0,245,212,.4), 0 10px 28px rgba(0,0,0,.45) !important; }
-/* Giriş ekranı — FleetFlow cam kart + neon */
-#login { background: radial-gradient(1000px 600px at 50% -5%, rgba(0,245,212,.09), transparent), #0d1513 !important; }
-#login .card { background: rgba(13,21,19,.72) !important; backdrop-filter: blur(18px);
-  border: 1px solid rgba(255,255,255,.12) !important; border-radius: 18px !important;
-  box-shadow: 0 24px 70px rgba(0,0,0,.55), 0 0 40px rgba(0,245,212,.08) !important; }
-#login h2 { color: var(--accent) !important; letter-spacing: -.02em; }
-#login #loginBtn { background: var(--accent) !important; color: #00201a !important;
-  box-shadow: 0 0 16px rgba(0,245,212,.4); }
-#login input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,245,212,.25); }
-/* Seçili araç kartı — cam overlay */
-#selInfo { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-  border-radius: 12px; padding: 12px; margin: 6px 12px; }
-#selInfo b { color: var(--accent); }
-/* Neon başlık ikonu parlaması */
-#bar h1 .material-symbols-outlined { filter: drop-shadow(0 0 6px rgba(0,245,212,.5)); }
-/* İhlal istatistiği kırmızı */
-.stats .stat:nth-child(3) b { color: var(--alert); }
-/* Koyu harita (FleetFlow gibi) + cam zoom kontrolleri */
-#mapLive .leaflet-tile, #mapCtrl .leaflet-tile { filter: grayscale(.6) brightness(.72) contrast(1.05); }
-.leaflet-control-zoom a { background: rgba(13,21,19,.72) !important; color: var(--text) !important;
-  border: 1px solid rgba(255,255,255,.12) !important; backdrop-filter: blur(8px); }
-.leaflet-bar { border: none !important; box-shadow: 0 6px 18px rgba(0,0,0,.4) !important; }
-</style>
-</head>
-<body>
-
-<aside id="bar">
-    <header>
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h1><span class="material-symbols-outlined">hub</span>VTS · Filo</h1><button id="ovBtn">📊 Özet</button></div>
-        <div class="sub" id="statusLine">Bağlanılıyor…</div>
-    </header>
-
-    <div class="stats">
-        <div class="stat"><b id="statTotal">0</b><span>Araç</span></div>
-        <div class="stat"><b id="statLive">0</b><span>Canlı</span></div>
-        <div class="stat"><b id="statAlerts">0</b><span>İhlal</span></div>
-        <div class="stat"><b id="statScore">–</b><span>Ort. puan</span></div>
-        <div class="stat"><b id="statMaint">–</b><span>Bakım</span></div>
-    </div>
-
-    <div class="sect"><span class="material-symbols-outlined">local_shipping</span>Araçlar</div>
-    <div id="vehicleList"></div>
-
-    <div id="scoreSection">
-    <div class="rz" data-rz="scoreList" title="Sürükle: sürücü skorları panelini büyüt/küçült"></div>
-    <div class="sect">Sürücü skorları <span style="text-transform:none;color:var(--muted)">(30 gün)</span></div>
-    <div id="scoreList"><div class="empty">Puanlanmış sefer bekleniyor…</div></div>
-    </div>
-
-    <div class="rz" data-rz="alertList" title="Sürükle: ihlal panelini büyüt/küçült"></div>
-    <div class="sect"><span class="material-symbols-outlined" style="color:var(--alert)">warning</span>İhlaller · toplam ceza <span id="fineTotal">0 ₺</span></div>
-    <div id="alertFilter">
-        <button class="fbtn on" id="fLive" title="Canlı akış">● Canlı</button>
-        <input id="fPlate" type="number" min="1" max="105" placeholder="Plaka"/>
-        <select id="fRule"><option value="">Tüm kurallar</option></select>
-        <select id="fDays"><option value="1">Bugün</option><option value="7">7 gün</option><option value="30">30 gün</option></select>
-        <button class="fbtn" id="fApply">Ara</button>
-    </div>
-    <div id="alertList"><div class="empty">Henüz ihlal yok — filo limitler içinde.</div></div>
-    <button id="alertMore">Daha fazla…</button>
-
-    <div id="ctrl">
-        <div class="hint">
-            Araç seç, sağdaki haritada yeni konuma <b>çift tıkla</b>. Kara araçları yalnızca
-            <b>yol üzerine</b> taşınabilir — yol dışına tıklarsan uyarı çıkar ve araç yerinde
-            kalır. Helikopterler (101–105) her yere konabilir. Taşınan araç <b>durmaz</b>:
-            bırakıldığı noktadan <b>yeni bir hedefe</b> kendi hızıyla yola çıkar.
-        </div>
-        <input id="plateNo" type="number" min="1" max="105" placeholder="Plaka no 1–105 (101–105 helikopter)"/>
-        <div id="selInfo"></div>
-
-        <div id="msgBox" style="display:none">
-            <div class="msg-title">Araca uyarı gönder</div>
-            <select id="msgCat">
-                <option value="Yanıcı madde">🔥 Yanıcı madde</option>
-                <option value="Kırılacak eşya">📦 Kırılacak eşya</option>
-                <option value="Soğuk zincir">❄️ Soğuk zincir</option>
-                <option value="Hıza dikkat">⚠️ Hıza dikkat</option>
-                <option value="Genel">💬 Genel uyarı</option>
-            </select>
-            <input id="msgText" maxlength="500" placeholder="ör. Yanıcı madde taşıyorsun, hızına dikkat et"/>
-            <button id="msgSend" class="btn-send">Uyarı Gönder</button>
-            <div id="msgList"></div>
-        </div>
-
-        <div id="cmdBox" style="display:none">
-            <div class="msg-title">Cihaza komut gönder</div>
-            <select id="cmdSelect"></select>
-            <button id="cmdSend" class="btn-send">Komutu Gönder</button>
-            <button id="replayBtn" class="btn-ghost" style="width:100%;margin-top:6px">▶ Son seferi oynat</button>
-            <div id="cmdList"></div>
-        </div>
-    </div>
-
-    <div id="maintSection">
-    <div class="sect">Bakım <span id="maintCount" style="text-transform:none;color:var(--muted)"></span></div>
-    <div id="maintList"><div class="empty">Yaklaşan bakım yok.</div></div>
-    </div>
-
-    <div id="zoneSection">
-    <div class="sect">Yasak bölgeler <span id="zoneCount" style="text-transform:none;color:var(--muted)"></span></div>
-    <div id="zoneList"><div class="empty">Tanımlı bölge yok.</div></div>
-    </div>
-</aside>
-
-<div id="vehDrawer">
-    <header><div><h3 id="dTitle">—</h3><div class="dsub" id="dModel"></div></div><button id="drawerClose">✕</button></header>
-    <div id="dBody"></div>
-</div>
-
-<div id="ovModal">
-    <div id="ovCard">
-        <header><h2>Filo genel bakış</h2><button id="ovClose">✕</button></header>
-        <div id="ovBody"></div>
-    </div>
-</div>
-
-<div id="drvModal">
-    <div id="drvCard">
-        <header><h2 id="drvTitle">Sürücü</h2><button id="drvClose">✕</button></header>
-        <div id="drvBody"></div>
-    </div>
-</div>
-
-<div class="mapWrap">
-    <div class="maplabel">CANLI FİLO · OpenStreetMap</div>
-    <div id="mapLive" class="map"></div>
-    <div id="legend">
-        <span><i style="--c:#2b7fff"></i>Otomobil</span>
-        <span><i style="--c:#f5b301"></i>Tır</span>
-        <span><i style="--c:#f8fafc"></i>Motor</span>
-        <span><i style="--c:#a855f7"></i>Helikopter</span>
-        <span><i class="sq" style="--c:#e24b4a"></i>Yasak bölge</span>
-        <span><i class="sq" style="--c:#5dcaa5"></i>İzinli bölge</span>
-        <span><i style="--c:#ffd27f"></i>Oynatılan sefer</span>
-    </div>
-    <div id="replayBar">
-        <button id="replayPlay">⏸</button>
-        <input id="replayRange" type="range" min="0" max="0" value="0"/>
-        <span id="replayLabel"></span>
-        <button id="replayClose">✕</button>
-    </div>
-</div>
-
-<div class="mapWrap">
-    <div class="maplabel">GEÇMİŞ ROTA · gün seç</div>
-    <div id="mapCtrl" class="map"></div>
-    <select id="daySelect" title="Geçmiş gün seç"></select>
-    <div id="histLegend">🟢 durak · 🔴 ihlal · 🔵 normal seyir</div>
-    <button id="routeBtn" class="map-fab" style="display:none">🗺️ Rota Oluştur</button>
-    <button id="zoneBtn" class="map-fab">⬡ Bölge Çiz</button>
-    <button id="nearBtn" class="map-fab">📍 En yakın araç</button>
-    <div id="zonePicker" style="display:none">
-        <div class="rp-title">Yasak bölge tanımla</div>
-        <input id="zoneName" maxlength="120" placeholder="Bölge adı"/>
-        <select id="zoneKind">
-            <option value="EXCLUSION">Yasak bölge (girişte uyar)</option>
-            <option value="INCLUSION">İzinli bölge (çıkışta uyar)</option>
-        </select>
-        <div id="zoneHint">Haritaya tıklayarak köşeleri koy — en az 3.</div>
-        <div class="rp-actions">
-            <button id="zoneSave" class="btn-send">Kaydet</button>
-            <button id="zoneCancel" class="btn-ghost">İptal</button>
-        </div>
-    </div>
-    <div id="routePicker" style="display:none">
-        <div class="rp-title">Hedef il seç</div>
-        <select id="provinceSelect"></select>
-        <div class="rp-actions">
-            <button id="routeGo" class="btn-send">Rotayı Oluştur</button>
-            <button id="routeCancel" class="btn-ghost">İptal</button>
-        </div>
-    </div>
-    <div id="nearPanel" style="display:none">
-        <div class="rp-title">📍 En yakın araçlar</div>
-        <div id="nearHint" class="rp-hint">Haritada bir noktaya tıkla — en yakın 5 aracı bulur (Redis GEO).</div>
-        <div id="nearList"></div>
-        <div class="rp-actions">
-            <button id="nearClose" class="btn-ghost">Kapat</button>
-        </div>
-    </div>
-</div>
-
-<div id="toast"></div>
-
-<div id="pairPanel" style="display:none">
-    <button class="pp-x" id="pairClose" title="Gizle">✕</button>
-    <div class="pp-head">📱 Telefonu bağla</div>
-    <div id="pairQr"></div>
-    <div class="pp-code">Onay kodu: <b id="pairCode">–</b></div>
-    <div class="pp-hint" id="pairHint">QR'ı telefonunla tarat</div>
-</div>
-
-<div id="login">
-    <div class="card">
-        <h2>Giriş</h2>
-        <p>Canlı filo haritasına erişmek için giriş yapın.</p>
-        <label>Kullanıcı adı</label>
-        <input id="username" value="admin" autocomplete="username"/>
-        <label>Parola</label>
-        <input id="password" type="password" value="password" autocomplete="current-password"/>
-        <button id="loginBtn">Giriş yap</button>
-        <div id="loginErr"></div>
-    </div>
-</div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!DOCTYPE html><html class="dark" lang="tr"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<meta name="theme-color" content="#131313">
+<title>FleetFlow · Canlı Filo Takibi</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&family=Hanken+Grotesk:wght@400;500;600;700;800&family=Geist:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
+<link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<style>
+  .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; vertical-align:middle; }
+  .glass-panel { background:rgba(30,30,30,.72); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%);
+    border:1px solid rgba(78,222,163,.14); box-shadow:0 8px 40px -12px rgba(0,0,0,.6); }
+  .emerald-glow { box-shadow:0 0 22px -4px rgba(78,222,163,.35); }
+  ::-webkit-scrollbar { width:6px; height:6px; } ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#2e3734; border-radius:10px; } ::-webkit-scrollbar-thumb:hover { background:#4edea3; }
+  /* position:relative + z-index:0 → tüm Leaflet katmanlarını (marker/kontrol z~1000)
+     kendi stacking context'ine hapseder; paneller ve giriş ekranı üstte kalır. */
+  #map { position:relative; height:100vh; width:100vw; z-index:0; background:#0e0e0e; }
+  .nav-indicator { transition:all .3s cubic-bezier(.4,0,.2,1); }
+  .fade-content { transition:opacity .3s ease, transform .3s ease; }
+  .hidden-content { opacity:0; pointer-events:none; position:absolute; transform:translateY(10px); }
+  /* OSM'i canlı koyu haritaya çevir (invert tekniği) — soluk gri yerine net, renkli koyu. */
+  .leaflet-tile { filter:invert(1) hue-rotate(180deg) brightness(.93) contrast(.92) saturate(.9); }
+  .leaflet-container { background:#0e0e0e; }
+  .anim-in { animation:animIn .5s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes animIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+</style>
+<script>
+  tailwind.config = { darkMode:"class", theme:{ extend:{
+    colors:{
+      "background":"#131313","surface":"#131313","surface-dim":"#131313","surface-bright":"#393939",
+      "surface-container-lowest":"#0e0e0e","surface-container-low":"#1c1b1b","surface-container":"#201f1f",
+      "surface-container-high":"#2a2a2a","surface-container-highest":"#353534","surface-variant":"#353534",
+      "on-surface":"#e5e2e1","on-surface-variant":"#bbcabf","outline":"#86948a","outline-variant":"#3c4a42",
+      "primary":"#4edea3","primary-fixed":"#6ffbbe","primary-container":"#10b981","on-primary":"#003824","on-primary-container":"#00422b",
+      "secondary":"#45dfa4","secondary-container":"#00bd85","on-secondary-container":"#00452e",
+      "tertiary":"#ffb3af","tertiary-container":"#fc7c78","on-tertiary-container":"#711419",
+      "error":"#ffb4ab","error-container":"#93000a","on-error-container":"#ffdad6" },
+    borderRadius:{ DEFAULT:"0.25rem", lg:"0.5rem", xl:"0.75rem", "2xl":"1rem", full:"9999px" },
+    spacing:{ gutter:"16px", "panel-gap":"12px", "container-padding":"24px" },
+    fontFamily:{ "body-md":["Inter"],"title-md":["Inter"],"headline-lg":["Hanken Grotesk"],"label-sm":["Geist"] },
+    fontSize:{ "body-md":["16px",{lineHeight:"24px"}],"title-md":["20px",{lineHeight:"28px",fontWeight:"600"}],
+      "label-sm":["12px",{lineHeight:"16px",letterSpacing:"0.05em",fontWeight:"500"}],
+      "headline-lg":["30px",{lineHeight:"38px",letterSpacing:"-0.01em",fontWeight:"800"}] } } } }
+</script>
+</head>
+<body class="bg-background text-on-surface overflow-hidden" style="font-family:Inter,system-ui,sans-serif">
+
+<!-- ── Top Nav ─────────────────────────────────────────────────────────────── -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-container-padding h-16 bg-background/80 backdrop-blur-xl border-b border-white/10 shadow-lg">
+  <div class="flex items-center gap-8">
+    <h1 class="font-headline-lg text-headline-lg text-primary tracking-tighter">FleetFlow</h1>
+    <nav class="hidden md:flex gap-2 items-center relative">
+      <button class="nav-link text-primary font-bold py-1 px-3 rounded-md transition-colors" data-view="live" onclick="toggleView('live')">Canlı Harita</button>
+      <button class="nav-link text-on-surface-variant font-medium hover:text-on-surface py-1 px-3 rounded-md transition-colors" data-view="fleet" onclick="toggleView('fleet')">Filo</button>
+      <button class="nav-link text-on-surface-variant font-medium hover:text-on-surface py-1 px-3 rounded-md transition-colors" data-view="history" onclick="toggleView('history')">Geçmiş</button>
+      <div class="nav-indicator absolute bottom-0 left-0 h-0.5 bg-primary rounded-full" id="nav-indicator" style="width:0;transform:translateX(0)"></div>
+    </nav>
+  </div>
+  <div class="flex items-center gap-3">
+    <div class="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/5">
+      <span id="connDot" class="w-2 h-2 rounded-full bg-on-surface-variant"></span>
+      <span id="connText" class="text-label-sm text-on-surface-variant hidden sm:inline">Bağlanılıyor…</span>
+    </div>
+    <button id="pairBtn" title="Telefon bağla (QR)" class="p-2 hover:bg-white/5 rounded-full transition-colors active:scale-95">
+      <span class="material-symbols-outlined text-on-surface-variant">qr_code_2</span>
+    </button>
+    <div class="w-9 h-9 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center">
+      <span class="material-symbols-outlined text-primary">hub</span>
+    </div>
+  </div>
+</header>
+
+<!-- ── Map ─────────────────────────────────────────────────────────────────── -->
+<div id="map"></div>
+
+<!-- ── Live Panel (Mission Control) ────────────────────────────────────────── -->
+<aside class="fade-content fixed left-0 top-20 bottom-6 z-40 flex flex-col w-80 m-6 glass-panel rounded-2xl overflow-hidden" id="live-panel">
+  <!-- Fleet Health + Stats -->
+  <div class="p-4 border-b border-white/10">
+    <div class="flex justify-between items-center mb-3">
+      <div class="flex items-center gap-2"><span class="material-symbols-outlined text-primary">monitoring</span>
+        <span class="font-title-md text-on-surface">Canlı İstatistik</span></div>
+      <span class="flex items-center gap-1.5 text-label-sm text-primary uppercase tracking-widest">
+        <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span></span>Aktif</span>
+    </div>
+    <!-- Filo Sağlığı -->
+    <div class="bg-black/20 rounded-xl p-3 mb-3 border border-white/5">
+      <div class="flex justify-between items-end mb-1.5">
+        <span class="text-label-sm text-on-surface-variant uppercase">Filo Sağlığı · Canlı Oran</span>
+        <span class="font-headline-lg text-[22px] leading-none text-primary" id="fleetRatio">—</span>
+      </div>
+      <div class="w-full h-1.5 bg-white/5 rounded-full overflow-hidden"><div class="h-full bg-primary rounded-full transition-all duration-700" id="fleetBar" style="width:0%"></div></div>
+    </div>
+    <div class="grid grid-cols-3 gap-2">
+      <div class="bg-white/5 p-2 rounded-lg text-center border border-white/5">
+        <div class="text-title-md font-extrabold text-on-surface" id="statTotal">0</div>
+        <div class="text-[10px] text-on-surface-variant uppercase tracking-wide">Araç</div></div>
+      <div class="p-2 rounded-lg text-center border" style="background:rgba(78,222,163,.1);border-color:rgba(78,222,163,.3)">
+        <div class="text-title-md font-extrabold text-primary" id="statLive">0</div>
+        <div class="text-[10px] uppercase tracking-wide" style="color:rgba(78,222,163,.7)">Canlı</div></div>
+      <div class="bg-error-container/20 p-2 rounded-lg text-center border border-error/20">
+        <div class="text-title-md font-extrabold text-error" id="statAlert">0</div>
+        <div class="text-[10px] text-error/70 uppercase tracking-wide">İhlal</div></div>
+    </div>
+  </div>
+  <!-- Fleet list -->
+  <div class="flex-1 overflow-y-auto px-3 py-3">
+    <div class="flex items-center gap-2 px-1 mb-2 text-on-surface-variant">
+      <span class="material-symbols-outlined text-body-md">local_shipping</span>
+      <span class="text-label-sm uppercase tracking-widest">Araç Filosu</span></div>
+    <div class="space-y-2" id="vehicleList"></div>
+  </div>
+  <!-- Violation feed -->
+  <div class="p-4 border-t border-white/10">
+    <div class="flex items-center gap-2 mb-2 text-error">
+      <span class="material-symbols-outlined text-body-md" style="font-variation-settings:'FILL' 1">warning</span>
+      <span class="text-label-sm uppercase tracking-widest font-bold">İhlal Akışı</span></div>
+    <div class="space-y-2 max-h-40 overflow-y-auto" id="vioFeed">
+      <div class="text-label-sm text-on-surface-variant px-1">Henüz ihlal yok.</div></div>
+  </div>
+</aside>
+
+<!-- ── History Panel ───────────────────────────────────────────────────────── -->
+<aside class="fade-content hidden-content fixed left-0 top-20 bottom-6 z-40 flex flex-col w-80 m-6 glass-panel rounded-2xl overflow-hidden" id="history-panel">
+  <div class="p-4 border-b border-white/10">
+    <div class="flex items-center gap-2 mb-4"><span class="material-symbols-outlined text-primary">history</span>
+      <span class="font-title-md text-on-surface">Geçmiş İzleme</span></div>
+    <label class="text-label-sm text-on-surface-variant uppercase block mb-1">Araç Seçimi</label>
+    <select id="histVehicle" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2.5 text-on-surface text-body-md mb-3 focus:outline-none focus:border-primary appearance-none"></select>
+    <label class="text-label-sm text-on-surface-variant uppercase block mb-1">Tarih Seçin</label>
+    <select id="daySelect" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2.5 text-on-surface text-body-md focus:outline-none focus:border-primary appearance-none"></select>
+  </div>
+  <div class="flex-1 p-4 overflow-y-auto">
+    <div class="text-label-sm text-on-surface-variant mb-3 uppercase tracking-widest">Gün Özeti</div>
+    <div id="histInfo" class="text-on-surface-variant text-body-md">Soldan bir araç ve gün seç.</div>
+  </div>
+  <div class="p-4 border-t border-white/10">
+    <button id="histExport" class="w-full py-2.5 bg-primary text-on-primary rounded-xl font-bold text-body-md flex items-center justify-center gap-2 active:scale-95 transition-transform emerald-glow">
+      <span class="material-symbols-outlined">file_export</span> Raporu Dışa Aktar</button>
+  </div>
+</aside>
+
+<!-- ── History playback bar (top center) ───────────────────────────────────── -->
+<div class="fixed top-24 left-1/2 -translate-x-1/2 z-30 glass-panel px-5 py-2 rounded-full flex items-center gap-5 hidden" id="playbackBar">
+  <div class="flex items-center gap-3">
+    <button id="pbStart" class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors" title="Başa dön">skip_previous</button>
+    <button id="pbPlay" class="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center active:scale-90 transition-all emerald-glow">
+      <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">play_arrow</span></button>
+    <button id="pbEnd" class="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors" title="Sona git">skip_next</button>
+  </div>
+  <div class="h-6 w-px bg-white/10"></div>
+  <div class="flex items-center gap-2"><span class="text-label-sm text-outline">Hız:</span>
+    <select id="pbSpeed" class="bg-transparent border-none text-primary font-bold text-sm focus:ring-0 p-0 cursor-pointer">
+      <option value="1" class="bg-surface-container">1x</option>
+      <option value="2" class="bg-surface-container">2x</option>
+      <option value="4" class="bg-surface-container">4x</option>
+      <option value="8" class="bg-surface-container">8x</option></select></div>
+</div>
+
+<!-- ── History summary cards (bottom) ──────────────────────────────────────── -->
+<div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-3 hidden" id="histSummary" style="width:min(680px,calc(100vw-380px))">
+  <div class="glass-panel p-3 rounded-2xl flex items-center gap-3 border-l-4" style="border-left-color:#3b82f6">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(59,130,246,.12)"><span class="material-symbols-outlined" style="color:#60a5fa">route</span></div>
+    <div><p class="text-[10px] text-on-surface-variant uppercase">Toplam Mesafe</p><h3 class="font-headline-lg text-[22px] leading-tight text-on-surface"><span id="sumDistance">0</span> <span class="text-label-sm font-normal opacity-60">km</span></h3></div></div>
+  <div class="glass-panel p-3 rounded-2xl flex items-center gap-3 border-l-4 border-l-error">
+    <div class="w-10 h-10 rounded-xl bg-error/10 flex items-center justify-center"><span class="material-symbols-outlined text-error" style="font-variation-settings:'FILL' 1">warning</span></div>
+    <div><p class="text-[10px] text-on-surface-variant uppercase">İhlaller</p><h3 class="font-headline-lg text-[22px] leading-tight text-on-surface"><span id="sumViolations">0</span> <span class="text-label-sm font-normal opacity-60">olay</span></h3></div></div>
+  <div class="glass-panel p-3 rounded-2xl flex items-center gap-3 border-l-4 border-l-primary">
+    <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center"><span class="material-symbols-outlined text-primary">location_on</span></div>
+    <div><p class="text-[10px] text-on-surface-variant uppercase">Duraklar</p><h3 class="font-headline-lg text-[22px] leading-tight text-on-surface"><span id="sumStops">0</span> <span class="text-label-sm font-normal opacity-60">konum</span></h3></div></div>
+</div>
+
+<!-- ── Floating controls (right) ───────────────────────────────────────────── -->
+<div class="fixed top-20 right-6 z-40 flex flex-col items-end gap-3" id="floatControls">
+  <div class="glass-panel rounded-full p-1 flex gap-1">
+    <button class="float-nav-btn px-6 py-2 rounded-full bg-primary text-on-primary font-bold text-label-sm emerald-glow" data-view="live" onclick="toggleView('live')">Canlı</button>
+    <button class="float-nav-btn px-6 py-2 rounded-full text-on-surface-variant font-medium text-label-sm hover:bg-white/5" data-view="history" onclick="toggleView('history')">Geçmiş</button>
+  </div>
+  <div class="glass-panel rounded-full px-4 py-2 flex items-center gap-4">
+    <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#60a5fa"></span><span class="text-[10px] uppercase font-bold text-on-surface-variant tracking-tight">Seyir</span></div>
+    <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-error"></span><span class="text-[10px] uppercase font-bold text-on-surface-variant tracking-tight">İhlal</span></div>
+    <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-primary"></span><span class="text-[10px] uppercase font-bold text-on-surface-variant tracking-tight">Durak</span></div>
+  </div>
+</div>
+
+<!-- ── QR pairing ──────────────────────────────────────────────────────────── -->
+<div class="fixed right-6 z-30 glass-panel rounded-2xl p-4 w-56 text-center hidden" id="pairPanel" style="top:12.5rem">
+  <button id="pairClose" class="absolute top-2 right-3 text-on-surface-variant hover:text-on-surface">✕</button>
+  <div class="text-label-sm font-bold mb-2 flex items-center justify-center gap-1.5 text-primary"><span class="material-symbols-outlined text-body-md">smartphone</span> Telefonu bağla</div>
+  <div id="pairQr" class="bg-white rounded-xl p-2 flex justify-center min-h-[148px] items-center"></div>
+  <div class="text-label-sm text-on-surface-variant mt-3">Onay kodu: <b id="pairCode" class="text-primary" style="font-size:22px;letter-spacing:3px">••</b></div>
+  <div class="text-[11px] text-on-surface-variant mt-1" id="pairHint">QR'ı telefonunla tarat</div>
+</div>
+
+<!-- ── Zoom ────────────────────────────────────────────────────────────────── -->
+<div class="fixed bottom-6 right-6 z-40 flex flex-col gap-2" id="zoomControls">
+  <button class="w-10 h-10 glass-panel rounded-xl flex items-center justify-center text-on-surface hover:bg-white/10" onclick="window._map&&_map.zoomIn()"><span class="material-symbols-outlined">add</span></button>
+  <button class="w-10 h-10 glass-panel rounded-xl flex items-center justify-center text-on-surface hover:bg-white/10" onclick="window._map&&_map.zoomOut()"><span class="material-symbols-outlined">remove</span></button>
+  <button class="w-10 h-10 glass-panel rounded-xl flex items-center justify-center text-on-surface hover:bg-white/10" onclick="window._locate&&_locate()"><span class="material-symbols-outlined">my_location</span></button>
+</div>
+
+<!-- ── Selected vehicle overlay ────────────────────────────────────────────── -->
+<div class="fixed bottom-6 right-20 z-40 glass-panel p-4 rounded-2xl border border-primary/20 w-80 hidden" id="selOverlay">
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center border border-primary/20">
+        <span class="material-symbols-outlined text-primary" style="font-variation-settings:'FILL' 1">local_shipping</span></div>
+      <div><h3 class="text-body-md font-bold text-on-surface" id="selTitle">Araç</h3>
+        <p class="text-label-sm text-on-surface-variant" id="selSub">—</p></div>
+    </div>
+    <button class="p-1 hover:bg-white/5 rounded-full" onclick="window._deselect&&_deselect()"><span class="material-symbols-outlined text-on-surface-variant">close</span></button>
+  </div>
+  <div class="grid grid-cols-3 gap-2 mb-3">
+    <div class="bg-white/5 rounded-xl p-2 border border-white/5"><div class="text-[10px] uppercase text-on-surface-variant mb-0.5">Hız</div>
+      <div class="text-title-md font-extrabold text-primary"><span id="selSpeed">0</span><span class="text-[11px] font-normal"> km/s</span></div></div>
+    <div class="bg-white/5 rounded-xl p-2 border border-white/5"><div class="text-[10px] uppercase text-on-surface-variant mb-0.5">Yakıt</div>
+      <div class="text-title-md font-extrabold text-on-surface"><span id="selFuel">—</span><span class="text-[11px] font-normal">%</span></div></div>
+    <div class="bg-white/5 rounded-xl p-2 border border-white/5"><div class="text-[10px] uppercase text-on-surface-variant mb-0.5">Doğruluk</div>
+      <div class="text-title-md font-extrabold text-on-surface">±<span id="selAcc">—</span></div></div>
+  </div>
+  <!-- Trip mini-stats -->
+  <div class="flex items-center justify-between text-label-sm text-on-surface-variant bg-black/20 rounded-lg px-3 py-2 mb-3 border border-white/5">
+    <span class="flex items-center gap-1"><span class="material-symbols-outlined text-body-md text-primary">eco</span> Eco <b class="text-on-surface" id="selEco">—</b></span>
+    <span class="flex items-center gap-1"><span class="material-symbols-outlined text-body-md text-primary">social_leaderboard</span> Skor <b class="text-on-surface" id="selScore">—</b></span>
+    <span class="flex items-center gap-1"><span class="material-symbols-outlined text-body-md text-primary">straighten</span> <b class="text-on-surface" id="selDist">—</b> km</span>
+  </div>
+  <div class="flex gap-2">
+    <button id="selFollow" class="flex-1 py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 transition-all">Bu aracı takip et</button>
+    <button id="selMsgBtn" title="Sürücüye uyarı gönder" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
+  </div>
+  <!-- inline message composer -->
+  <div id="selMsgBox" class="hidden mt-2 flex gap-2">
+    <input id="selMsgInput" placeholder="Uyarı mesajı…" maxlength="200" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
+    <button id="selMsgSend" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95"><span class="material-symbols-outlined text-body-md">send</span></button>
+  </div>
+  <div id="selMsgOk" class="text-primary text-label-sm mt-1.5 text-center h-4"></div>
+</div>
+
+<!-- ── Fleet (Araç Listesi) ────────────────────────────────────────────────── -->
+<section class="fixed inset-x-0 bottom-0 top-16 z-40 overflow-y-auto hidden" id="fleet-panel" style="background:radial-gradient(1100px 600px at 100% -6%,rgba(78,222,163,.07),transparent),#131313">
+  <div class="max-w-[1400px] mx-auto px-container-padding py-6">
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+      <div>
+        <h1 class="font-headline-lg text-headline-lg text-on-surface">Araç Filosu</h1>
+        <p class="text-on-surface-variant" id="fleetCount">Yükleniyor…</p>
+      </div>
+      <div class="flex bg-surface-container rounded-full p-1 border border-white/5" id="fleetFilters">
+        <button data-f="all" class="px-4 py-1.5 rounded-full text-label-sm font-bold bg-primary text-on-primary">Tümü</button>
+        <button data-f="move" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Harekette</button>
+        <button data-f="park" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Durgun</button>
+        <button data-f="off" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Çevrimdışı</button>
+      </div>
+    </div>
+    <div class="grid grid-cols-12 gap-panel-gap">
+      <!-- Card grid -->
+      <div class="col-span-12 lg:col-span-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-panel-gap" id="fleetGrid"></div>
+        <div id="fleetEmpty" class="hidden glass-panel rounded-2xl text-center text-on-surface-variant py-16 px-4">
+          <span class="material-symbols-outlined text-[40px] text-outline block mb-2">directions_car</span>
+          Henüz araç yok — telefondan QR ile ekle.</div>
+      </div>
+      <!-- Right column -->
+      <div class="col-span-12 lg:col-span-4 space-y-panel-gap">
+        <div class="glass-panel p-6 rounded-2xl">
+          <h3 class="font-title-md text-primary mb-5 flex items-center gap-2"><span class="material-symbols-outlined">health_and_safety</span> Filo Sağlığı</h3>
+          <div class="flex justify-between items-end mb-2"><span class="text-body-md text-on-surface">Canlı Oran</span><span class="font-headline-lg text-[26px] text-primary" id="fhRatio">—</span></div>
+          <div class="w-full h-2 bg-white/5 rounded-full overflow-hidden mb-5"><div class="h-full bg-primary rounded-full transition-all duration-700" id="fhBar" style="width:0%"></div></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-black/20 p-3 rounded-xl border border-white/5"><p class="text-[10px] text-on-surface-variant uppercase">Aktif Sefer</p><p class="font-title-md font-bold text-on-surface" id="fhTrips">—</p></div>
+            <div class="bg-black/20 p-3 rounded-xl border border-white/5"><p class="text-[10px] text-on-surface-variant uppercase">24s İhlal</p><p class="font-title-md font-bold text-error" id="fhVio">—</p></div>
+            <div class="bg-black/20 p-3 rounded-xl border border-white/5"><p class="text-[10px] text-on-surface-variant uppercase">Sürücü</p><p class="font-title-md font-bold text-on-surface" id="fhDrivers">—</p></div>
+            <div class="bg-black/20 p-3 rounded-xl border border-white/5"><p class="text-[10px] text-on-surface-variant uppercase">Canlı Araç</p><p class="font-title-md font-bold text-primary" id="fhLive">—</p></div>
+          </div>
+        </div>
+        <div class="glass-panel p-6 rounded-2xl">
+          <h3 class="text-label-sm font-bold text-on-surface-variant uppercase tracking-widest mb-4">Kritik Uyarılar</h3>
+          <div class="space-y-3" id="fleetAlerts"><div class="text-label-sm text-on-surface-variant">Henüz ihlal yok.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Login ───────────────────────────────────────────────────────────────── -->
+<div id="login" class="fixed inset-0 z-[60] flex items-center justify-center p-6" style="background:radial-gradient(1000px 600px at 50% -5%,rgba(78,222,163,.10),transparent),#131313">
+  <div class="glass-panel emerald-glow rounded-2xl p-8 w-full max-w-sm anim-in">
+    <div class="flex items-center gap-2 mb-1"><span class="material-symbols-outlined text-primary text-[28px]">hub</span>
+      <h1 class="font-headline-lg text-headline-lg text-primary tracking-tighter">FleetFlow</h1></div>
+    <p class="text-on-surface-variant text-label-sm mb-6">Canlı filo haritasına giriş yap · Mission Control</p>
+    <label class="text-label-sm text-on-surface-variant uppercase">Kullanıcı adı</label>
+    <div class="relative mt-1 mb-3">
+      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-body-md">person</span>
+      <input id="username" value="admin" class="w-full bg-surface-container-lowest border border-white/10 rounded-xl pl-10 pr-3 py-3 text-on-surface focus:outline-none focus:border-primary"></div>
+    <label class="text-label-sm text-on-surface-variant uppercase">Parola</label>
+    <div class="relative mt-1 mb-5">
+      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-body-md">lock</span>
+      <input id="password" type="password" value="password" class="w-full bg-surface-container-lowest border border-white/10 rounded-xl pl-10 pr-3 py-3 text-on-surface focus:outline-none focus:border-primary"></div>
+    <button id="loginBtn" class="w-full py-3 rounded-xl font-bold bg-primary text-on-primary emerald-glow active:scale-[.98] transition-transform">Giriş yap</button>
+    <div id="loginErr" class="text-error text-label-sm mt-3 text-center"></div>
+    <div class="pt-5 mt-5 border-t border-white/10 text-center text-label-sm text-on-surface-variant">
+      Sürücü müsün? Telefonundan <b class="text-primary">QR</b> ile araç ekle.</div>
+  </div>
+</div>
+
 <script src="/app.js"></script>
-</body>
-</html>
+</body></html>

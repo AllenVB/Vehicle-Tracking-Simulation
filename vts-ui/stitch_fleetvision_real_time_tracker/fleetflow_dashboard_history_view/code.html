@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FleetFlow - Geçmiş (History)</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&amp;family=Geist:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-container": "#006be3",
+                        "tertiary-container": "#ffd651",
+                        "surface-container": "#19211f",
+                        "on-tertiary-fixed-variant": "#574500",
+                        "on-surface": "#dbe5e0",
+                        "on-surface-variant": "#b9cac4",
+                        "outline": "#83948f",
+                        "error-container": "#93000a",
+                        "on-secondary-fixed-variant": "#004494",
+                        "surface-bright": "#323b38",
+                        "on-tertiary-fixed": "#231b00",
+                        "on-primary": "#00382f",
+                        "on-secondary-container": "#f2f4ff",
+                        "surface-tint": "#00dfc1",
+                        "surface-container-high": "#232c29",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "secondary-fixed": "#d8e2ff",
+                        "surface-dim": "#0d1513",
+                        "surface-variant": "#2e3734",
+                        "error": "#ffb4ab",
+                        "background": "#0d1513",
+                        "on-tertiary": "#3c2f00",
+                        "inverse-on-surface": "#2a3230",
+                        "surface-container-highest": "#2e3734",
+                        "primary-container": "#00f5d4",
+                        "on-error": "#690005",
+                        "surface-container-lowest": "#08100e",
+                        "on-background": "#dbe5e0",
+                        "inverse-primary": "#006b5b",
+                        "primary-fixed": "#26fedc",
+                        "tertiary": "#fff5e4",
+                        "surface": "#0d1513",
+                        "tertiary-fixed": "#ffe086",
+                        "surface-container-low": "#151d1b",
+                        "primary": "#d7fff3",
+                        "on-tertiary-container": "#745c00",
+                        "on-secondary": "#002e69",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-fixed-variant": "#005144",
+                        "tertiary-fixed-dim": "#eac33f",
+                        "inverse-surface": "#dbe5e0",
+                        "secondary": "#adc6ff",
+                        "outline-variant": "#3a4a46",
+                        "primary-fixed-dim": "#00dfc1",
+                        "on-secondary-fixed": "#001a41",
+                        "on-primary-fixed": "#00201a",
+                        "on-primary-container": "#006c5c"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "unit": "4px",
+                        "panel-gap": "12px",
+                        "container-padding": "24px"
+                    },
+                    "fontFamily": {
+                        "display-lg": ["Inter"],
+                        "title-md": ["Inter"],
+                        "headline-lg-mobile": ["Inter"],
+                        "headline-lg": ["Inter"],
+                        "label-sm": ["Geist"],
+                        "body-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "300"}],
+                        "title-md": ["20px", {"lineHeight": "28px", "fontWeight": "500"}],
+                        "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "500"}],
+                        "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "400"}],
+                        "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(13, 21, 19, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .map-container {
+            mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+        }
+        .route-path {
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            animation: dash 5s linear forwards;
+        }
+        @keyframes dash {
+            to { stroke-dashoffset: 0; }
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md overflow-hidden">
+<!-- Top Navigation Bar -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-container-padding h-16 bg-background/80 backdrop-blur-md border-b border-white/10">
+<div class="flex items-center gap-4">
+<span class="font-headline-lg text-headline-lg font-black text-primary-fixed tracking-tighter">FleetFlow</span>
+</div>
+<div class="flex items-center gap-gutter">
+<div class="hidden md:flex gap-6 items-center">
+<a class="text-on-surface-variant font-medium hover:bg-white/5 transition-colors px-3 py-1 rounded" href="#">Dashboard</a>
+<a class="text-primary-fixed font-bold border-b-2 border-primary-fixed px-3 py-1" href="#">History</a>
+<a class="text-on-surface-variant font-medium hover:bg-white/5 transition-colors px-3 py-1 rounded" href="#">Fleet</a>
+</div>
+<div class="flex items-center gap-4 ml-6">
+<button class="p-2 hover:bg-white/5 rounded-full transition-colors">
+<span class="material-symbols-outlined text-primary-fixed">notifications</span>
+</button>
+<button class="p-2 hover:bg-white/5 rounded-full transition-colors">
+<span class="material-symbols-outlined text-primary-fixed">settings</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center border border-white/10 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A professional headshot of a fleet manager with a focused expression, wearing a dark navy corporate uniform. The background is a blurred high-tech operations center with glowing teal screens. High-end cinematic lighting with teal and obsidian tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAHXdkVRFRRLdbLuD9F5zZF0gNxxHc8RCXMf3V013fbgU0AIjAZ25IAq1MXUw1j43mbIPP1ght9sUi4ODPKZLQhXf8irmF4wycWLBeFqD_ljlVaA-LKC9q1INq2-KrqNR9IV1movDcRxxuRDLtblaaIUPxd0Z4okrAqBgVBmaiQxXq9p32dFXqvmQ6w67Ig5HbNmbDX4No8ECu8xI1isKUij5C7DWt_UPy_UasYsc5CxR1FGt1JJoSi"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Side Navigation Shell (Hidden on Mobile) -->
+<aside class="fixed left-0 top-20 bottom-6 z-40 flex flex-col p-panel-gap w-80 glass-panel m-6 rounded-xl shadow-2xl hidden md:flex">
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-3 px-4 py-3">
+<span class="material-symbols-outlined text-primary-fixed">history</span>
+<span class="font-title-md text-title-md font-bold text-primary-fixed">History</span>
+</div>
+<div class="h-px bg-white/10 mx-4 my-2"></div>
+<!-- Vehicle Selection -->
+<div class="px-4 py-2">
+<label class="font-label-sm text-label-sm text-on-surface-variant uppercase mb-2 block">Vehicle Selection</label>
+<div class="relative">
+<select class="w-full bg-black/30 border border-white/10 rounded-lg py-3 px-4 text-on-surface focus:outline-none focus:border-primary-fixed appearance-none cursor-pointer">
+<option>TR-34-FLEET-01 (Volvo FH)</option>
+<option>TR-34-FLEET-02 (Scania R)</option>
+<option>TR-35-LOGI-99 (Mercedes Actros)</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-3 pointer-events-none text-outline">expand_more</span>
+</div>
+</div>
+<!-- Date Picker -->
+<div class="px-4 py-2">
+<label class="font-label-sm text-label-sm text-on-surface-variant uppercase mb-2 block">Select Date</label>
+<div class="bg-black/30 border border-white/10 rounded-lg p-3">
+<div class="flex justify-between items-center mb-2">
+<span class="font-medium text-primary">October 2023</span>
+<div class="flex gap-1">
+<span class="material-symbols-outlined text-sm cursor-pointer hover:text-primary">chevron_left</span>
+<span class="material-symbols-outlined text-sm cursor-pointer hover:text-primary">chevron_right</span>
+</div>
+</div>
+<div class="grid grid-cols-7 gap-1 text-center text-[10px] text-outline mb-1">
+<span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+</div>
+<div class="grid grid-cols-7 gap-1 text-center text-xs">
+<span class="p-1 hover:bg-white/5 rounded cursor-pointer">25</span>
+<span class="p-1 hover:bg-white/5 rounded cursor-pointer">26</span>
+<span class="p-1 hover:bg-white/5 rounded cursor-pointer">27</span>
+<span class="p-1 bg-primary-container text-on-primary-container font-bold rounded cursor-pointer">28</span>
+<span class="p-1 hover:bg-white/5 rounded cursor-pointer">29</span>
+<span class="p-1 hover:bg-white/5 rounded cursor-pointer">30</span>
+<span class="p-1 hover:bg-white/5 rounded cursor-pointer text-outline">1</span>
+</div>
+</div>
+</div>
+<!-- Speed Limit Setting -->
+<div class="px-4 py-2">
+<div class="flex justify-between items-center mb-2">
+<label class="font-label-sm text-label-sm text-on-surface-variant uppercase">Speed Limit Filter</label>
+<span class="text-primary-fixed font-bold">90 km/h</span>
+</div>
+<input class="w-full accent-primary-fixed h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" max="120" min="30" type="range" value="90"/>
+<div class="flex justify-between text-[10px] text-outline mt-1">
+<span>30</span>
+<span>120</span>
+</div>
+</div>
+<div class="mt-auto px-4 pb-4">
+<button class="w-full bg-primary-container text-on-primary-container font-bold py-3 rounded-full flex items-center justify-center gap-2 hover:shadow-[0_0_20px_rgba(0,245,212,0.4)] transition-all active:scale-95">
+<span class="material-symbols-outlined">analytics</span>
+                    Export Reports
+                </button>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas (The Map Area) -->
+<main class="fixed inset-0 pt-16 md:pl-96 p-6">
+<div class="relative w-full h-full rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
+<!-- Map Background -->
+<div class="absolute inset-0 z-0 bg-surface-dim">
+<div class="w-full h-full opacity-40 grayscale contrast-125" data-alt="A dark, high-contrast satellite view map of Istanbul's highways and Bosphorus strait at night. The map shows glowing orange city lights against deep midnight blue terrain, with sharp, detailed road networks in silver. Minimalist tactical map aesthetic." data-location="Istanbul" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCja78j42TBxmA1nAsG8rgYIqAEaX4tgf-tTAsACth3ZSJa78BXq3xM0J2gNgczJtTEPql2VEMYNiZdAC7xHlfofrEazJtNIDyPho12nYKN0QgD7Tdp09dC5__bW0pBXfB77240s37SqbBOcqXx5ek4r9f5SCxzPZ9kIUTGM1_xJ4EUS4efgYI54AjsDYNIMohei006NGQLXAXTZh4S49yMsJ6d3RpyUkxfZp9IrnIvQI7Z95PexoKp')"></div>
+<!-- SVG Route Overlay -->
+<svg class="absolute inset-0 w-full h-full z-10 pointer-events-none" preserveaspectratio="none" viewbox="0 0 1000 1000">
+<!-- Normal Route (Blue) -->
+<path class="route-path" d="M100,500 Q300,450 450,600 T800,550" fill="none" stroke="#006be3" stroke-linecap="round" stroke-width="4"></path>
+<!-- Violation Segment (Red) -->
+<path class="route-path" d="M450,600 Q500,680 600,650" fill="none" stroke="#ffb4ab" stroke-linecap="round" stroke-width="5"></path>
+<!-- Stops (Green Nodes) -->
+<circle class="animate-pulse" cx="100" cy="500" fill="#00dfc1" r="8"></circle>
+<circle cx="450" cy="600" fill="#00dfc1" r="8"></circle>
+<circle class="animate-pulse" cx="800" cy="550" fill="#00dfc1" r="10"></circle>
+<!-- Violation Point -->
+<circle cx="550" cy="660" fill="rgba(255, 180, 171, 0.2)" r="12" stroke="#ffb4ab" stroke-width="1"></circle>
+<text class="text-[14px] font-bold" fill="#ffb4ab" x="565" y="670">Speed Violation (104 km/h)</text>
+</svg>
+</div>
+<!-- Map Controls (Level 2) -->
+<div class="absolute right-6 top-6 z-20 flex flex-col gap-2">
+<button class="w-10 h-10 rounded-lg glass-panel flex items-center justify-center hover:bg-white/10 text-primary-fixed">
+<span class="material-symbols-outlined">add</span>
+</button>
+<button class="w-10 h-10 rounded-lg glass-panel flex items-center justify-center hover:bg-white/10 text-primary-fixed">
+<span class="material-symbols-outlined">remove</span>
+</button>
+<button class="w-10 h-10 rounded-lg glass-panel flex items-center justify-center hover:bg-white/10 text-primary-fixed mt-4">
+<span class="material-symbols-outlined">layers</span>
+</button>
+</div>
+<!-- Summary Cards (Bottom Overlay) -->
+<div class="absolute bottom-6 left-6 right-6 z-20 grid grid-cols-1 md:grid-cols-3 gap-4">
+<!-- KM Summary -->
+<div class="glass-panel p-4 rounded-xl flex items-center gap-4 border-l-4 border-l-secondary-container">
+<div class="w-12 h-12 rounded-lg bg-secondary-container/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary-fixed">route</span>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm uppercase">Total Distance</p>
+<h3 class="text-headline-lg font-black text-on-surface">432.5 <span class="text-title-md font-normal opacity-60">km</span></h3>
+</div>
+</div>
+<!-- Violation Summary -->
+<div class="glass-panel p-4 rounded-xl flex items-center gap-4 border-l-4 border-l-error">
+<div class="w-12 h-12 rounded-lg bg-error-container/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-error" style="font-variation-settings: 'FILL' 1;">warning</span>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm uppercase">Violations</p>
+<h3 class="text-headline-lg font-black text-on-surface">02 <span class="text-title-md font-normal opacity-60">Events</span></h3>
+</div>
+</div>
+<!-- Stops Summary -->
+<div class="glass-panel p-4 rounded-xl flex items-center gap-4 border-l-4 border-l-primary-fixed">
+<div class="w-12 h-12 rounded-lg bg-primary-container/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary-fixed">location_on</span>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm uppercase">Total Stops (≥2min)</p>
+<h3 class="text-headline-lg font-black text-on-surface">06 <span class="text-title-md font-normal opacity-60">Locations</span></h3>
+</div>
+</div>
+</div>
+<!-- Playback Control Panel (Floating) -->
+<div class="absolute top-6 left-1/2 -translate-x-1/2 glass-panel px-6 py-3 rounded-full flex items-center gap-6 z-20">
+<button class="material-symbols-outlined text-on-surface hover:text-primary transition-colors">skip_previous</button>
+<button class="w-10 h-10 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center active:scale-90 transition-transform">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+<button class="material-symbols-outlined text-on-surface hover:text-primary transition-colors">skip_next</button>
+<div class="h-6 w-px bg-white/10"></div>
+<div class="flex items-center gap-3">
+<span class="font-label-sm text-outline">Speed:</span>
+<select class="bg-transparent border-none text-primary-fixed font-bold text-sm focus:ring-0">
+<option>1x</option>
+<option>2x</option>
+<option>4x</option>
+</select>
+</div>
+</div>
+</div>
+</main>
+<!-- Mobile Navigation Shell -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full bg-background/80 backdrop-blur-md z-50 flex justify-around items-center py-4 px-4 border-t border-white/5">
+<div class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-[10px] font-medium">Home</span>
+</div>
+<div class="flex flex-col items-center gap-1 text-primary-fixed">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">history</span>
+<span class="text-[10px] font-bold">History</span>
+</div>
+<div class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">local_shipping</span>
+<span class="text-[10px] font-medium">Fleet</span>
+</div>
+<div class="flex flex-col items-center gap-1 text-on-surface-variant">
+<span class="material-symbols-outlined">account_circle</span>
+<span class="text-[10px] font-medium">Profile</span>
+</div>
+</nav>
+<script>
+        // Simple Micro-interactions
+        document.addEventListener('DOMContentLoaded', () => {
+            const playBtn = document.querySelector('.bg-primary-fixed');
+            let isPlaying = false;
+            
+            playBtn.addEventListener('click', () => {
+                isPlaying = !isPlaying;
+                const icon = playBtn.querySelector('span');
+                icon.textContent = isPlaying ? 'pause' : 'play_arrow';
+                playBtn.classList.toggle('bg-tertiary-container', isPlaying);
+            });
+
+            // Hover effects on Summary Cards
+            document.querySelectorAll('.glass-panel').forEach(card => {
+                card.addEventListener('mouseenter', () => {
+                    card.style.transform = 'translateY(-4px)';
+                    card.style.transition = 'all 0.3s ease';
+                });
+                card.addEventListener('mouseleave', () => {
+                    card.style.transform = 'translateY(0px)';
+                });
+            });
+        });
+    </script>
+</body></html>

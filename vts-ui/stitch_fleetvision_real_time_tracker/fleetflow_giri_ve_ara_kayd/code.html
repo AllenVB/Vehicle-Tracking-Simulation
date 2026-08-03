@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FleetPro - Giriş Yap</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700&amp;family=Inter:wght@400;500&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-error-container": "#ffdad6",
+                    "primary-container": "#10b981",
+                    "secondary-container": "#00bd85",
+                    "on-error": "#690005",
+                    "secondary": "#45dfa4",
+                    "primary-fixed-dim": "#4edea3",
+                    "tertiary": "#ffb3af",
+                    "on-tertiary-container": "#711419",
+                    "surface-container-highest": "#353534",
+                    "tertiary-fixed": "#ffdad7",
+                    "primary": "#4edea3",
+                    "on-secondary-container": "#00452e",
+                    "error-container": "#93000a",
+                    "on-secondary-fixed-variant": "#005137",
+                    "surface-tint": "#4edea3",
+                    "inverse-on-surface": "#313030",
+                    "surface-container-high": "#2a2a2a",
+                    "on-primary": "#003824",
+                    "surface-container-lowest": "#0e0e0e",
+                    "on-surface-variant": "#bbcabf",
+                    "on-tertiary": "#650911",
+                    "on-tertiary-fixed": "#410005",
+                    "secondary-fixed-dim": "#45dfa4",
+                    "background": "#131313",
+                    "error": "#ffb4ab",
+                    "inverse-surface": "#e5e2e1",
+                    "on-secondary": "#003825",
+                    "on-primary-fixed": "#002113",
+                    "surface-bright": "#393939",
+                    "surface-dim": "#131313",
+                    "outline": "#86948a",
+                    "on-primary-fixed-variant": "#005236",
+                    "surface-container": "#201f1f",
+                    "on-background": "#e5e2e1",
+                    "surface-variant": "#353534",
+                    "inverse-primary": "#006c49",
+                    "tertiary-container": "#fc7c78",
+                    "on-secondary-fixed": "#002114",
+                    "outline-variant": "#3c4a42",
+                    "surface": "#131313",
+                    "secondary-fixed": "#68fcbf",
+                    "tertiary-fixed-dim": "#ffb3af",
+                    "primary-fixed": "#6ffbbe",
+                    "on-surface": "#e5e2e1",
+                    "on-primary-container": "#00422b",
+                    "on-tertiary-fixed-variant": "#842225",
+                    "surface-container-low": "#1c1b1b"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin-mobile": "16px",
+                    "xl": "64px",
+                    "base": "4px",
+                    "gutter": "24px",
+                    "margin-desktop": "48px",
+                    "lg": "40px",
+                    "md": "24px",
+                    "sm": "16px",
+                    "xs": "8px"
+            },
+            "fontFamily": {
+                    "headline-xl": ["Hanken Grotesk"],
+                    "headline-lg": ["Hanken Grotesk"],
+                    "body-md": ["Inter"],
+                    "body-sm": ["Inter"],
+                    "label-md": ["Geist"],
+                    "label-sm": ["Geist"],
+                    "headline-lg-mobile": ["Hanken Grotesk"]
+            },
+            "fontSize": {
+                    "headline-xl": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "label-md": ["14px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "label-sm": ["12px", {"lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #131313;
+            color: #e5e2e1;
+        }
+        .glass-card {
+            background: rgba(30, 30, 30, 0.8);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(78, 222, 163, 0.1);
+        }
+        .emerald-glow {
+            box-shadow: 0 0 40px -10px rgba(78, 222, 163, 0.15);
+        }
+        .qr-scanner-line {
+            height: 2px;
+            background: #4edea3;
+            box-shadow: 0 0 15px #4edea3;
+            animation: scan 3s infinite ease-in-out;
+        }
+        @keyframes scan {
+            0%, 100% { top: 0%; }
+            50% { top: 100%; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col overflow-x-hidden">
+<!-- Ambient Background Animation -->
+
+<main class="flex-grow flex items-center justify-center p-margin-mobile md:p-margin-desktop relative z-10">
+<div class="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-gutter lg:gap-xl">
+<!-- Left Side: Branding & Info -->
+<div class="flex flex-col justify-center space-y-lg text-center md:text-left">
+<div>
+<h1 class="font-headline-xl text-headline-xl text-primary mb-xs">FleetFlow</h1>
+<p class="font-body-md text-body-md text-on-surface-variant max-w-md">
+                        Profesyonel filo yönetim sistemi. Araç girişlerini hızlandırın, QR kod ile anında takip edin ve verimliliğinizi artırın.
+                    </p>
+</div>
+<div class="hidden md:flex flex-col space-y-md">
+<div class="flex items-center space-x-sm">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined">speed</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Gerçek Zamanlı Takip</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Anlık veri akışı ile kontrol sizde.</p>
+</div>
+</div>
+<div class="flex items-center space-x-sm">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined">security</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface">Güvenli Altyapı</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Uçtan uca şifrelenmiş veri güvenliği.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Side: Login Interaction -->
+<div class="glass-card rounded-xl p-md md:p-lg emerald-glow flex flex-col space-y-lg">
+<!-- Toggle Methods -->
+<div class="flex bg-surface-container-low p-base rounded-lg" id="method-toggle">
+<button class="flex-1 py-xs rounded-md text-label-md transition-all duration-300 bg-primary text-on-primary" id="qr-tab-btn">
+                        QR Kod Tarama
+                    </button>
+<button class="flex-1 py-xs rounded-md text-label-md transition-all duration-300 text-on-surface-variant hover:text-on-surface" id="manual-tab-btn">
+                        Manuel Giriş
+                    </button>
+</div>
+<!-- QR Section -->
+<div class="flex flex-col items-center space-y-md" id="qr-section">
+<div class="relative w-48 h-48 md:w-64 md:h-64 border-2 border-primary/20 rounded-xl overflow-hidden bg-surface-container-lowest">
+<div class="absolute inset-0 border-[20px] border-surface-container-lowest opacity-40"></div>
+<div class="qr-scanner-line absolute left-0 w-full z-20"></div>
+<div class="absolute inset-0 flex items-center justify-center opacity-20">
+<span class="material-symbols-outlined text-[120px]">qr_code_scanner</span>
+</div>
+<img class="w-full h-full object-cover" data-alt="A clean, minimalist high-tech QR code interface graphic for a fleet management app. The visual features an emerald green glowing scanner line moving over a stylized matrix pattern in a dark charcoal environment. The mood is sophisticated, cinematic, and professional, perfectly reflecting a premium glassmorphism dark theme." src="https://lh3.googleusercontent.com/aida-public/AB6AXuASIEJUaZzpGrS9rCvrWTRpfLmmoSOYcXf-_xBxbHbK79bFjmUNfSMaWd5kY3UX6ZCqZCbuLJEagQMvF4z5NEkxa-fAXcHOOOWOzM0qU14dLs8JF9QYCc76i76SbmL-9-LGupkb1jxzXH0Oe3FusjWukmZpUKzF-UVFuMHyVFo0znCeWiKViPKfV_BwWoagLks6CWJduE_vW5Kwnqn4XnOX9Fljh9zNDctccMFQNqW3e46OU4vxx2nR"/>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant text-center">
+                        Kamerayı QR koda doğrultun veya sistem tarafından sağlanan barkodu taratın.
+                    </p>
+</div>
+<!-- Manual Section (Hidden by default) -->
+<div class="hidden flex-col space-y-md" id="manual-section">
+<div class="space-y-xs">
+<label class="font-label-md text-label-md text-on-surface-variant">Araç Plakası</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant">directions_car</span>
+<input class="w-full pl-xl pr-md py-sm bg-surface-container-highest border-none rounded-lg text-body-md focus:ring-2 focus:ring-primary transition-all" placeholder="34 ABC 123" type="text"/>
+</div>
+</div>
+<div class="space-y-xs">
+<label class="font-label-md text-label-md text-on-surface-variant">Şifre</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant">lock</span>
+<input class="w-full pl-xl pr-md py-sm bg-surface-container-highest border-none rounded-lg text-body-md focus:ring-2 focus:ring-primary transition-all" placeholder="••••••••" type="password"/>
+</div>
+</div>
+<div class="flex justify-end">
+<a class="font-label-sm text-label-sm text-primary hover:underline" href="#">Şifremi Unuttum</a>
+</div>
+<button class="w-full py-md bg-primary text-on-primary font-label-md rounded-lg hover:brightness-110 active:scale-[0.98] transition-all shadow-lg shadow-primary/20">
+                        Giriş Yap
+                    </button>
+</div>
+<!-- Common Actions -->
+<div class="pt-sm border-t border-outline-variant/15 flex flex-col space-y-sm">
+<button class="w-full py-sm border-2 border-primary/40 text-primary font-label-md rounded-lg hover:bg-primary/5 active:scale-[0.98] transition-all flex items-center justify-center space-x-xs">
+<span class="material-symbols-outlined">add_circle</span>
+<span>Araç Oluştur</span>
+</button>
+<p class="font-body-sm text-body-sm text-on-surface-variant text-center">
+                        Yardıma mı ihtiyacınız var? <a class="text-primary hover:underline" href="#">Destek Ekibi</a>
+</p>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer Identity -->
+<footer class="p-md text-center relative z-10">
+<p class="font-label-sm text-label-sm text-on-surface-variant opacity-60">© 2024 FleetPro Terminal A-12. Tüm Hakları Saklıdır.</p>
+</footer>
+<script>
+        const qrTabBtn = document.getElementById('qr-tab-btn');
+        const manualTabBtn = document.getElementById('manual-tab-btn');
+        const qrSection = document.getElementById('qr-section');
+        const manualSection = document.getElementById('manual-section');
+
+        qrTabBtn.addEventListener('click', () => {
+            qrSection.classList.remove('hidden');
+            qrSection.classList.add('flex');
+            manualSection.classList.add('hidden');
+            manualSection.classList.remove('flex');
+            
+            qrTabBtn.classList.add('bg-primary', 'text-on-primary');
+            qrTabBtn.classList.remove('text-on-surface-variant');
+            manualTabBtn.classList.remove('bg-primary', 'text-on-primary');
+            manualTabBtn.classList.add('text-on-surface-variant');
+        });
+
+        manualTabBtn.addEventListener('click', () => {
+            manualSection.classList.remove('hidden');
+            manualSection.classList.add('flex');
+            qrSection.classList.add('hidden');
+            qrSection.classList.remove('flex');
+
+            manualTabBtn.classList.add('bg-primary', 'text-on-primary');
+            manualTabBtn.classList.remove('text-on-surface-variant');
+            qrTabBtn.classList.remove('bg-primary', 'text-on-primary');
+            qrTabBtn.classList.add('text-on-surface-variant');
+        });
+
+        // Simple button active effect for feedback
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', function() {
+                this.classList.add('scale-95');
+                setTimeout(() => this.classList.remove('scale-95'), 100);
+            });
+        });
+    </script>
+</body></html>

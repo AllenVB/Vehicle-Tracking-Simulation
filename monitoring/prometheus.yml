@@ -19,4 +19,3 @@ scrape_configs:
           - vts-notification-service:8084
           - vts-api-gateway:8080
           - vts-scheduler-service:8086
-          - vts-simulator:8085

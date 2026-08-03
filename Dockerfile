@@ -9,14 +9,12 @@ COPY vts-common/pom.xml vts-common/
 # Testcontainers helpers: no runtime code, but it is a reactor module, so the reactor
 # refuses to resolve without its pom.
 COPY vts-test-support/pom.xml vts-test-support/
-COPY vts-simulator/pom.xml vts-simulator/
 COPY vts-ingestion-service/pom.xml vts-ingestion-service/
 COPY vts-processing-service/pom.xml vts-processing-service/
 COPY vts-stream-analytics/pom.xml vts-stream-analytics/
 COPY vts-notification-service/pom.xml vts-notification-service/
 COPY vts-api-gateway/pom.xml vts-api-gateway/
 COPY vts-scheduler-service/pom.xml vts-scheduler-service/
-COPY vts-iett-feed/pom.xml vts-iett-feed/
 RUN mvn -q -B dependency:go-offline || true
 COPY . .
 RUN mvn -q -B -DskipTests package

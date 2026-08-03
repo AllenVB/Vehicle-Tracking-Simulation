@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>FleetSync | Live Tracking</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700&amp;family=Inter:wght@400&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "error": "#ffb4ab",
+                "surface-dim": "#131313",
+                "on-primary-container": "#00422b",
+                "surface-container": "#201f1f",
+                "tertiary": "#ffb3af",
+                "on-surface": "#e5e2e1",
+                "on-secondary-container": "#00452e",
+                "on-tertiary-fixed": "#410005",
+                "background": "#131313",
+                "surface-container-lowest": "#0e0e0e",
+                "on-tertiary": "#650911",
+                "surface-bright": "#393939",
+                "on-secondary": "#003825",
+                "secondary-container": "#00bd85",
+                "surface-variant": "#353534",
+                "surface-container-high": "#2a2a2a",
+                "primary-fixed-dim": "#4edea3",
+                "secondary-fixed-dim": "#45dfa4",
+                "on-background": "#e5e2e1",
+                "inverse-primary": "#006c49",
+                "on-primary": "#003824",
+                "on-error-container": "#ffdad6",
+                "outline-variant": "#3c4a42",
+                "on-tertiary-fixed-variant": "#842225",
+                "outline": "#86948a",
+                "on-primary-fixed": "#002113",
+                "error-container": "#93000a",
+                "tertiary-fixed-dim": "#ffb3af",
+                "primary": "#4edea3",
+                "surface": "#131313",
+                "primary-container": "#10b981",
+                "on-error": "#690005",
+                "on-secondary-fixed-variant": "#005137",
+                "surface-tint": "#4edea3",
+                "secondary": "#45dfa4",
+                "on-tertiary-container": "#711419",
+                "inverse-surface": "#e5e2e1",
+                "tertiary-fixed": "#ffdad7",
+                "surface-container-low": "#1c1b1b",
+                "secondary-fixed": "#68fcbf",
+                "inverse-on-surface": "#313030",
+                "surface-container-highest": "#353534",
+                "primary-fixed": "#6ffbbe",
+                "on-primary-fixed-variant": "#005236",
+                "tertiary-container": "#fc7c78",
+                "on-surface-variant": "#bbcabf",
+                "on-secondary-fixed": "#002114"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+            },
+            "spacing": {
+                "xs": "8px",
+                "md": "24px",
+                "gutter": "24px",
+                "margin-desktop": "48px",
+                "margin-mobile": "16px",
+                "sm": "16px",
+                "xl": "64px",
+                "base": "4px",
+                "lg": "40px"
+            },
+            "fontFamily": {
+                "body-sm": ["Inter"],
+                "headline-lg": ["Hanken Grotesk"],
+                "label-md": ["Geist"],
+                "headline-xl": ["Hanken Grotesk"],
+                "label-sm": ["Geist"],
+                "headline-lg-mobile": ["Hanken Grotesk"],
+                "body-md": ["Inter"]
+            },
+            "fontSize": {
+                "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                "label-md": ["14px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                "headline-xl": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                "label-sm": ["12px", {"lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #131313;
+            color: #e5e2e1;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+        .glass-panel {
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border: 1px solid rgba(78, 222, 163, 0.15);
+        }
+        .speedometer-glow {
+            text-shadow: 0 0 20px rgba(78, 222, 163, 0.4);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .map-gradient-overlay {
+            background: linear-gradient(to bottom, rgba(19, 19, 19, 0.4) 0%, transparent 15%, transparent 85%, rgba(19, 19, 19, 0.8) 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body-md text-body-md select-none">
+<!-- Map Background Section -->
+<div class="fixed inset-0 z-0">
+<div class="w-full h-full bg-surface-dim" data-alt="A sophisticated dark-mode satellite navigation map view of a modern city at night. The map features glowing emerald green route lines and stylized minimalist charcoal buildings. The lighting is low-key with high-contrast neon green accents, matching a premium SaaS dark aesthetic. Wide cinematic angle showing fluid street layouts and traffic flow indicators." data-location="Berlin" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAxYuR2R-hBGIVCTeUs2kJZx1iKvs5NuHPh_Qnxjl0URlGCfucizVOBixxKcrRiOvGBg0PDLOuI7NQXrY3ChvrESl_yvESJfzcvskY3wS4rLDNrUM17t37sE_KTLboNVgEIYE2h28gFfx8WDHJsxXZD3Km3T1CO19B99XjXG04Kno5jYvMCTYczEZo369IqSvvt22WaA88zO6P_GpnQgKNzFICkUBz5NZdXy8faDzzdmLyFYPEAplk7')"></div>
+<div class="absolute inset-0 map-gradient-overlay pointer-events-none"></div>
+</div>
+<!-- Top App Bar (As defined in JSON) -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-margin-mobile h-16 w-full bg-surface/80 dark:bg-surface/80 backdrop-blur-xl border-b border-white/10 shadow-sm">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden border-2 border-primary/20 bg-surface-container-high">
+<img class="w-full h-full object-cover" data-alt="A professional portrait of a delivery driver wearing high-tech logistics apparel. The lighting is moody with subtle emerald green rim lighting against a dark charcoal background. High-quality professional photography with a focus on reliability and modern professional character." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC227FEBHAYod4Lh4bcUl1DfTszKISbAidg6_lcekIG5jJThfdXctorpsI3WGZdz4udWuyA91uF7eMOGYB9DFv2VxDoojxv-fODDCFG1fSV9n8DTAMPLI8nEVtjpyvVcNbnDIu2_dCGt6nzbBLQm3Zals3XNPU7faSzLPFZQJP_gLjszFWarHSXzdHZeEGycSizQeNig-5BTJ8nGdDyX4rFDC-asFicBiwxq6EILnQjR5B6fSaytVOi"/>
+</div>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-bold text-primary">FleetSync</h1>
+</div>
+<button class="hover:opacity-80 transition-opacity active:scale-95 transition-transform text-primary">
+<span class="material-symbols-outlined text-[28px]">settings</span>
+</button>
+</header>
+<!-- Floating Live Status Card -->
+<main class="relative z-10 pt-20 px-margin-mobile flex flex-col gap-4">
+<div class="glass-panel bg-surface-container/60 rounded-xl p-md flex flex-col items-center justify-center animate-in fade-in slide-in-from-top-4 duration-700">
+<div class="flex items-center gap-2 mb-1">
+<span class="relative flex h-3 w-3">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+</span>
+<span class="font-label-md text-label-md text-primary uppercase tracking-widest">Live Status: Active</span>
+</div>
+<div class="flex flex-col items-center gap-1 mt-2">
+<div class="flex items-baseline">
+<span class="font-headline-xl text-headline-xl text-primary font-bold speedometer-glow" id="speed-display">84</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant ml-2">KM/H</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">On route to Hub 04 • 2.4 km left</p>
+</div>
+</div>
+<!-- Secondary Info Cards -->
+<div class="grid grid-cols-2 gap-4">
+<div class="glass-panel bg-surface-container-low/40 rounded-xl p-sm flex items-center gap-3">
+<div class="bg-primary/10 p-2 rounded-lg">
+<span class="material-symbols-outlined text-primary">schedule</span>
+</div>
+<div>
+<p class="font-label-sm text-label-sm text-on-surface-variant uppercase">ETA</p>
+<p class="font-label-md text-label-md text-on-surface">14:45 PM</p>
+</div>
+</div>
+<div class="glass-panel bg-surface-container-low/40 rounded-xl p-sm flex items-center gap-3">
+<div class="bg-primary/10 p-2 rounded-lg">
+<span class="material-symbols-outlined text-primary">distance</span>
+</div>
+<div>
+<p class="font-label-sm text-label-sm text-on-surface-variant uppercase">Trip</p>
+<p class="font-label-md text-label-md text-on-surface">12.8 km</p>
+</div>
+</div>
+</div>
+</main>
+<!-- FAB: Report Issue -->
+<button class="fixed right-6 bottom-24 z-50 flex items-center gap-2 bg-primary text-on-primary px-6 py-4 rounded-full shadow-lg shadow-primary/20 font-label-md text-label-md active:scale-95 transition-transform">
+<span class="material-symbols-outlined">report_problem</span>
+<span>Report Issue</span>
+</button>
+<!-- Bottom Navigation Bar (As defined in JSON) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 pb-safe bg-surface-container/90 dark:bg-surface-container/90 backdrop-blur-xl border-t border-white/5 shadow-[0_-4px_20px_rgba(78,222,163,0.1)] rounded-t-xl">
+<!-- Map (Active) -->
+<a class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-full px-4 py-1 active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">map</span>
+<span class="font-label-sm text-label-sm">Map</span>
+</a>
+<!-- Alerts -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">notifications</span>
+<span class="font-label-sm text-label-sm">Alerts</span>
+</a>
+<!-- Profile -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">person</span>
+<span class="font-label-sm text-label-sm">Profile</span>
+</a>
+</nav>
+<!-- Interaction Script -->
+<script>
+        // Subtle speed variance simulation
+        const speedEl = document.getElementById('speed-display');
+        let currentSpeed = 84;
+        
+        setInterval(() => {
+            const variance = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+            currentSpeed += variance;
+            // Clamp speed for visual demo
+            if(currentSpeed < 80) currentSpeed = 80;
+            if(currentSpeed > 88) currentSpeed = 88;
+            speedEl.textContent = currentSpeed;
+        }, 3000);
+
+        // Simple touch feedback for FAB
+        const fab = document.querySelector('button.fixed');
+        fab.addEventListener('touchstart', () => {
+            fab.classList.add('brightness-90');
+        });
+        fab.addEventListener('touchend', () => {
+            fab.classList.remove('brightness-90');
+        });
+    </script>
+</body></html>

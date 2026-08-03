@@ -21,14 +21,12 @@
     <modules>
         <module>vts-common</module>
         <module>vts-test-support</module>
-        <module>vts-simulator</module>
         <module>vts-ingestion-service</module>
         <module>vts-processing-service</module>
         <module>vts-stream-analytics</module>
         <module>vts-notification-service</module>
         <module>vts-api-gateway</module>
         <module>vts-scheduler-service</module>
-        <module>vts-iett-feed</module>
     </modules>
 
     <properties>
