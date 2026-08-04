@@ -23,8 +23,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * The device-facing messaging endpoints are identified purely by the session token: no token means
- * no vehicle, so nothing can be read or answered. Replies are constrained to the fixed catalogue,
- * and a valid one is both stored (FROM_DRIVER) and broadcast to the operators.
+ * no vehicle, so nothing can be read or sent. Driver-to-operator messages are free text (empty is
+ * rejected), stored FROM_DRIVER and broadcast to the operators.
  */
 class DriverMessageControllerTest {
 
@@ -57,10 +57,10 @@ class DriverMessageControllerTest {
     }
 
     @Test
-    void unknownReplyCodeIs400AndNothingIsStored() {
+    void emptyMessageIs400AndNothingStored() {
         when(sessions.identify("tok")).thenReturn(Optional.of(new DriverSessionService.Identity(7, "devA")));
 
-        ResponseEntity<?> res = controller.reply(new DriverMessageController.ReplyRequest("NOPE"), "tok");
+        ResponseEntity<?> res = controller.message(new DriverMessageController.MessageRequest("   "), "tok");
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         verify(messages, never()).insertDeviceReply(org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString());
@@ -68,14 +68,24 @@ class DriverMessageControllerTest {
     }
 
     @Test
-    void validReplyIsStoredAndBroadcastToOperators() {
+    void messageWithoutSessionIs401() {
+        when(sessions.identify(null)).thenReturn(Optional.empty());
+
+        ResponseEntity<?> res = controller.message(new DriverMessageController.MessageRequest("yoldayim"), null);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verify(messages, never()).insertDeviceReply(org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void validMessageIsStoredAndBroadcastToOperators() {
         when(sessions.identify("tok")).thenReturn(Optional.of(new DriverSessionService.Identity(7, "devA")));
         when(messages.plateOf(7)).thenReturn("06AT2130");
 
-        ResponseEntity<?> res = controller.reply(new DriverMessageController.ReplyRequest("YOLDA"), "tok");
+        ResponseEntity<?> res = controller.message(new DriverMessageController.MessageRequest("  yola ciktim  "), "tok");
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(messages).insertDeviceReply(7, "YANIT", "Yoldayım");
+        verify(messages).insertDeviceReply(7, "MESAJ", "yola ciktim");   // trimmed
         verify(messaging).convertAndSend(eq("/topic/vehicle-messages"), (Object) any());
     }
 

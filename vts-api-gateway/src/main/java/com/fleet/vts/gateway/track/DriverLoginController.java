@@ -27,15 +27,15 @@ public class DriverLoginController {
         this.sessions = sessions;
     }
 
-    public record LoginRequest(String plate, String model, String password, String deviceId) {
+    public record LoginRequest(String plate, String password, String deviceId) {
     }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest req) {
-        if (isBlank(req.plate()) || isBlank(req.model()) || isBlank(req.password()) || isBlank(req.deviceId())) {
+        if (isBlank(req.plate()) || isBlank(req.password()) || isBlank(req.deviceId())) {
             return ResponseEntity.badRequest().body(Map.of("error", "MISSING_FIELDS"));
         }
-        var identity = auth.login(req.plate().trim(), req.model().trim(), req.password(), req.deviceId().trim());
+        var identity = auth.login(req.plate().trim(), req.password(), req.deviceId().trim());
         if (identity.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "BAD_CREDENTIALS"));
         }

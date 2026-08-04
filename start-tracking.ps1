@@ -85,13 +85,13 @@ Start-Process 'http://localhost:8080'
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host " HAZIR." -ForegroundColor Green
-Write-Host " 1) Bilgisayarda acilan haritaya giris yap (admin / password)." -ForegroundColor White
-Write-Host " 2) Sag ustteki QR'i telefonunla tarat." -ForegroundColor White
-Write-Host " 3) Telefonda cikan 2 basamakli kod ile haritadaki kod ayni mi bak, ONAYLA." -ForegroundColor White
+Write-Host " 1) Bilgisayarda harita otomatik acilir (sifre yok)." -ForegroundColor White
+Write-Host " 2) Filo sekmesinden + ile arac ekle ve sifre ata; sag ustteki QR'i telefona tarat." -ForegroundColor White
+Write-Host " 3) Telefonda acilan sayfada plaka + sifre ile giris yap." -ForegroundColor White
 Write-Host " 4) Konum izni ver -> aracin canli haritada gorunur." -ForegroundColor White
 Write-Host ""
-Write-Host " Telefon tracker adresi (elle de acabilirsin):" -ForegroundColor White
-Write-Host "   $publicUrl/tracker.html" -ForegroundColor Yellow
+Write-Host " Surucu adresi (elle de acabilirsin):" -ForegroundColor White
+Write-Host "   $publicUrl/driver.html" -ForegroundColor Yellow
 Write-Host ""
 Write-Host " Bu pencere ACIK kaldigi surece tunel calisir. Durdurmak icin Ctrl+C." -ForegroundColor White
 Write-Host "============================================================" -ForegroundColor Green

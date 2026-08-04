@@ -24,19 +24,17 @@
     return Math.abs(v) + (t != null ? " · eşik " + Math.abs(t) : "");   // fren/ivme: büyüklük göster
   }
 
-  // ── Login ────────────────────────────────────────────────────────────────
-  $("loginBtn").onclick = doLogin;
-  $("password").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
-  async function doLogin() {
-    const err = $("loginErr"); err.textContent = ""; $("loginBtn").disabled = true;
+  // ── Otomatik giriş ─────────────────────────────────────────────────────────
+  // Admin paneli şifre sormaz: token arka planda alınır (backend yine JWT ile korunur).
+  autoLogin();
+  async function autoLogin() {
     try {
       const r = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: $("username").value.trim(), password: $("password").value }) });
+        body: JSON.stringify({ username: "admin", password: "password" }) });
       if (!r.ok) throw 0;
       token = (await r.json()).token;
-      $("login").style.display = "none";
       start();
-    } catch (e) { err.textContent = "Kullanıcı adı veya parola hatalı."; $("loginBtn").disabled = false; }
+    } catch (e) { setTimeout(autoLogin, 2000); }   // gateway hazır olana kadar tekrar dene
   }
 
   async function start() {
@@ -60,7 +58,7 @@
     await seedViolations();
     connectWs();
     initDaySelect();
-    initPairing();
+    initQr();
     initSelActions();
     initPlayback();
     initFleet();
@@ -101,7 +99,7 @@
       el.appendChild(card);
       const o = document.createElement("option"); o.value = v.id; o.textContent = `#${v.trackId} · ${v.plate}`; hv.appendChild(o);
     });
-    if (!list.length) el.innerHTML = '<div class="text-label-sm text-on-surface-variant px-1">Henüz araç yok — telefondan QR ile ekle.</div>';
+    if (!list.length) el.innerHTML = '<div class="text-label-sm text-on-surface-variant px-1">Henüz araç yok — Filo sekmesinden + ile ekle.</div>';
     if (prev && vehicles.has(+prev)) hv.value = prev;
     $("statTotal").textContent = list.length;
     refreshCards();
@@ -187,7 +185,6 @@
   // ── Seçili araç ──────────────────────────────────────────────────────────
   function select(id) {
     selected = id;
-    resetAccessUi();
     refreshCards();
     const ov = $("selOverlay");
     if (id == null) { ov.classList.add("hidden"); followId = null; if (view === "history") clearHistory(); return; }
@@ -231,49 +228,8 @@
     $("selMsgBtn").onclick = () => { $("selMsgBox").classList.toggle("hidden"); $("selMsgInput").focus(); };
     $("selMsgInput").addEventListener("keydown", e => { if (e.key === "Enter") sendMsg(); });
     $("selMsgSend").onclick = sendMsg;
-    $("selAccessBtn").onclick = () => { $("selAccessBox").classList.toggle("hidden"); $("selPwInput").focus(); };
-    $("selPwSet").onclick = setDriverPassword;
-    $("selPwInput").addEventListener("keydown", e => { if (e.key === "Enter") setDriverPassword(); });
   }
 
-  // Seçili araca sürücü şifresi belirle, ardından plaka+model'i dolduran driver.html QR'ı üret.
-  async function setDriverPassword() {
-    if (selected == null) return;
-    const inp = $("selPwInput"), hint = $("selAccessHint"), pw = inp.value.trim();
-    if (pw.length < 4) { hint.textContent = "Şifre en az 4 karakter olmalı."; return; }
-    hint.textContent = "Kaydediliyor…";
-    try {
-      const r = await fetch(`/api/v1/vehicles/${selected}/driver-credential`, { method: "POST",
-        headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
-      if (!r.ok) throw 0;
-      hint.textContent = "✓ Şifre belirlendi. QR'ı sürücünün telefonuna okut.";
-      await showDriverQr();
-    } catch (_) { hint.textContent = "Şifre belirlenemedi."; }
-  }
-
-  async function showDriverQr() {
-    const v = vehicles.get(selected); if (!v) return;
-    let base = location.origin;
-    try { const cfg = await (await fetch("/api/v1/track/config")).json(); if (cfg && cfg.publicUrl) base = cfg.publicUrl.replace(/\/+$/, ""); } catch (_) {}
-    const url = base + "/driver.html?plate=" + encodeURIComponent(v.plate) + "&model=" + encodeURIComponent(v.model || "");
-    const qrEl = $("selAccessQr");
-    if (typeof qrcode === "function") {
-      const qr = qrcode(0, "M"); qr.addData(url); qr.make();
-      qrEl.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2 });
-      qrEl.classList.remove("hidden");
-    }
-    // Telefon GPS'i güvenli bağlam ister: tünel yoksa yalnızca https/localhost'ta konum alınır.
-    if (base === location.origin && location.protocol !== "https:") {
-      $("selAccessHint").textContent += " Not: telefon GPS'i için https tünel gerekir (start-tracking).";
-    }
-  }
-
-  function resetAccessUi() {
-    if (!$("selAccessBox")) return;
-    $("selAccessBox").classList.add("hidden");
-    $("selAccessQr").classList.add("hidden"); $("selAccessQr").innerHTML = "";
-    $("selAccessHint").textContent = ""; $("selPwInput").value = "";
-  }
   async function sendMsg() {
     if (selected == null) return;
     const inp = $("selMsgInput"), ok = $("selMsgOk"), body = inp.value.trim();
@@ -369,6 +325,40 @@
       });
       renderFleet();
     });
+    const nb = $("fleetNewBtn");
+    if (nb) nb.onclick = () => { const f = $("fleetNewForm"); f.classList.toggle("hidden"); if (!f.classList.contains("hidden")) $("nvPlate").focus(); };
+    if ($("nvCreate")) $("nvCreate").onclick = createVehicle;
+    if ($("nvPlate")) $("nvPlate").addEventListener("keydown", e => { if (e.key === "Enter") createVehicle(); });
+  }
+
+  // Admin yeni araç oluşturur (sürücüler oluşturamaz — yalnızca adminin araçlarına girer).
+  async function createVehicle() {
+    const plate = $("nvPlate").value.trim(), make = $("nvMake").value.trim(), model = $("nvModel").value.trim(), msg = $("nvMsg");
+    if (!plate) { msg.textContent = "Plaka gerekli."; return; }
+    msg.textContent = "Oluşturuluyor…";
+    try {
+      const r = await fetch("/api/v1/vehicles", { method: "POST",
+        headers: { ...auth(), "Content-Type": "application/json" },
+        body: JSON.stringify({ plate: plate, make: make || null, model: model || null, type: "CAR" }) });
+      if (!r.ok) { msg.textContent = "Oluşturulamadı (plaka tekil olmalı)."; return; }
+      $("nvPlate").value = ""; $("nvMake").value = ""; $("nvModel").value = "";
+      $("fleetNewForm").classList.add("hidden"); msg.textContent = "";
+      await loadVehicles(); renderFleet();
+    } catch (_) { msg.textContent = "Oluşturulamadı."; }
+  }
+
+  // Filodan araca sürücü şifresi atar (POST /vehicles/{id}/driver-credential).
+  async function setVehiclePassword(id) {
+    const v = vehicles.get(id);
+    const pw = prompt((v ? v.plate : "Araç") + " için sürücü şifresi (en az 4):");
+    if (pw == null) return;
+    if (pw.trim().length < 4) { alert("Şifre en az 4 karakter olmalı."); return; }
+    try {
+      const r = await fetch(`/api/v1/vehicles/${id}/driver-credential`, { method: "POST",
+        headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ password: pw.trim() }) });
+      if (!r.ok) throw 0;
+      toast((v ? v.plate : "Araç") + " için şifre belirlendi.");
+    } catch (_) { alert("Şifre belirlenemedi."); }
   }
   async function loadDashboard() {
     try { const r = await fetch("/api/v1/dashboard/summary", { headers: auth() }); if (r.ok) dash = await r.json(); } catch (_) {}
@@ -415,6 +405,7 @@
       <div class="flex gap-2 relative">
         <button data-map="${id}" class="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-label-sm font-bold text-on-surface active:scale-95 transition-all flex items-center justify-center gap-1"><span class="material-symbols-outlined text-body-md">map</span> Haritada gör</button>
         <button data-msg="${id}" title="Sürücüye uyarı" class="w-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
+        <button data-pw="${id}" title="Sürücü şifresi ata" class="w-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">key</span></button>
       </div>
     </div>`;
   }
@@ -432,6 +423,7 @@
     grid.innerHTML = filtered.map(fleetCard).join("");
     grid.querySelectorAll("[data-map]").forEach(b => b.onclick = () => { const id = +b.dataset.map; toggleView("live"); select(id); });
     grid.querySelectorAll("[data-msg]").forEach(b => b.onclick = () => { const id = +b.dataset.msg; toggleView("live"); select(id); setTimeout(() => { $("selMsgBox").classList.remove("hidden"); $("selMsgInput").focus(); }, 150); });
+    grid.querySelectorAll("[data-pw]").forEach(b => b.onclick = () => setVehiclePassword(+b.dataset.pw));
     renderFleetAlerts();
     updateFleetHealth();
   }
@@ -633,25 +625,23 @@
     }
   };
 
-  // ── QR eşleştirme ────────────────────────────────────────────────────────
-  async function initPairing() {
-    const panel = $("pairPanel"), qrEl = $("pairQr"), hint = $("pairHint"), codeEl = $("pairCode");
+  // ── Sürücü QR'ı ───────────────────────────────────────────────────────────
+  // Tek genel kod: araca özel değil, sadece sürücü sayfasına yönlendirir. Sürücü
+  // tarar, açılan sayfada plaka + şifre girer. Tünel varsa https adresini kullanır
+  // (telefon GPS'i güvenli bağlam ister), yoksa mevcut origin'e düşer.
+  async function initQr() {
+    const panel = $("pairPanel"), qrEl = $("pairQr"), hint = $("pairHint");
     $("pairClose").onclick = () => panel.classList.add("hidden");
     $("pairBtn").onclick = () => panel.classList.toggle("hidden");
-    try {
-      const cfg = await (await fetch("/api/v1/track/config")).json();
-      const base = (cfg.publicUrl || "").replace(/\/+$/, "");
-      const s = await (await fetch("/api/v1/track/pair", { method: "POST" })).json();
-      codeEl.textContent = "••";
-      if (!base) { qrEl.innerHTML = '<div style="color:#333;font-size:11px;padding:16px">Tünel yok.<br><b>start-tracking</b> çalıştır.</div>'; hint.textContent = "Tünel bekleniyor…"; }
-      else if (typeof qrcode === "function") { const qr = qrcode(0, "M"); qr.addData(base + "/tracker.html?pair=" + s.publicId); qr.make(); qrEl.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2 }); hint.textContent = "QR'ı telefonunla tarat"; }
-      panel.classList.remove("hidden");
-      const poll = setInterval(async () => {
-        try { const r = await fetch("/api/v1/track/pair/" + s.sessionId); if (!r.ok) return; const st = await r.json();
-          if (st.status === "SCANNED") { codeEl.textContent = st.code; hint.textContent = "👉 Bu kodu telefona gir"; }
-          else if (st.status === "CONFIRMED") { clearInterval(poll); if (st.code) codeEl.textContent = st.code; hint.textContent = "✓ Onaylandı — araç ekleniyor…"; }
-        } catch (_) {}
-      }, 1500);
-    } catch (_) {}
+    let base = location.origin;
+    try { const cfg = await (await fetch("/api/v1/track/config")).json(); if (cfg && cfg.publicUrl) base = cfg.publicUrl.replace(/\/+$/, ""); } catch (_) {}
+    const url = base + "/driver.html";
+    if (typeof qrcode === "function") {
+      const qr = qrcode(0, "M"); qr.addData(url); qr.make();
+      qrEl.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2 });
+    }
+    hint.textContent = (base === location.origin && location.protocol !== "https:")
+      ? "Telefon GPS'i için https tünel gerekir (start-tracking)."
+      : "QR'ı telefonla tarat → plaka + şifre ile gir.";
   }
 })();

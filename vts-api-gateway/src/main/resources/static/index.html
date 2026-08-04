@@ -194,10 +194,9 @@
 <!-- ── QR pairing ──────────────────────────────────────────────────────────── -->
 <div class="fixed right-6 z-30 glass-panel rounded-2xl p-4 w-56 text-center hidden" id="pairPanel" style="top:12.5rem">
   <button id="pairClose" class="absolute top-2 right-3 text-on-surface-variant hover:text-on-surface">✕</button>
-  <div class="text-label-sm font-bold mb-2 flex items-center justify-center gap-1.5 text-primary"><span class="material-symbols-outlined text-body-md">smartphone</span> Telefonu bağla</div>
+  <div class="text-label-sm font-bold mb-2 flex items-center justify-center gap-1.5 text-primary"><span class="material-symbols-outlined text-body-md">smartphone</span> Sürücü girişi</div>
   <div id="pairQr" class="bg-white rounded-xl p-2 flex justify-center min-h-[148px] items-center"></div>
-  <div class="text-label-sm text-on-surface-variant mt-3">Onay kodu: <b id="pairCode" class="text-primary" style="font-size:22px;letter-spacing:3px">••</b></div>
-  <div class="text-[11px] text-on-surface-variant mt-1" id="pairHint">QR'ı telefonunla tarat</div>
+  <div class="text-[11px] text-on-surface-variant mt-2" id="pairHint">QR'ı telefonla tarat</div>
 </div>
 
 <!-- ── Zoom ────────────────────────────────────────────────────────────────── -->
@@ -235,7 +234,6 @@
   <div class="flex gap-2">
     <button id="selFollow" class="flex-1 py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 transition-all">Bu aracı takip et</button>
     <button id="selMsgBtn" title="Sürücüye uyarı gönder" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
-    <button id="selAccessBtn" title="Sürücü erişimi (şifre + QR)" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">badge</span></button>
   </div>
   <!-- inline message composer -->
   <div id="selMsgBox" class="hidden mt-2 flex gap-2">
@@ -243,16 +241,6 @@
     <button id="selMsgSend" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95"><span class="material-symbols-outlined text-body-md">send</span></button>
   </div>
   <div id="selMsgOk" class="text-primary text-label-sm mt-1.5 text-center h-4"></div>
-  <!-- driver access: set password + QR that opens driver.html prefilled -->
-  <div id="selAccessBox" class="hidden mt-2 pt-2 border-t border-white/10">
-    <div class="text-[10px] uppercase text-on-surface-variant mb-1.5">Sürücü erişimi · plaka + model + şifre</div>
-    <div class="flex gap-2">
-      <input id="selPwInput" type="text" placeholder="Sürücü şifresi (min 4)" maxlength="72" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
-      <button id="selPwSet" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95 whitespace-nowrap">Belirle & QR</button>
-    </div>
-    <div id="selAccessQr" class="bg-white rounded-xl p-2 mt-2 flex justify-center items-center min-h-[120px] hidden"></div>
-    <div id="selAccessHint" class="text-[11px] text-on-surface-variant mt-1.5"></div>
-  </div>
 </div>
 
 <!-- ── Fleet (Araç Listesi) ────────────────────────────────────────────────── -->
@@ -263,12 +251,26 @@
         <h1 class="font-headline-lg text-headline-lg text-on-surface">Araç Filosu</h1>
         <p class="text-on-surface-variant" id="fleetCount">Yükleniyor…</p>
       </div>
-      <div class="flex bg-surface-container rounded-full p-1 border border-white/5" id="fleetFilters">
-        <button data-f="all" class="px-4 py-1.5 rounded-full text-label-sm font-bold bg-primary text-on-primary">Tümü</button>
-        <button data-f="move" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Harekette</button>
-        <button data-f="park" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Durgun</button>
-        <button data-f="off" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Çevrimdışı</button>
+      <div class="flex items-center gap-3">
+        <button id="fleetNewBtn" class="flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary font-bold text-label-sm active:scale-95 emerald-glow"><span class="material-symbols-outlined text-body-md">add</span> Yeni araç</button>
+        <div class="flex bg-surface-container rounded-full p-1 border border-white/5" id="fleetFilters">
+          <button data-f="all" class="px-4 py-1.5 rounded-full text-label-sm font-bold bg-primary text-on-primary">Tümü</button>
+          <button data-f="move" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Harekette</button>
+          <button data-f="park" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Durgun</button>
+          <button data-f="off" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Çevrimdışı</button>
+        </div>
       </div>
+    </div>
+    <!-- Yeni araç formu -->
+    <div id="fleetNewForm" class="hidden glass-panel rounded-2xl p-4 mb-6 flex flex-wrap items-end gap-3">
+      <div class="flex-1 min-w-[140px]"><label class="text-[10px] uppercase text-on-surface-variant block mb-1">Plaka</label>
+        <input id="nvPlate" placeholder="34 ABC 123" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary"></div>
+      <div class="flex-1 min-w-[120px]"><label class="text-[10px] uppercase text-on-surface-variant block mb-1">Marka</label>
+        <input id="nvMake" placeholder="Ford" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary"></div>
+      <div class="flex-1 min-w-[120px]"><label class="text-[10px] uppercase text-on-surface-variant block mb-1">Model</label>
+        <input id="nvModel" placeholder="Transit" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary"></div>
+      <button id="nvCreate" class="px-5 py-2 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95">Oluştur</button>
+      <div id="nvMsg" class="text-label-sm text-on-surface-variant w-full"></div>
     </div>
     <div class="grid grid-cols-12 gap-panel-gap">
       <!-- Card grid -->
@@ -276,7 +278,7 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-panel-gap" id="fleetGrid"></div>
         <div id="fleetEmpty" class="hidden glass-panel rounded-2xl text-center text-on-surface-variant py-16 px-4">
           <span class="material-symbols-outlined text-[40px] text-outline block mb-2">directions_car</span>
-          Henüz araç yok — telefondan QR ile ekle.</div>
+          Henüz araç yok — yukarıdan <b>+ Yeni araç</b> ile ekle.</div>
       </div>
       <!-- Right column -->
       <div class="col-span-12 lg:col-span-4 space-y-panel-gap">
@@ -299,27 +301,6 @@
     </div>
   </div>
 </section>
-
-<!-- ── Login ───────────────────────────────────────────────────────────────── -->
-<div id="login" class="fixed inset-0 z-[60] flex items-center justify-center p-6" style="background:radial-gradient(1000px 600px at 50% -5%,rgba(78,222,163,.10),transparent),#131313">
-  <div class="glass-panel emerald-glow rounded-2xl p-8 w-full max-w-sm anim-in">
-    <div class="flex items-center gap-2 mb-1"><span class="material-symbols-outlined text-primary text-[28px]">hub</span>
-      <h1 class="font-headline-lg text-headline-lg text-primary tracking-tighter">FleetFlow</h1></div>
-    <p class="text-on-surface-variant text-label-sm mb-6">Canlı filo haritasına giriş yap · Mission Control</p>
-    <label class="text-label-sm text-on-surface-variant uppercase">Kullanıcı adı</label>
-    <div class="relative mt-1 mb-3">
-      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-body-md">person</span>
-      <input id="username" value="admin" class="w-full bg-surface-container-lowest border border-white/10 rounded-xl pl-10 pr-3 py-3 text-on-surface focus:outline-none focus:border-primary"></div>
-    <label class="text-label-sm text-on-surface-variant uppercase">Parola</label>
-    <div class="relative mt-1 mb-5">
-      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-body-md">lock</span>
-      <input id="password" type="password" value="password" class="w-full bg-surface-container-lowest border border-white/10 rounded-xl pl-10 pr-3 py-3 text-on-surface focus:outline-none focus:border-primary"></div>
-    <button id="loginBtn" class="w-full py-3 rounded-xl font-bold bg-primary text-on-primary emerald-glow active:scale-[.98] transition-transform">Giriş yap</button>
-    <div id="loginErr" class="text-error text-label-sm mt-3 text-center"></div>
-    <div class="pt-5 mt-5 border-t border-white/10 text-center text-label-sm text-on-surface-variant">
-      Sürücü müsün? Telefonundan <b class="text-primary">QR</b> ile araç ekle.</div>
-  </div>
-</div>
 
 <script src="/app.js"></script>
 </body></html>

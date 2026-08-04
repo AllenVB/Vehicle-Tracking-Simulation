@@ -47,15 +47,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Static live-map UI shell (the data it loads still needs a JWT).
                         .requestMatchers("/", "/index.html", "/app.js").permitAll()
-                        // In-browser phone GPS tracker: the public page, its telemetry ingress,
-                        // and the pairing/confirm + tunnel-config endpoints. A real field device
-                        // cannot carry a JWT, so this surface is open by design; the IMEI still
-                        // has to resolve to a known vehicle downstream, and streaming only starts
-                        // after a human confirms the 2-digit pairing code.
-                        .requestMatchers("/tracker.html", "/tracker.js").permitAll()
-                        // Driver app (plate+model+password sign-in, PWA shell): the page, its
-                        // script, the installable manifest/service-worker and icon. Its login and
-                        // telemetry live under /api/v1/track/** below.
+                        // Driver app (plate+password sign-in, PWA shell): the page, its script, the
+                        // installable manifest/service-worker and icon. Login, telemetry and the
+                        // tunnel-config for its QR all live under /api/v1/track/** below. A field
+                        // phone carries no JWT, so this surface is open by design; the IMEI still has
+                        // to resolve to an admin-created vehicle downstream.
                         .requestMatchers("/driver.html", "/driver.js", "/manifest.webmanifest",
                                 "/sw.js", "/driver-icon.svg").permitAll()
                         .requestMatchers("/api/v1/track", "/api/v1/track/**").permitAll()

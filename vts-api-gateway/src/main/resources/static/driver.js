@@ -46,7 +46,6 @@
   // ── QR / derin bağlantı ile plaka+model ön-doldurma ───────────────────────
   var qs = new URLSearchParams(location.search);
   if (qs.get("plate")) $("plate").value = qs.get("plate");
-  if (qs.get("model")) $("model").value = qs.get("model");
 
   // Pil seviyesini (varsa) izle — telemetriye eklenir.
   if (navigator.getBattery) {
@@ -62,20 +61,21 @@
   // ── Giriş ─────────────────────────────────────────────────────────────────
   $("loginBtn").onclick = doLogin;
   $("password").addEventListener("keydown", function (e) { if (e.key === "Enter") doLogin(); });
+  $("msgSend").onclick = function () { sendText($("msgInput").value); };
+  $("msgInput").addEventListener("keydown", function (e) { if (e.key === "Enter") sendText($("msgInput").value); });
 
   function doLogin() {
     var err = $("loginErr"); err.textContent = "";
     var plate = $("plate").value.trim();
-    var model = $("model").value.trim();
     var password = $("password").value;
-    if (!plate || !model || !password) { err.textContent = "Plaka, model ve şifre gerekli."; return; }
+    if (!plate || !password) { err.textContent = "Plaka ve şifre gerekli."; return; }
     $("loginBtn").disabled = true;
 
     fetch("/api/v1/track/login", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plate: plate, model: model, password: password, deviceId: deviceId })
+      body: JSON.stringify({ plate: plate, password: password, deviceId: deviceId })
     }).then(function (r) {
-      if (r.status === 401) throw new Error("Plaka, model veya şifre hatalı.");
+      if (r.status === 401) throw new Error("Plaka veya şifre hatalı.");
       if (r.status === 409) throw new Error("Bu araçta şu an başka bir cihaz aktif. Biraz sonra tekrar dene.");
       if (!r.ok) throw new Error("Giriş başarısız. Bağlantını kontrol et.");
       return r.json();
@@ -515,21 +515,24 @@
         (opts || []).forEach(function (o) {
           var b = document.createElement("button");
           b.type = "button"; b.textContent = o.label;
-          b.onclick = function () { sendReply(o.code, o.label, b); };
+          b.onclick = function () { sendText(o.label, b); };
           box.appendChild(b);
         });
       }).catch(function () {});
   }
 
-  function sendReply(code, label, btn) {
+  // Sürücü → merkez mesajı. Serbest metin ya da hızlı-yanıt çipi; ikisi de aynı uca gider.
+  function sendText(text, btn) {
+    text = (text || "").trim();
+    if (!text || !session) return;
     if (btn) btn.disabled = true;
-    fetch("/api/v1/track/reply", {
+    fetch("/api/v1/track/message", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Device-Session": session.sessionToken },
-      body: JSON.stringify({ code: code })
+      body: JSON.stringify({ text: text })
     }).then(function (r) {
       if (r.status === 401) return sessionLost();
-      if (r.ok) appendMsg({ body: label }, true);
+      if (r.ok) { appendMsg({ body: text }, true); $("msgInput").value = ""; }
     }).catch(function () {}).then(function () { if (btn) btn.disabled = false; });
   }
 

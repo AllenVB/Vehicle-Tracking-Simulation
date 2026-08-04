@@ -74,6 +74,9 @@
     .replies button { width: auto; margin-top: 0; padding: 12px 14px; font-size: 14px; flex: 1 1 42%;
       background: #12324a; color: var(--text); border: 1px solid var(--line); font-weight: 600; }
     .replies button:active { background: #16405e; }
+    .compose { display: flex; gap: 8px; margin-top: 10px; }
+    .compose input { flex: 1; }
+    .compose button { width: auto; margin-top: 0; padding: 0 18px; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -83,11 +86,9 @@
     <!-- ── Giriş ─────────────────────────────────────────────── -->
     <section id="loginView" class="card">
       <h2 style="margin:2px 0 4px">Araca giriş</h2>
-      <p class="note" style="text-align:left;margin:0">Aracın plakası, modeli ve şifresiyle giriş yap. QR okuttuysan plaka ve model önceden dolar.</p>
+      <p class="note" style="text-align:left;margin:0">Aracın plakası ve şifresiyle giriş yap.</p>
       <label for="plate">Plaka</label>
-      <input id="plate" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="34 GPS 001">
-      <label for="model">Model</label>
-      <input id="model" autocomplete="off" placeholder="Canlı GPS">
+      <input id="plate" inputmode="text" autocapitalize="characters" autocomplete="off" placeholder="34 ABC 123">
       <label for="password">Şifre</label>
       <input id="password" type="password" autocomplete="current-password" placeholder="••••">
       <button id="loginBtn">Giriş yap</button>
@@ -113,11 +114,13 @@
         <div class="metric"><div class="k">Gönderilen</div><div class="v" id="mSent">0</div></div>
         <div class="metric"><div class="k">Bekleyen (çevrimdışı)</div><div class="v" id="mQueued">0</div></div>
       </div>
-      <div class="sectionLabel">Merkezden mesajlar</div>
-      <div id="msgList" class="msgList"><div class="note" style="text-align:left">Henüz mesaj yok.</div></div>
-
-      <div class="sectionLabel">Hızlı yanıt</div>
+      <div class="sectionLabel">Mesajlar</div>
+      <div id="msgList" class="msgList"><div class="note" style="text-align:left">Merkezle mesajlaşman burada görünür.</div></div>
       <div id="replies" class="replies"></div>
+      <div class="compose">
+        <input id="msgInput" autocomplete="off" placeholder="Merkeze mesaj yaz…" maxlength="500">
+        <button id="msgSend">Gönder</button>
+      </div>
 
       <p id="hint" class="note" style="margin-top:14px"></p>
       <button id="stopBtn" class="ghost">Sürüşü bitir</button>

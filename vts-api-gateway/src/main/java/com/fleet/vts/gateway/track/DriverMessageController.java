@@ -75,31 +75,41 @@ public class DriverMessageController {
                 .toList();
     }
 
-    public record ReplyRequest(String code) {
+    public record MessageRequest(String text) {
     }
 
-    @PostMapping("/reply")
-    public ResponseEntity<?> reply(@RequestBody ReplyRequest req,
-                                   @RequestHeader(value = "X-Device-Session", required = false) String session) {
+    /**
+     * Driver to operator. Free text (not a fixed catalogue): the quick-reply chips are only a
+     * convenience that fill this same field. Trimmed, length-capped, and delivered to the operators
+     * on {@code /topic/vehicle-messages} like any other event.
+     */
+    @PostMapping("/message")
+    public ResponseEntity<?> message(@RequestBody MessageRequest req,
+                                     @RequestHeader(value = "X-Device-Session", required = false) String session) {
         Optional<DriverSessionService.Identity> id = sessions.identify(session);
         if (id.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "NO_SESSION"));
         }
-        String label = req == null ? null : REPLIES.get(req.code());
-        if (label == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "UNKNOWN_REPLY"));
+        String text = req == null || req.text() == null ? "" : req.text().trim();
+        if (text.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "EMPTY"));
+        }
+        if (text.length() > MAX_TEXT) {
+            text = text.substring(0, MAX_TEXT);
         }
         long vehicleId = id.get().vehicleId();
-        messages.insertDeviceReply(vehicleId, "YANIT", label);
+        messages.insertDeviceReply(vehicleId, "MESAJ", text);
 
         Map<String, Object> msg = new LinkedHashMap<>();
         msg.put("vehicleId", vehicleId);
         msg.put("plate", messages.plateOf(vehicleId));
-        msg.put("category", "YANIT");
-        msg.put("body", label);
+        msg.put("category", "MESAJ");
+        msg.put("body", text);
         msg.put("direction", "FROM_DRIVER");
         msg.put("at", Instant.now().toString());
         messaging.convertAndSend("/topic/vehicle-messages", msg);   // operatörlere anlık bildirim
         return ResponseEntity.ok(msg);
     }
+
+    private static final int MAX_TEXT = 500;
 }

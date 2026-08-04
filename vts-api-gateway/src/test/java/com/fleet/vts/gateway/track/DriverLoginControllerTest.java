@@ -13,9 +13,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * The driver sign-in orchestration: reject incomplete requests (400), keep all three credential
- * failures indistinguishable (401), block a login while another device holds the vehicle (409),
- * and on success hand back the IMEI to stream under plus the session token.
+ * The driver sign-in orchestration: reject incomplete requests (400), keep credential failures
+ * indistinguishable (401), block a login while another device holds the vehicle (409), and on
+ * success hand back the IMEI to stream under plus the session token. Login is plate + password.
  */
 class DriverLoginControllerTest {
 
@@ -26,37 +26,37 @@ class DriverLoginControllerTest {
     private static final DriverAuthService.DriverIdentity ID =
             new DriverAuthService.DriverIdentity(111L, 1L, "904184072081054", "06AT2130", "Citroen", "C4");
 
-    private static DriverLoginController.LoginRequest req(String plate, String model, String pw, String dev) {
-        return new DriverLoginController.LoginRequest(plate, model, pw, dev);
+    private static DriverLoginController.LoginRequest req(String plate, String pw, String dev) {
+        return new DriverLoginController.LoginRequest(plate, pw, dev);
     }
 
     @Test
     void missingFieldsAre400() {
-        ResponseEntity<?> res = controller.login(req("06AT2130", "C4", "  ", "devA"));
+        ResponseEntity<?> res = controller.login(req("06AT2130", "  ", "devA"));
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
     void badCredentialsAre401() {
-        when(auth.login("06AT2130", "C4", "1234", "devA")).thenReturn(Optional.empty());
-        ResponseEntity<?> res = controller.login(req("06AT2130", "C4", "1234", "devA"));
+        when(auth.login("06AT2130", "1234", "devA")).thenReturn(Optional.empty());
+        ResponseEntity<?> res = controller.login(req("06AT2130", "1234", "devA"));
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
     void vehicleAlreadyInUseIs409() {
-        when(auth.login("06AT2130", "C4", "1234", "devA")).thenReturn(Optional.of(ID));
+        when(auth.login("06AT2130", "1234", "devA")).thenReturn(Optional.of(ID));
         when(sessions.tryLogin(111L, "devA")).thenReturn(Optional.empty());
-        ResponseEntity<?> res = controller.login(req("06AT2130", "C4", "1234", "devA"));
+        ResponseEntity<?> res = controller.login(req("06AT2130", "1234", "devA"));
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test
     void successReturnsImeiAndSessionToken() {
-        when(auth.login("06AT2130", "C4", "1234", "devA")).thenReturn(Optional.of(ID));
+        when(auth.login("06AT2130", "1234", "devA")).thenReturn(Optional.of(ID));
         when(sessions.tryLogin(111L, "devA")).thenReturn(Optional.of("tok-123"));
 
-        ResponseEntity<?> res = controller.login(req("06AT2130", "C4", "1234", "devA"));
+        ResponseEntity<?> res = controller.login(req("06AT2130", "1234", "devA"));
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(res.getBody()).isInstanceOf(Map.class);
