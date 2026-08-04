@@ -69,15 +69,16 @@
     toggleView("live");
   }
 
-  // ── Araçlar (sadece QR ile eklenen) ──────────────────────────────────────
+  // ── Araçlar (adminin oluşturduğu tüm filo) ────────────────────────────────
   async function loadVehicles() {
-    const r = await fetch("/api/v1/vehicles/tracked", { headers: auth() });
+    const r = await fetch("/api/v1/vehicles", { headers: auth() });
     if (!r.ok) return;
     const list = await r.json();
     vehicles.clear();
     const el = $("vehicleList"), hv = $("histVehicle"), prev = hv.value;
     el.innerHTML = ""; hv.innerHTML = "";
-    list.forEach(v => {
+    list.forEach((v, i) => {
+      v.trackId = i + 1;
       vehicles.set(v.id, v);
       const model = esc([v.make, v.model].filter(Boolean).join(" ") || "Telefon GPS");
       const card = document.createElement("div");
@@ -360,6 +361,23 @@
       toast((v ? v.plate : "Araç") + " için şifre belirlendi.");
     } catch (_) { alert("Şifre belirlenemedi."); }
   }
+
+  // Aracı ve ona bağlı tüm kayıtları kalıcı siler (onay ister).
+  async function deleteVehicle(id) {
+    const v = vehicles.get(id);
+    var ok = confirm((v ? v.plate + " — " : "") + "bu aracı kalıcı olarak silmek istediğinize emin misiniz?\n\n" +
+      "Araca ait tüm kayıtlar (konum geçmişi, mesajlar, sürücü şifresi) geri alınamaz şekilde silinir.");
+    if (!ok) return;
+    try {
+      const r = await fetch(`/api/v1/vehicles/${id}`, { method: "DELETE", headers: auth() });
+      if (!r.ok) throw 0;
+      if (selected === id) select(null);
+      vehicles.delete(id); pos.delete(id);
+      const m = markers.get(id); if (m && cluster) { cluster.removeLayer(m); markers.delete(id); }
+      toast((v ? v.plate : "Araç") + " kalıcı olarak silindi.");
+      await loadVehicles(); renderFleet();
+    } catch (_) { alert("Araç silinemedi."); }
+  }
   async function loadDashboard() {
     try { const r = await fetch("/api/v1/dashboard/summary", { headers: auth() }); if (r.ok) dash = await r.json(); } catch (_) {}
     updateFleetHealth();
@@ -406,6 +424,7 @@
         <button data-map="${id}" class="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-label-sm font-bold text-on-surface active:scale-95 transition-all flex items-center justify-center gap-1"><span class="material-symbols-outlined text-body-md">map</span> Haritada gör</button>
         <button data-msg="${id}" title="Sürücüye uyarı" class="w-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
         <button data-pw="${id}" title="Sürücü şifresi ata" class="w-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">key</span></button>
+        <button data-del="${id}" title="Aracı kalıcı sil" class="w-10 flex items-center justify-center bg-error/10 hover:bg-error/20 rounded-xl border border-error/20 text-error active:scale-95"><span class="material-symbols-outlined text-body-md">delete</span></button>
       </div>
     </div>`;
   }
@@ -424,6 +443,7 @@
     grid.querySelectorAll("[data-map]").forEach(b => b.onclick = () => { const id = +b.dataset.map; toggleView("live"); select(id); });
     grid.querySelectorAll("[data-msg]").forEach(b => b.onclick = () => { const id = +b.dataset.msg; toggleView("live"); select(id); setTimeout(() => { $("selMsgBox").classList.remove("hidden"); $("selMsgInput").focus(); }, 150); });
     grid.querySelectorAll("[data-pw]").forEach(b => b.onclick = () => setVehiclePassword(+b.dataset.pw));
+    grid.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteVehicle(+b.dataset.del));
     renderFleetAlerts();
     updateFleetHealth();
   }

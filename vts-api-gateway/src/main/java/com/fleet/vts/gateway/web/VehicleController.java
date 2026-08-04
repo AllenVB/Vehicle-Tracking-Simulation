@@ -41,13 +41,15 @@ public class VehicleController {
     private final VehicleMapper mapper;
     private final JdbcTemplate jdbc;
     private final ReportingQueryRepository reporting;
+    private final VehicleDeletionService deletion;
 
     public VehicleController(VehicleRepository repository, VehicleMapper mapper, JdbcTemplate jdbc,
-                            ReportingQueryRepository reporting) {
+                            ReportingQueryRepository reporting, VehicleDeletionService deletion) {
         this.repository = repository;
         this.mapper = mapper;
         this.jdbc = jdbc;
         this.reporting = reporting;
+        this.deletion = deletion;
     }
 
     /** Phone-enrolled vehicles only (QR-added), numbered 1..N — the left bar's list. */
@@ -143,12 +145,17 @@ public class VehicleController {
                 "error", "UNKNOWN_VEHICLE_TYPE", "type", badType, "allowed", allowed));
     }
 
+    /**
+     * Hard-delete: removes the vehicle and every row that references it (device, trips, telemetry,
+     * violations, messages, the driver password…) in one transaction — see
+     * {@link VehicleDeletionService}. Permanent and irreversible; ADMIN only.
+     */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id) {
         return repository.findByIdAndTenantId(id, CurrentUser.tenantId(jwt))
                 .map(vehicle -> {
-                    repository.delete(vehicle);
+                    deletion.purge(vehicle.getId());
                     return ResponseEntity.noContent().<Void>build();
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
