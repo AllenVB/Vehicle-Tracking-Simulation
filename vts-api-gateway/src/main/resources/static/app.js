@@ -10,6 +10,7 @@
   const recentVios = [];        // {vehicleId,ruleCode,value,threshold,occurredAt}
   let fleetFilter = "all", dash = null;
   const STALE_MS = 30000, VIO_SPEED = 82, VIO_DROP = 40, STOP_SPEED = 3, MIN_STOP_SEC = 120, STOP_RADIUS_M = 40;
+  const RED_WINDOW_MS = 120000;   // 6b: bir nokta, gerçek hız ihlalinin ±2 dk'sındaysa kırmızı
 
   const $ = id => document.getElementById(id);
   const auth = () => ({ Authorization: "Bearer " + token });
@@ -396,6 +397,7 @@
 
   // ── Geçmiş rota (gün seçici + playback) ──────────────────────────────────
   let histLayer = null, histVeh = null, histDay = 0, histPrev = null, histPts = [];
+  let histVios = [], speedVios = [];   // 6b: seçili araç+günün gerçek ihlalleri / hız ihlalleri
   function currentDay() { const el = $("daySelect"); return el ? (parseInt(el.value, 10) || 0) : 0; }
   function dayLabel(d) { return new Date(Date.now() - d * 86400000).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", weekday: "short" }); }
   function initDaySelect() {
@@ -416,12 +418,26 @@
   }
   function histAdd(prev, cur) {
     if (!histLayer) return;
-    const reasons = violations(prev, cur), red = reasons.length > 0;
+    const vio = speedVioAt(cur.ts), red = !!vio;   // 6b: renk gerçek backend hız ihlaline göre
     L.circleMarker([cur.lat, cur.lon], { radius: red ? 4 : 2.5, color: red ? "#ff4d4d" : "#3b82f6", weight: 1, fillColor: red ? "#ff4d4d" : "#3b82f6", fillOpacity: .85, interactive: red }).addTo(histLayer);
     if (prev) {
       const seg = L.polyline([[prev.lat, prev.lon], [cur.lat, cur.lon]], red ? { color: "#ff4d4d", weight: 5, opacity: .95 } : { color: "#3b82f6", weight: 3, opacity: .7 }).addTo(histLayer);
-      if (red) seg.bindTooltip("⚠ İhlal — " + reasons.join(" · "), { sticky: true });
+      if (red) seg.bindTooltip(speedVioLabel(vio), { sticky: true });
     }
+  }
+  // Bu noktanın zamanına (±RED_WINDOW_MS) denk gelen gerçek hız ihlali, yoksa null.
+  function speedVioAt(tsStr) {
+    const t = Date.parse(tsStr);
+    if (isNaN(t)) return null;
+    for (let i = 0; i < speedVios.length; i++) {
+      if (Math.abs(t - speedVios[i].ms) <= RED_WINDOW_MS) return speedVios[i];
+    }
+    return null;
+  }
+  function speedVioLabel(v) {
+    const rule = ruleLabel(v.ruleCode);
+    if (v.value == null) return "⚠ " + rule;
+    return "⚠ " + rule + " — " + Math.round(v.value) + " km/s" + (v.threshold != null ? " · limit " + Math.round(v.threshold) : "");
   }
   function haversine(a, b) {
     const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLon = (b.lon - a.lon) * Math.PI / 180;
@@ -458,22 +474,39 @@
     });
   }
   async function fetchDay(id, d) { const r = await fetch(`/api/v1/vehicles/${id}/track?daysAgo=${d}`, { headers: auth() }); return r.ok ? await r.json() : []; }
+  // 6b: gösterilen noktaların zaman aralığındaki gerçek ihlaller (mevcut /violations ucundan).
+  async function fetchDayViolations(id, pts) {
+    const times = pts.map(p => Date.parse(p.ts)).filter(t => !isNaN(t));
+    if (!times.length) return [];
+    const from = new Date(Math.min(...times) - 3e5).toISOString();
+    const to = new Date(Math.max(...times) + 3e5).toISOString();
+    try {
+      const r = await fetch(`/api/v1/violations?vehicleId=${id}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=200`, { headers: auth() });
+      if (!r.ok) return [];
+      const page = await r.json();
+      const items = (page && (page.items || page.content)) || [];
+      return items.map(v => ({ ms: Date.parse(v.occurredAt), ruleCode: v.ruleCode || v.type, value: v.value, threshold: v.threshold }));
+    } catch (_) { return []; }
+  }
   async function loadHistory(id, day, autoFind) {
     clearHistory(); histVeh = id; histDay = day;
     let pts = await fetchDay(id, day);
     if (autoFind && !pts.length) { for (let d = day + 1; d <= 6; d++) { const p2 = await fetchDay(id, d); if (p2.length) { day = d; histDay = d; pts = p2; $("daySelect").value = String(d); break; } } }
     if (id !== histVeh) return;
+    histVios = await fetchDayViolations(id, pts);            // 6b: gerçek ihlaller (çizimden önce)
+    if (id !== histVeh) return;                              // await sırasında seçim değişebilir
+    speedVios = histVios.filter(v => (v.ruleCode || "").indexOf("SPEED") >= 0);
     histLayer = L.layerGroup().addTo(map);
     histPts = pts;
     let prev = null; pts.forEach(p => { histAdd(prev, p); prev = p; }); histPrev = prev;
     markStops(pts);
     if (pts.length) map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])).pad(0.2));
-    const v = vehicles.get(id), s = summarize(pts);
+    const v = vehicles.get(id), s = summarize(pts), realVio = histVios.length;
     $("sumDistance").textContent = s.dist.toFixed(1);
-    $("sumViolations").textContent = String(s.vio).padStart(2, "0");
+    $("sumViolations").textContent = String(realVio).padStart(2, "0");
     $("sumStops").textContent = String(s.stops).padStart(2, "0");
     $("histInfo").innerHTML = `<b class="text-on-surface">#${v ? v.trackId : "?"} ${v ? esc(v.plate) : ""}</b><br>${dayLabel(day)} · <b>${pts.length}</b> nokta` +
-      (pts.length ? `<br><span class="text-primary">${s.dist.toFixed(1)} km</span> · ${s.vio} ihlal · ${s.stops} durak` : '<br><span class="text-error">Bu gün için kayıt yok.</span>');
+      (pts.length ? `<br><span class="text-primary">${s.dist.toFixed(1)} km</span> · ${realVio} ihlal · ${s.stops} durak` : '<br><span class="text-error">Bu gün için kayıt yok.</span>');
     resetPlayback();
   }
   function extendHistory(p) {
@@ -482,7 +515,7 @@
     if (histPrev && histPrev.lat === cur.lat && histPrev.lon === cur.lon) return;
     histAdd(histPrev, cur); histPrev = cur; histPts.push(cur);
   }
-  function clearHistory() { stopPlayback(); if (histLayer) map.removeLayer(histLayer); histLayer = null; histVeh = null; histPrev = null; histPts = []; }
+  function clearHistory() { stopPlayback(); if (histLayer) map.removeLayer(histLayer); histLayer = null; histVeh = null; histPrev = null; histPts = []; histVios = []; speedVios = []; }
 
   function exportCsv() {
     if (!histPts.length) return;
