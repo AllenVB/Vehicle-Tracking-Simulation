@@ -8,7 +8,7 @@
   const markers = new Map();    // id -> L.marker
   const tripCache = new Map();  // id -> {distanceKm, ecoScore, score}
   const recentVios = [];        // {vehicleId,ruleCode,value,threshold,occurredAt}
-  let fleetFilter = "all", dash = null;
+  let fleetFilter = "all", dash = null, cluster = null;
   const STALE_MS = 30000, VIO_SPEED = 82, VIO_DROP = 40, STOP_SPEED = 3, MIN_STOP_SEC = 120, STOP_RADIUS_M = 40;
   const RED_WINDOW_MS = 120000;   // 6b: bir nokta, gerçek hız ihlalinin ±2 dk'sındaysa kırmızı
 
@@ -42,6 +42,17 @@
   async function start() {
     map = L.map("map", { zoomControl: false, attributionControl: false }).setView([41.02, 29.0], 11);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+    // Marker kümeleme: yakın araçlar zoom-out'ta tek daireye toplanır (üzerinde adet),
+    // zoom ≥16'da tek tek gösterilir. Küme ikonu emerald temaya uygun.
+    cluster = L.markerClusterGroup({
+      maxClusterRadius: 50, showCoverageOnHover: false, disableClusteringAtZoom: 16,
+      iconCreateFunction: cl => {
+        const n = cl.getChildCount();
+        return L.divIcon({ className: "", iconSize: [36, 36], html:
+          `<div style="background:rgba(78,222,163,.92);color:#003824;font-weight:800;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid #131313;box-shadow:0 0 10px rgba(78,222,163,.6)">${n}</div>` });
+      }
+    });
+    map.addLayer(cluster);
     window._map = map;
     window._locate = fitAll;
     await loadVehicles();
@@ -121,6 +132,7 @@
     updateStats();
     if (followId != null && view === "live") { const fp = pos.get(followId); if (fp) map.panTo([fp.lat, fp.lon], { animate: true }); }
     refreshCards();
+    if (cluster && view !== "history") cluster.refreshClusters();   // taşınan marker'ları yeniden kümele
   }
   function isStale(p) { if (!p || !p.ts) return false; const t = Date.parse(p.ts); return !isNaN(t) && (Date.now() - t) > STALE_MS; }
   function liveCount() { let n = 0; pos.forEach(p => { if (!isStale(p)) n++; }); return n; }
@@ -147,11 +159,10 @@
     const icon = L.divIcon({ className: "", iconSize: [16, 16], iconAnchor: [8, 8],
       html: `<div style="background:${c};width:14px;height:14px;border-radius:50%;border:3px solid #131313;${live ? "box-shadow:0 0 8px rgba(78,222,163,.7);" : ""}"></div>` });
     let m = markers.get(p.vehicleId);
-    if (!m) { m = L.marker([p.lat, p.lon], { icon }).addTo(map); m.on("click", () => select(p.vehicleId)); markers.set(p.vehicleId, m); }
+    if (!m) { m = L.marker([p.lat, p.lon], { icon }); m.on("click", () => select(p.vehicleId)); markers.set(p.vehicleId, m); if (cluster) cluster.addLayer(m); }
     else { m.setLatLng([p.lat, p.lon]); m.setIcon(icon); }
-    m.setOpacity(view === "history" ? 0 : 1);
   }
-  function sweep() { pos.forEach(p => drawMarker(p)); updateStats(); refreshCards(); if (selected != null) updateOverlay(); if (view === "fleet") renderFleet(); }
+  function sweep() { pos.forEach(p => drawMarker(p)); updateStats(); refreshCards(); if (cluster && view !== "history") cluster.refreshClusters(); if (selected != null) updateOverlay(); if (view === "fleet") renderFleet(); }
   function fitAll() {
     const pts = []; pos.forEach(p => { if (p.lat != null) pts.push([p.lat, p.lon]); });
     if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.25));
@@ -580,10 +591,10 @@
     if (isFleet) $("selOverlay").classList.add("hidden");
     if (v === "live") {
       hist.classList.add("hidden-content"); setTimeout(() => live.classList.remove("hidden-content"), 100);
-      clearHistory(); markers.forEach(m => m.setOpacity(1));
+      clearHistory(); if (cluster) map.addLayer(cluster);
     } else if (v === "history") {
       live.classList.add("hidden-content"); setTimeout(() => hist.classList.remove("hidden-content"), 100);
-      markers.forEach(m => m.setOpacity(0));
+      if (cluster) map.removeLayer(cluster);
       const vid = selected != null ? selected : (+$("histVehicle").value || null);
       if (vid != null) { $("histVehicle").value = vid; loadHistory(vid, currentDay(), true); }
       else $("histInfo").textContent = "Soldan bir araç ve gün seç.";
