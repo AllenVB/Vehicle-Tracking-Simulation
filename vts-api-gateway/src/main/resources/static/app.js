@@ -102,6 +102,7 @@
     stomp.onConnect = () => { setConn(true);
       stomp.subscribe("/topic/fleet/live", m => apply(JSON.parse(m.body).vehicles || []));
       stomp.subscribe("/topic/violations", m => onViolation(JSON.parse(m.body), true));
+      stomp.subscribe("/topic/vehicle-messages", m => onDriverMessage(JSON.parse(m.body)));
     };
     stomp.onWebSocketClose = () => setConn(false);
     stomp.activate();
@@ -254,11 +255,52 @@
     const when = e.occurredAt ? new Date(e.occurredAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "şimdi";
     item.innerHTML = `<div class="flex-1 min-w-0"><div class="text-label-sm font-bold text-on-surface truncate">${v ? "#" + v.trackId + " " + esc(v.plate) : "Araç"} · ${esc(ruleLabel(e.ruleCode))}</div>
       <div class="text-[10px] text-on-surface-variant">${detail} · ${when}</div></div>`;
+    if (v) { item.style.cursor = "pointer"; item.onclick = () => { window.toggleView("live"); select(e.vehicleId); }; }
     if (isLive) feed.prepend(item); else feed.appendChild(item);
     while (feed.children.length > 30) feed.removeChild(feed.lastChild);
     recentVios.unshift({ vehicleId: e.vehicleId, ruleCode: e.ruleCode, value: e.value, threshold: e.threshold, occurredAt: e.occurredAt || new Date().toISOString() });
     while (recentVios.length > 15) recentVios.pop();
     if (view === "fleet") renderFleetAlerts();
+  }
+
+  // Sürücünün tek-tık yanıtı (1c). Operatörün kendi gönderdiği uyarı (TO_DRIVER) burada
+  // tekrar gösterilmez; yalnızca sürücüden gelen (FROM_DRIVER) "yeni olay" sayılır.
+  function onDriverMessage(e) {
+    if (!e || e.direction !== "FROM_DRIVER") return;
+    const feed = $("vioFeed");
+    if (!feed.querySelector(".vitem")) feed.innerHTML = "";
+    const v = vehicles.get(e.vehicleId);
+    const when = e.at ? new Date(e.at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "şimdi";
+    const item = document.createElement("div");
+    item.className = "vitem flex gap-2 items-start p-2 rounded-lg border-l-2 anim-in";
+    item.style.borderLeftColor = "#4edea3";
+    item.style.background = "rgba(78,222,163,.10)";
+    item.style.cursor = "pointer";
+    item.innerHTML = `<span class="material-symbols-outlined text-primary text-body-md" style="font-variation-settings:'FILL' 1">chat</span>
+      <div class="flex-1 min-w-0"><div class="text-label-sm font-bold text-on-surface truncate">${v ? "#" + v.trackId + " " + esc(v.plate) : "Araç"} · sürücü</div>
+      <div class="text-[10px] text-on-surface-variant truncate">${esc(e.body)} · ${when}</div></div>`;
+    item.onclick = () => { window.toggleView("live"); select(e.vehicleId); };
+    feed.prepend(item);
+    while (feed.children.length > 30) feed.removeChild(feed.lastChild);
+    toast((v ? "#" + v.trackId + " " + esc(v.plate) : "Sürücü") + ": " + esc(e.body));
+  }
+
+  // Kısa süreli, tıklanınca kapanan bildirim balonu (sürücü yanıtı için).
+  let toastTimer = null;
+  function toast(html) {
+    let el = $("ffToast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "ffToast";
+      el.className = "fixed top-20 left-1/2 -translate-x-1/2 z-[70] glass-panel px-4 py-2.5 rounded-xl text-body-md text-on-surface anim-in flex items-center gap-2 cursor-pointer";
+      el.style.borderLeft = "3px solid #4edea3";
+      el.onclick = () => { el.style.display = "none"; };
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `<span class="material-symbols-outlined text-primary text-body-md" style="font-variation-settings:'FILL' 1">chat</span><span>${html}</span>`;
+    el.style.display = "flex";
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.style.display = "none"; }, 5000);
   }
 
   // ── Filo (Araç Listesi) ──────────────────────────────────────────────────
