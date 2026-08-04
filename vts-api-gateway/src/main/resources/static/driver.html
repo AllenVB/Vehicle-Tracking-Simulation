@@ -100,6 +100,13 @@
         <span id="statusPill" class="pill"><span class="beat"></span><span id="statusText">Hazırlanıyor…</span></span>
         <span class="plate" id="platePill"></span>
       </div>
+
+      <div id="permBanner" class="hidden" style="margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--danger);background:rgba(255,93,108,.10)">
+        <div style="font-weight:700;color:var(--danger)">Konum izni gerekli</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:3px">Sürüşü paylaşmak için tarayıcı/telefon ayarlarından bu siteye konum erişimi ver, sonra "Tekrar dene"ye bas.</div>
+        <button id="permRetry" style="margin-top:10px">Konuma izin ver / Tekrar dene</button>
+      </div>
+
       <div class="grid">
         <div class="metric" id="speedTile"><div class="k">Hız</div><div class="v"><span id="mSpeed">–</span><span class="u"> km/s</span></div><div class="k" id="mLimit" style="margin-top:6px;color:var(--muted)">Limit: –</div></div>
         <div class="metric"><div class="k">GPS doğruluğu</div><div class="v"><span id="mAcc">–</span><span class="u"> m</span></div></div>

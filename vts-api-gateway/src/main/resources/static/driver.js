@@ -127,6 +127,14 @@
     $("password").value = "";
   };
 
+  // Konum izni reddedildiyse: ayarlardan izin verip yeniden dene.
+  $("permRetry").onclick = function () {
+    showPerm(false);
+    stopGps();
+    setStatus("wait", "Konum bekleniyor…");
+    startGps();
+  };
+
   function startGps() {
     if (!navigator.geolocation) { setStatus("off", "Bu cihaz konum desteklemiyor."); return; }
     watchId = navigator.geolocation.watchPosition(onPos, onErr, {
@@ -140,10 +148,13 @@
 
   function onErr(e) {
     setStatus("off", e.code === 1 ? "Konum izni verilmedi." : "Konum alınamıyor.");
+    showPerm(true);
   }
+  function showPerm(show) { $("permBanner").classList.toggle("hidden", !show); }
 
   function onPos(pos) {
     var c = pos.coords;
+    showPerm(false);
     var now = Date.now();
     var speedKmh = speedFrom(c, pos.timestamp);
 
