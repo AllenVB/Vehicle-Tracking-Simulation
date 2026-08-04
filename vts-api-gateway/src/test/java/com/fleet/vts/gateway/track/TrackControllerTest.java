@@ -7,6 +7,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -60,5 +62,40 @@ class TrackControllerTest {
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         server.verify();   // no forward was attempted
+    }
+
+    @Test
+    void forwardsAnOfflineBacklogAsOneBatch() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        DriverSessionService sessions = mock(DriverSessionService.class);
+        when(sessions.refresh("live-token")).thenReturn(true);
+        TrackController controller = new TrackController(builder.build(), sessions);
+
+        server.expect(requestTo("/api/v1/telemetry/batch"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[1].lat").value(41.020))
+                .andRespond(withStatus(HttpStatus.ACCEPTED));
+
+        TrackRequest second = new TrackRequest("990000000000001", null, 41.020, 28.980, 30, 80, 6.0, null);
+        ResponseEntity<Void> res = controller.ingestBatch(List.of(fix, second), "live-token");
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        server.verify();
+    }
+
+    @Test
+    void batchIsRefusedAndNotForwardedWhenTheSessionWasTakenOver() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        DriverSessionService sessions = mock(DriverSessionService.class);
+        when(sessions.refresh("stale-token")).thenReturn(false);
+        TrackController controller = new TrackController(builder.build(), sessions);
+
+        ResponseEntity<Void> res = controller.ingestBatch(List.of(fix), "stale-token");
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        server.verify();   // taken-over phone's backlog is not forwarded
     }
 }

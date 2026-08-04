@@ -61,4 +61,29 @@ public class TrackController {
                 .toBodilessEntity();
         return ResponseEntity.accepted().build();
     }
+
+    /**
+     * Store-and-forward drain: a driver-app phone that was offline (tunnel, dead zone) accumulates
+     * fixes locally and flushes them here as a batch when the network returns. Deliberately NOT
+     * {@code @Valid} — like ingestion's own batch endpoint, one bad reading must not fail the whole
+     * packet; ingestion validates each element and dead-letters the bad ones. The session is checked
+     * once for the packet, so a taken-over phone is told to stop before its backlog is forwarded.
+     */
+    @PostMapping("/batch")
+    public ResponseEntity<Void> ingestBatch(
+            @RequestBody List<TrackRequest> fixes,
+            @RequestHeader(value = "X-Device-Session", required = false) String session) {
+        if (session != null && !session.isBlank() && !sessions.refresh(session)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        if (fixes == null || fixes.isEmpty()) {
+            return ResponseEntity.accepted().build();
+        }
+        ingestion.post()
+                .uri(INGEST_BATCH_PATH)
+                .body(fixes)
+                .retrieve()
+                .toBodilessEntity();
+        return ResponseEntity.accepted().build();
+    }
 }

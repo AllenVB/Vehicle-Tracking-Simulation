@@ -7,8 +7,8 @@
  *
  * Web'in sınırı (bilinçli): tarayıcı, sayfa/uygulama tamamen kapandığında arka planda GPS
  * gönderemez. Ekran açıkken Wake Lock ile uyanık kalır; gerçek "foreground service" native
- * sürümde gelecek. Çevrimdışıyken ölçümler yerelde birikir ve bağlantı gelince gönderilir
- * (1a'da basit kuyruk; 1b'de IndexedDB + toplu gönderim).
+ * sürümde gelecek. Çevrimdışıyken ölçümler dayanıklı IndexedDB'de birikir (tarayıcı kapansa
+ * da kalır) ve bağlantı gelince paket halinde /api/v1/track/batch'e boşaltılır (Store & Forward).
  */
 (function () {
   "use strict";
@@ -43,6 +43,12 @@
   if (navigator.getBattery) {
     navigator.getBattery().then(function (b) { battery = b; }).catch(function () {});
   }
+
+  // Çevrimdışı depo erken kurulur: resume() sayfa yüklenince flushBacklog çağırabilir.
+  // (idbQueue/lsQueue/migrateLegacyQueue aşağıda function declaration — hoist edilir.)
+  var BATCH_SIZE = 200;
+  var Q = ("indexedDB" in window) ? idbQueue() : lsQueue();
+  migrateLegacyQueue();
 
   // ── Giriş ─────────────────────────────────────────────────────────────────
   $("loginBtn").onclick = doLogin;
@@ -91,7 +97,7 @@
     setStatus("wait", "Konum bekleniyor…");
     requestWakeLock();
     startGps();
-    flushQueue();
+    flushBacklog();
     updateQueued();
   }
 
@@ -173,26 +179,109 @@
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  // ── Gönderim + çevrimdışı kuyruk ──────────────────────────────────────────
+  // ── Çevrimdışı depo (Store & Forward): IndexedDB, localStorage'a fallback ──
+  // Aynı arayüz (add/take/remove/count) iki uygulamayı gizler; üstteki tek satır
+  // hangisinin kullanılacağını seçer.
+  function idbQueue() {
+    var DB_NAME = "vts-driver", STORE = "queue", dbP = null;
+    function db() {
+      if (dbP) return dbP;
+      dbP = new Promise(function (res, rej) {
+        var r = indexedDB.open(DB_NAME, 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore(STORE, { keyPath: "id", autoIncrement: true }); };
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { rej(r.error); };
+      });
+      return dbP;
+    }
+    return {
+      add: function (fix) {
+        return db().then(function (d) { return new Promise(function (res, rej) {
+          var tx = d.transaction(STORE, "readwrite"); tx.objectStore(STORE).add({ fix: fix });
+          tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
+        }); });
+      },
+      take: function (n) {
+        return db().then(function (d) { return new Promise(function (res, rej) {
+          var out = [], cur = d.transaction(STORE, "readonly").objectStore(STORE).openCursor();
+          cur.onsuccess = function () {
+            var c = cur.result;
+            if (c && out.length < n) { out.push({ id: c.key, fix: c.value.fix }); c.continue(); } else res(out);
+          };
+          cur.onerror = function () { rej(cur.error); };
+        }); });
+      },
+      remove: function (ids) {
+        return db().then(function (d) { return new Promise(function (res, rej) {
+          var tx = d.transaction(STORE, "readwrite"), s = tx.objectStore(STORE);
+          ids.forEach(function (id) { s.delete(id); });
+          tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
+        }); });
+      },
+      count: function () {
+        return db().then(function (d) { return new Promise(function (res, rej) {
+          var req = d.transaction(STORE, "readonly").objectStore(STORE).count();
+          req.onsuccess = function () { res(req.result); }; req.onerror = function () { rej(req.error); };
+        }); });
+      }
+    };
+  }
+
+  function lsQueue() {
+    function read() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch (e) { return []; } }
+    function write(a) { localStorage.setItem(QUEUE_KEY, JSON.stringify(a)); }
+    return {
+      add: function (fix) { var a = read(); a.push(fix); if (a.length > 5000) a = a.slice(-5000); write(a); return Promise.resolve(); },
+      take: function (n) { return Promise.resolve(read().slice(0, n).map(function (fix, i) { return { id: i, fix: fix }; })); },
+      remove: function (ids) { write(read().slice(ids.length)); return Promise.resolve(); },   // hep baştan boşaltılır
+      count: function () { return Promise.resolve(read().length); }
+    };
+  }
+
+  // 1a'nın localStorage kuyruğunda kalan ölçümleri IndexedDB'ye taşı (bir kereliğine).
+  function migrateLegacyQueue() {
+    if (!("indexedDB" in window)) return;
+    var old;
+    try { old = JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch (e) { old = []; }
+    if (!old.length) return;
+    old.reduce(function (p, fix) { return p.then(function () { return Q.add(fix); }); }, Promise.resolve())
+      .then(function () { localStorage.removeItem(QUEUE_KEY); updateQueued(); })
+      .catch(function () {});
+  }
+
+  // ── Gönderim ──────────────────────────────────────────────────────────────
   function sendFix(fix) {
     if (!navigator.onLine) { enqueue(fix); return; }
     post(fix).then(function (res) {
       if (res === "taken") return sessionLost();
       sentCount++; $("mSent").textContent = sentCount;
       setStatus("live", "Canlı — konum gönderiliyor");
-      flushQueue();
+      flushBacklog();   // fırsat buldukça biriken çevrimdışı veriyi paket halinde gönder
     }).catch(function () {
       enqueue(fix);
       setStatus("warn", "Bağlantı yok — konum yerelde birikiyor");
     });
   }
 
-  // Tek bir ölçümü gönderir. 409 → oturum devralındı ("taken"); diğer hatalar → reject.
+  // Tek (canlı) ölçüm. 409 → oturum devralındı ("taken"); diğer hatalar → reject.
   function post(fix) {
     return fetch("/api/v1/track", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Device-Session": session.sessionToken },
       body: JSON.stringify(fix), keepalive: true
+    }).then(function (r) {
+      if (r.status === 409) return "taken";
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return "ok";
+    });
+  }
+
+  // Biriken ölçümleri toplu gönder (keepalive yok — paket 64KB'ı aşabilir).
+  function postBatch(fixes) {
+    return fetch("/api/v1/track/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Device-Session": session.sessionToken },
+      body: JSON.stringify(fixes)
     }).then(function (r) {
       if (r.status === 409) return "taken";
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -212,39 +301,29 @@
     }, 2500);
   }
 
-  function enqueue(fix) {
-    var q = readQueue(); q.push(fix);
-    if (q.length > 5000) q = q.slice(q.length - 5000);   // ~1.5 saat @1sn üst sınır
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
-    updateQueued();
-  }
+  function enqueue(fix) { Q.add(fix).then(updateQueued).catch(function () {}); }
+  function updateQueued() { Q.count().then(function (n) { $("mQueued").textContent = n; }).catch(function () {}); }
 
-  function readQueue() {
-    try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch (e) { return []; }
-  }
-
-  // Bağlantı gelince kuyruğu sırayla boşalt (1b'de toplu /batch gönderimine yükseltilecek).
+  // Biriken veriyi bağlantı gelince paketler halinde boşalt.
   var flushing = false;
-  function flushQueue() {
+  function flushBacklog() {
     if (flushing || !session || !navigator.onLine) return;
-    var q = readQueue();
-    if (!q.length) return;
     flushing = true;
-    var fix = q[0];
-    post(fix).then(function (res) {
-      flushing = false;
-      if (res === "taken") return sessionLost();
-      q.shift();
-      localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
-      sentCount++; $("mSent").textContent = sentCount;
-      updateQueued();
-      if (q.length) flushQueue();
-    }).catch(function () { flushing = false; });
+    Q.take(BATCH_SIZE).then(function (items) {
+      if (!items.length) { flushing = false; return; }
+      return postBatch(items.map(function (it) { return it.fix; })).then(function (res) {
+        if (res === "taken") { flushing = false; return sessionLost(); }
+        return Q.remove(items.map(function (it) { return it.id; })).then(function () {
+          sentCount += items.length; $("mSent").textContent = sentCount;
+          updateQueued();
+          flushing = false;
+          flushBacklog();   // kuyruk bitene kadar devam
+        });
+      });
+    }).catch(function () { flushing = false; });   // hâlâ çevrimdışı/hata → sonra tekrar dener
   }
 
-  function updateQueued() { $("mQueued").textContent = readQueue().length; }
-
-  window.addEventListener("online", flushQueue);
+  window.addEventListener("online", flushBacklog);
 
   // ── Durum + Wake Lock ─────────────────────────────────────────────────────
   function setStatus(kind, text) {
