@@ -235,6 +235,7 @@
   <div class="flex gap-2">
     <button id="selFollow" class="flex-1 py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 transition-all">Bu aracı takip et</button>
     <button id="selMsgBtn" title="Sürücüye uyarı gönder" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
+    <button id="selAccessBtn" title="Sürücü erişimi (şifre + QR)" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">badge</span></button>
   </div>
   <!-- inline message composer -->
   <div id="selMsgBox" class="hidden mt-2 flex gap-2">
@@ -242,6 +243,16 @@
     <button id="selMsgSend" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95"><span class="material-symbols-outlined text-body-md">send</span></button>
   </div>
   <div id="selMsgOk" class="text-primary text-label-sm mt-1.5 text-center h-4"></div>
+  <!-- driver access: set password + QR that opens driver.html prefilled -->
+  <div id="selAccessBox" class="hidden mt-2 pt-2 border-t border-white/10">
+    <div class="text-[10px] uppercase text-on-surface-variant mb-1.5">Sürücü erişimi · plaka + model + şifre</div>
+    <div class="flex gap-2">
+      <input id="selPwInput" type="text" placeholder="Sürücü şifresi (min 4)" maxlength="72" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
+      <button id="selPwSet" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95 whitespace-nowrap">Belirle & QR</button>
+    </div>
+    <div id="selAccessQr" class="bg-white rounded-xl p-2 mt-2 flex justify-center items-center min-h-[120px] hidden"></div>
+    <div id="selAccessHint" class="text-[11px] text-on-surface-variant mt-1.5"></div>
+  </div>
 </div>
 
 <!-- ── Fleet (Araç Listesi) ────────────────────────────────────────────────── -->

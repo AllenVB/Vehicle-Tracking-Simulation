@@ -187,6 +187,7 @@
   // ── Seçili araç ──────────────────────────────────────────────────────────
   function select(id) {
     selected = id;
+    resetAccessUi();
     refreshCards();
     const ov = $("selOverlay");
     if (id == null) { ov.classList.add("hidden"); followId = null; if (view === "history") clearHistory(); return; }
@@ -230,6 +231,48 @@
     $("selMsgBtn").onclick = () => { $("selMsgBox").classList.toggle("hidden"); $("selMsgInput").focus(); };
     $("selMsgInput").addEventListener("keydown", e => { if (e.key === "Enter") sendMsg(); });
     $("selMsgSend").onclick = sendMsg;
+    $("selAccessBtn").onclick = () => { $("selAccessBox").classList.toggle("hidden"); $("selPwInput").focus(); };
+    $("selPwSet").onclick = setDriverPassword;
+    $("selPwInput").addEventListener("keydown", e => { if (e.key === "Enter") setDriverPassword(); });
+  }
+
+  // Seçili araca sürücü şifresi belirle, ardından plaka+model'i dolduran driver.html QR'ı üret.
+  async function setDriverPassword() {
+    if (selected == null) return;
+    const inp = $("selPwInput"), hint = $("selAccessHint"), pw = inp.value.trim();
+    if (pw.length < 4) { hint.textContent = "Şifre en az 4 karakter olmalı."; return; }
+    hint.textContent = "Kaydediliyor…";
+    try {
+      const r = await fetch(`/api/v1/vehicles/${selected}/driver-credential`, { method: "POST",
+        headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+      if (!r.ok) throw 0;
+      hint.textContent = "✓ Şifre belirlendi. QR'ı sürücünün telefonuna okut.";
+      await showDriverQr();
+    } catch (_) { hint.textContent = "Şifre belirlenemedi."; }
+  }
+
+  async function showDriverQr() {
+    const v = vehicles.get(selected); if (!v) return;
+    let base = location.origin;
+    try { const cfg = await (await fetch("/api/v1/track/config")).json(); if (cfg && cfg.publicUrl) base = cfg.publicUrl.replace(/\/+$/, ""); } catch (_) {}
+    const url = base + "/driver.html?plate=" + encodeURIComponent(v.plate) + "&model=" + encodeURIComponent(v.model || "");
+    const qrEl = $("selAccessQr");
+    if (typeof qrcode === "function") {
+      const qr = qrcode(0, "M"); qr.addData(url); qr.make();
+      qrEl.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2 });
+      qrEl.classList.remove("hidden");
+    }
+    // Telefon GPS'i güvenli bağlam ister: tünel yoksa yalnızca https/localhost'ta konum alınır.
+    if (base === location.origin && location.protocol !== "https:") {
+      $("selAccessHint").textContent += " Not: telefon GPS'i için https tünel gerekir (start-tracking).";
+    }
+  }
+
+  function resetAccessUi() {
+    if (!$("selAccessBox")) return;
+    $("selAccessBox").classList.add("hidden");
+    $("selAccessQr").classList.add("hidden"); $("selAccessQr").innerHTML = "";
+    $("selAccessHint").textContent = ""; $("selPwInput").value = "";
   }
   async function sendMsg() {
     if (selected == null) return;
