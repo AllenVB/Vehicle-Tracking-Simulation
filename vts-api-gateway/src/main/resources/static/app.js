@@ -39,7 +39,7 @@
 
   async function start() {
     map = L.map("map", { zoomControl: false, attributionControl: false }).setView([41.02, 29.0], 11);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 20, subdomains: "abcd" }).addTo(map);
     // Marker kümeleme: yakın araçlar zoom-out'ta tek daireye toplanır (üzerinde adet),
     // zoom ≥16'da tek tek gösterilir. Küme ikonu emerald temaya uygun.
     cluster = L.markerClusterGroup({
@@ -62,6 +62,7 @@
     initSelActions();
     initPlayback();
     initFleet();
+    initChat();
     loadDashboard();
     setInterval(loadVehicles, 15000);
     setInterval(sweep, 5000);
@@ -226,23 +227,7 @@
       $("selFollow").textContent = followId === selected ? "Takibi durdur" : "Bu aracı takip et";
       if (followId != null) { const p = pos.get(followId); if (p) map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15)); }
     };
-    $("selMsgBtn").onclick = () => { $("selMsgBox").classList.toggle("hidden"); $("selMsgInput").focus(); };
-    $("selMsgInput").addEventListener("keydown", e => { if (e.key === "Enter") sendMsg(); });
-    $("selMsgSend").onclick = sendMsg;
-  }
-
-  async function sendMsg() {
-    if (selected == null) return;
-    const inp = $("selMsgInput"), ok = $("selMsgOk"), body = inp.value.trim();
-    if (!body) return;
-    try {
-      const r = await fetch(`/api/v1/vehicles/${selected}/messages`, { method: "POST",
-        headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ category: "UYARI", body }) });
-      if (!r.ok) throw 0;
-      inp.value = ""; ok.textContent = "✓ Sürücüye gönderildi";
-      $("selMsgBox").classList.add("hidden");
-      setTimeout(() => ok.textContent = "", 3000);
-    } catch (_) { ok.textContent = "Gönderilemedi"; setTimeout(() => ok.textContent = "", 3000); }
+    $("selMsgBtn").onclick = () => { if (selected != null) openChat(selected); };
   }
 
   // ── İhlal akışı ──────────────────────────────────────────────────────────
@@ -295,6 +280,7 @@
     feed.prepend(item);
     while (feed.children.length > 30) feed.removeChild(feed.lastChild);
     toast((v ? "#" + v.trackId + " " + esc(v.plate) : "Sürücü") + ": " + esc(e.body));
+    if (chatVehicle === e.vehicleId && !$("chatPanel").classList.contains("hidden")) renderChatMsg("FROM_DRIVER", e.body, e.at);
   }
 
   // Kısa süreli, tıklanınca kapanan bildirim balonu (sürücü yanıtı için).
@@ -313,6 +299,89 @@
     el.style.display = "flex";
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.style.display = "none"; }, 5000);
+  }
+
+  // ── Haritada gör: canlı yoksa son bilinen konumu göster ───────────────────
+  async function showOnMap(id) {
+    toggleView("live"); select(id);
+    let p = pos.get(id);
+    if (p && p.lat != null) { map.setView([p.lat, p.lon], Math.max(map.getZoom(), 14)); return; }
+    try {
+      const r = await fetch(`/api/v1/vehicles/${id}/last-position`, { headers: auth() });
+      if (!r.ok) { toast("Bu araç için konum kaydı yok."); return; }
+      p = await r.json();
+      pos.set(id, p);
+      drawMarker(p);
+      if (cluster) cluster.refreshClusters();
+      map.setView([p.lat, p.lon], Math.max(map.getZoom(), 14));
+      updateOverlay();
+    } catch (_) {}
+  }
+
+  // ── Şifre göster (göz efekti) ─────────────────────────────────────────────
+  async function revealPassword(id) {
+    const line = document.querySelector(`[data-pwline="${id}"]`);
+    if (!line) return;
+    if (!line.classList.contains("hidden")) { line.classList.add("hidden"); return; }   // tekrar tık → gizle
+    try {
+      const r = await fetch(`/api/v1/vehicles/${id}/driver-credential`, { headers: auth() });
+      const d = r.ok ? await r.json() : null;
+      line.querySelector(".pwval").textContent = (d && d.password) ? d.password : "(atanmamış)";
+      line.classList.remove("hidden");
+    } catch (_) {}
+  }
+
+  // ── Destek sohbeti (admin ↔ sürücü, sağ alt) ──────────────────────────────
+  let chatVehicle = null;
+  function initChat() {
+    $("chatClose").onclick = () => $("chatPanel").classList.add("hidden");
+    $("chatSend").onclick = sendChat;
+    $("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+  }
+  function openChat(id) {
+    chatVehicle = id;
+    const v = vehicles.get(id);
+    $("chatTitle").textContent = v ? ("#" + v.trackId + " · " + v.plate) : "Destek";
+    $("selOverlay").classList.add("hidden");
+    $("chatPanel").classList.remove("hidden");
+    $("chatBody").innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-4">Yükleniyor…</div>';
+    loadChat(id);
+    setTimeout(() => $("chatInput").focus(), 100);
+  }
+  async function loadChat(id) {
+    try {
+      const r = await fetch(`/api/v1/vehicles/${id}/messages`, { headers: auth() });
+      const list = r.ok ? await r.json() : [];
+      $("chatBody").innerHTML = "";
+      if (!list.length) { $("chatBody").innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-4">Henüz mesaj yok. İlk mesajı sen yaz.</div>'; return; }
+      list.forEach(m => renderChatMsg(m.direction, m.body, m.at));
+      const b = $("chatBody"); b.scrollTop = b.scrollHeight;
+    } catch (_) {}
+  }
+  function renderChatMsg(direction, body, at) {
+    const wrap = $("chatBody"); const ph = wrap.querySelector(".text-center"); if (ph) ph.remove();
+    const mine = direction !== "FROM_DRIVER";   // admin (TO_DRIVER) sağda, sürücü solda
+    const time = at ? new Date(at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+    const el = document.createElement("div");
+    el.className = "max-w-[82%] rounded-xl px-3 py-2 " + (mine ? "self-end" : "self-start");
+    el.style.background = mine ? "rgba(78,222,163,.16)" : "rgba(255,255,255,.06)";
+    if (!mine) el.style.borderLeft = "2px solid #4edea3";
+    el.innerHTML = `<div class="text-body-md text-on-surface" style="word-break:break-word">${esc(body)}</div>
+      <div class="text-[10px] text-on-surface-variant mt-0.5 ${mine ? "text-right" : ""}">${(mine ? "Merkez · " : "Sürücü · ") + time}</div>`;
+    wrap.appendChild(el);
+    wrap.scrollTop = wrap.scrollHeight;
+  }
+  async function sendChat() {
+    if (chatVehicle == null) return;
+    const inp = $("chatInput"), body = inp.value.trim();
+    if (!body) return;
+    inp.value = "";
+    try {
+      const r = await fetch(`/api/v1/vehicles/${chatVehicle}/messages`, { method: "POST",
+        headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ category: "MESAJ", body: body }) });
+      if (!r.ok) throw 0;
+      renderChatMsg("TO_DRIVER", body, new Date().toISOString());
+    } catch (_) { inp.value = body; alert("Mesaj gönderilemedi."); }
   }
 
   // ── Filo (Araç Listesi) ──────────────────────────────────────────────────
@@ -420,11 +489,15 @@
         <span class="material-symbols-outlined text-primary text-body-md">location_on</span>
         <p class="text-label-sm leading-tight">${loc} · ${seen}</p>
       </div>
-      <div class="flex gap-2 relative">
-        <button data-map="${id}" class="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-label-sm font-bold text-on-surface active:scale-95 transition-all flex items-center justify-center gap-1"><span class="material-symbols-outlined text-body-md">map</span> Haritada gör</button>
-        <button data-msg="${id}" title="Sürücüye uyarı" class="w-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
-        <button data-pw="${id}" title="Sürücü şifresi ata" class="w-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">key</span></button>
-        <button data-del="${id}" title="Aracı kalıcı sil" class="w-10 flex items-center justify-center bg-error/10 hover:bg-error/20 rounded-xl border border-error/20 text-error active:scale-95"><span class="material-symbols-outlined text-body-md">delete</span></button>
+      <div class="relative space-y-2">
+        <button data-map="${id}" class="w-full py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-label-sm font-bold text-on-surface active:scale-95 transition-all flex items-center justify-center gap-1"><span class="material-symbols-outlined text-body-md">map</span> Haritada gör</button>
+        <div class="flex gap-2">
+          <button data-msg="${id}" title="Sürücü ile mesajlaş" class="flex-1 flex items-center justify-center py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
+          <button data-pw="${id}" title="Sürücü şifresi ata" class="flex-1 flex items-center justify-center py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">key</span></button>
+          <button data-eye="${id}" title="Şifreyi göster" class="flex-1 flex items-center justify-center py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">visibility</span></button>
+          <button data-del="${id}" title="Aracı kalıcı sil" class="flex-1 flex items-center justify-center py-2 bg-error/10 hover:bg-error/20 rounded-xl border border-error/20 text-error active:scale-95"><span class="material-symbols-outlined text-body-md">delete</span></button>
+        </div>
+        <div data-pwline="${id}" class="hidden text-label-sm text-on-surface bg-black/20 rounded-lg px-3 py-2 border border-white/5">Sürücü şifresi: <b class="text-primary pwval">••••</b></div>
       </div>
     </div>`;
   }
@@ -440,9 +513,10 @@
     $("fleetCount").textContent = vehicles.size + " araç yönetiliyor" + (fleetFilter !== "all" ? " · " + filtered.length + " gösteriliyor" : "");
     $("fleetEmpty").classList.toggle("hidden", vehicles.size > 0);
     grid.innerHTML = filtered.map(fleetCard).join("");
-    grid.querySelectorAll("[data-map]").forEach(b => b.onclick = () => { const id = +b.dataset.map; toggleView("live"); select(id); });
-    grid.querySelectorAll("[data-msg]").forEach(b => b.onclick = () => { const id = +b.dataset.msg; toggleView("live"); select(id); setTimeout(() => { $("selMsgBox").classList.remove("hidden"); $("selMsgInput").focus(); }, 150); });
+    grid.querySelectorAll("[data-map]").forEach(b => b.onclick = () => showOnMap(+b.dataset.map));
+    grid.querySelectorAll("[data-msg]").forEach(b => b.onclick = () => openChat(+b.dataset.msg));
     grid.querySelectorAll("[data-pw]").forEach(b => b.onclick = () => setVehiclePassword(+b.dataset.pw));
+    grid.querySelectorAll("[data-eye]").forEach(b => b.onclick = () => revealPassword(+b.dataset.eye));
     grid.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteVehicle(+b.dataset.del));
     renderFleetAlerts();
     updateFleetHealth();

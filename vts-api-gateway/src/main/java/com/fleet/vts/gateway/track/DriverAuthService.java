@@ -1,5 +1,6 @@
 package com.fleet.vts.gateway.track;
 
+import com.fleet.vts.gateway.web.Plates;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -36,10 +37,10 @@ public class DriverAuthService {
     @Transactional
     public Optional<DriverIdentity> login(String plate, String password, String deviceId) {
         List<Vehicle> found = jdbc.query(
-                "SELECT id, tenant_id, plate, make, model FROM vehicle WHERE upper(plate) = upper(?)",
+                "SELECT id, tenant_id, plate, make, model FROM vehicle WHERE replace(upper(plate), ' ', '') = ?",
                 (rs, n) -> new Vehicle(rs.getLong("id"), rs.getLong("tenant_id"),
                         rs.getString("plate"), rs.getString("make"), rs.getString("model")),
-                plate);
+                Plates.normalize(plate));
         if (found.isEmpty()) {
             return Optional.empty();
         }

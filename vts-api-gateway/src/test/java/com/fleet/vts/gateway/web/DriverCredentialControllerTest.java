@@ -10,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,7 +50,19 @@ class DriverCredentialControllerTest {
         ResponseEntity<?> res = controller.setPassword(JWT, 9L, new DriverCredentialController.CredentialRequest("gizli12"));
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(jdbc).update(anyString(), eq(1L), eq(9L), eq("$2a$hash"));   // hash stored, not the plaintext
+        verify(jdbc).update(anyString(), eq(1L), eq(9L), eq("$2a$hash"), eq("gizli12"));   // hash + plaintext
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void revealsThePlaintextForAnOwnedVehicle() {
+        owns(true);
+        doReturn(List.of("gizli12")).when(jdbc).query(anyString(), any(RowMapper.class), eq(9L));
+
+        ResponseEntity<Map<String, Object>> res = controller.getPassword(JWT, 9L);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(res.getBody()).containsEntry("password", "gizli12");
     }
 
     @Test

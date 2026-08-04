@@ -25,7 +25,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -68,6 +71,28 @@ public class VehicleController {
         return reporting.findDayPositions(CurrentUser.tenantId(jwt), id, Math.clamp(daysAgo, 0, 29));
     }
 
+    /** The vehicle's last known position (from vehicle_last_position), even if it is not live now. */
+    @GetMapping("/{id}/last-position")
+    public ResponseEntity<Map<String, Object>> lastPosition(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id) {
+        long tenant = CurrentUser.tenantId(jwt);
+        List<Map<String, Object>> rows = jdbc.query("""
+                        SELECT ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon,
+                               speed_kmh, heading, ts
+                        FROM vehicle_last_position WHERE vehicle_id = ? AND tenant_id = ?
+                        """,
+                (rs, n) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("vehicleId", id);
+                    m.put("lat", rs.getDouble("lat"));
+                    m.put("lon", rs.getDouble("lon"));
+                    m.put("speedKmh", rs.getObject("speed_kmh"));
+                    m.put("heading", rs.getObject("heading"));
+                    m.put("ts", rs.getObject("ts", OffsetDateTime.class).toInstant().toString());
+                    return m;
+                }, id, tenant);
+        return rows.isEmpty() ? ResponseEntity.notFound().build() : ResponseEntity.ok(rows.get(0));
+    }
+
     @GetMapping
     public List<VehicleDto> list(@AuthenticationPrincipal Jwt jwt) {
         return repository.findByTenantId(CurrentUser.tenantId(jwt)).stream().map(mapper::toDto).toList();
@@ -90,6 +115,7 @@ public class VehicleController {
         }
         Vehicle vehicle = mapper.toEntity(request);
         vehicle.setTenantId(CurrentUser.tenantId(jwt));
+        vehicle.setPlate(Plates.normalize(vehicle.getPlate()));   // boşluksuz + büyük harf
         // Defaults for optional fields (NOT NULL columns).
         if (vehicle.getType() == null) {
             vehicle.setType("CAR");
@@ -103,7 +129,12 @@ public class VehicleController {
         if (vehicle.getOdometerKm() == null) {
             vehicle.setOdometerKm(0L);
         }
-        return ResponseEntity.ok(mapper.toDto(repository.save(vehicle)));
+        try {
+            return ResponseEntity.ok(mapper.toDto(repository.saveAndFlush(vehicle)));
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // Plaka normalize edildikten sonra bile aynıysa (boşluk/harf varyantı) benzersizlik ihlali.
+            return ResponseEntity.status(409).body(java.util.Map.of("error", "PLATE_TAKEN", "plate", vehicle.getPlate()));
+        }
     }
 
     @PutMapping("/{id}")
@@ -117,6 +148,7 @@ public class VehicleController {
         return repository.findByIdAndTenantId(id, CurrentUser.tenantId(jwt))
                 .map(vehicle -> {
                     mapper.update(vehicle, request);
+                    vehicle.setPlate(Plates.normalize(vehicle.getPlate()));   // boşluksuz + büyük harf
                     return ResponseEntity.ok().<Object>body(mapper.toDto(repository.save(vehicle)));
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());

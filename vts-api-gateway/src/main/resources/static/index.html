@@ -22,13 +22,12 @@
   ::-webkit-scrollbar-thumb { background:#2e3734; border-radius:10px; } ::-webkit-scrollbar-thumb:hover { background:#4edea3; }
   /* position:relative + z-index:0 → tüm Leaflet katmanlarını (marker/kontrol z~1000)
      kendi stacking context'ine hapseder; paneller ve giriş ekranı üstte kalır. */
-  #map { position:relative; height:100vh; width:100vw; z-index:0; background:#0e0e0e; }
+  #map { position:relative; height:100vh; width:100vw; z-index:0; background:#dfe4e8; }
   .nav-indicator { transition:all .3s cubic-bezier(.4,0,.2,1); }
   .fade-content { transition:opacity .3s ease, transform .3s ease; }
   .hidden-content { opacity:0; pointer-events:none; position:absolute; transform:translateY(10px); }
-  /* OSM'i canlı koyu haritaya çevir (invert tekniği) — soluk gri yerine net, renkli koyu. */
-  .leaflet-tile { filter:invert(1) hue-rotate(180deg) brightness(.93) contrast(.92) saturate(.9); }
-  .leaflet-container { background:#0e0e0e; }
+  /* Açık, kullanıcı dostu harita (CartoDB Positron) — invert yok, ferah ve okunaklı. */
+  .leaflet-container { background:#dfe4e8; }
   .anim-in { animation:animIn .5s cubic-bezier(.2,.7,.2,1) both; }
   @keyframes animIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 </style>
@@ -233,14 +232,8 @@
   </div>
   <div class="flex gap-2">
     <button id="selFollow" class="flex-1 py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 transition-all">Bu aracı takip et</button>
-    <button id="selMsgBtn" title="Sürücüye uyarı gönder" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
+    <button id="selMsgBtn" title="Sürücü ile mesajlaş" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
   </div>
-  <!-- inline message composer -->
-  <div id="selMsgBox" class="hidden mt-2 flex gap-2">
-    <input id="selMsgInput" placeholder="Uyarı mesajı…" maxlength="200" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
-    <button id="selMsgSend" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95"><span class="material-symbols-outlined text-body-md">send</span></button>
-  </div>
-  <div id="selMsgOk" class="text-primary text-label-sm mt-1.5 text-center h-4"></div>
 </div>
 
 <!-- ── Fleet (Araç Listesi) ────────────────────────────────────────────────── -->
@@ -301,6 +294,23 @@
     </div>
   </div>
 </section>
+
+<!-- ── Destek sohbeti (admin ↔ sürücü, sağ alt) ─────────────────────────────── -->
+<div class="fixed bottom-6 right-6 z-[55] w-80 max-w-[calc(100vw-3rem)] glass-panel rounded-2xl flex flex-col hidden" id="chatPanel" style="max-height:min(70vh,520px)">
+  <div class="flex items-center justify-between p-3 border-b border-white/10">
+    <div class="flex items-center gap-2 min-w-0">
+      <span class="material-symbols-outlined text-primary" style="font-variation-settings:'FILL' 1">support_agent</span>
+      <div class="min-w-0"><div class="text-body-md font-bold text-on-surface truncate" id="chatTitle">Destek</div>
+        <div class="text-[10px] text-on-surface-variant">Sürücü ile mesajlaşma · kalıcı</div></div>
+    </div>
+    <button id="chatClose" class="p-1 hover:bg-white/5 rounded-full"><span class="material-symbols-outlined text-on-surface-variant">close</span></button>
+  </div>
+  <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2" id="chatBody"></div>
+  <div class="p-3 border-t border-white/10 flex gap-2">
+    <input id="chatInput" placeholder="Mesaj yaz…" maxlength="500" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
+    <button id="chatSend" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95"><span class="material-symbols-outlined text-body-md">send</span></button>
+  </div>
+</div>
 
 <script src="/app.js"></script>
 </body></html>

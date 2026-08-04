@@ -38,18 +38,21 @@ public class VehicleMessageRepository {
                 tenantId, vehicleId, category, body);
     }
 
-    /** The vehicle's last 20 messages, newest first. */
+    /** The vehicle's last 50 messages (both directions), oldest first — for the support chat panel. */
     public List<Map<String, Object>> recent(long tenantId, long vehicleId) {
         return jdbc.query("""
-                        SELECT category, body, created_at
-                        FROM vehicle_message
-                        WHERE tenant_id = ? AND vehicle_id = ?
-                        ORDER BY created_at DESC LIMIT 20
+                        SELECT category, body, direction, created_at FROM (
+                            SELECT category, body, direction, created_at
+                            FROM vehicle_message
+                            WHERE tenant_id = ? AND vehicle_id = ?
+                            ORDER BY created_at DESC LIMIT 50
+                        ) t ORDER BY created_at ASC
                         """,
                 (rs, n) -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("category", rs.getString("category"));
                     m.put("body", rs.getString("body"));
+                    m.put("direction", rs.getString("direction"));
                     m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
                     return m;
                 },
