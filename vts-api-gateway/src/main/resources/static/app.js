@@ -9,7 +9,7 @@
   const tripCache = new Map();  // id -> {distanceKm, ecoScore, score}
   const recentVios = [];        // {vehicleId,ruleCode,value,threshold,occurredAt}
   let fleetFilter = "all", dash = null, cluster = null;
-  const STALE_MS = 30000, VIO_SPEED = 82, VIO_DROP = 40, STOP_SPEED = 3, MIN_STOP_SEC = 120, STOP_RADIUS_M = 40;
+  const STALE_MS = 30000, VIO_SPEED = 82, STOP_SPEED = 3, MIN_STOP_SEC = 120, STOP_RADIUS_M = 40;
   const RED_WINDOW_MS = 120000;   // 6b: bir nokta, gerçek hız ihlalinin ±2 dk'sındaysa kırmızı
 
   const $ = id => document.getElementById(id);
@@ -461,15 +461,6 @@
     $("histVehicle").onchange = () => { const vid = +$("histVehicle").value; if (vid) { select(vid); loadHistory(vid, currentDay(), true); } };
     $("histExport").onclick = exportCsv;
   }
-  function violations(prev, cur) {
-    const r = [];
-    if (cur.speedKmh != null && cur.speedKmh > VIO_SPEED) r.push("Hız aşımı: " + cur.speedKmh + " km/s");
-    if (prev && prev.speedKmh != null && cur.speedKmh != null && prev.ts && cur.ts) {
-      const dt = (new Date(cur.ts) - new Date(prev.ts)) / 1000;
-      if (dt > 0.2 && dt <= 5 && (prev.speedKmh - cur.speedKmh) / dt >= VIO_DROP) r.push("Sert fren: " + Math.round(prev.speedKmh - cur.speedKmh) + " km/s ani düşüş");
-    }
-    return r;
-  }
   function histAdd(prev, cur) {
     if (!histLayer) return;
     const vio = speedVioAt(cur.ts), red = !!vio;   // 6b: renk gerçek backend hız ihlaline göre
@@ -512,14 +503,9 @@
     return stops;
   }
   function summarize(pts) {
-    let dist = 0, vio = 0, prev = null, inVio = false;
-    pts.forEach(p => {
-      if (prev) dist += haversine(prev, p);
-      const isV = violations(prev, p).length > 0;
-      if (isV && !inVio) vio++;
-      inVio = isV; prev = p;
-    });
-    return { dist, vio, stops: findStops(pts).length };
+    let dist = 0, prev = null;
+    pts.forEach(p => { if (prev) dist += haversine(prev, p); prev = p; });
+    return { dist, stops: findStops(pts).length };
   }
   function markStops(pts) {
     findStops(pts).forEach(s => {

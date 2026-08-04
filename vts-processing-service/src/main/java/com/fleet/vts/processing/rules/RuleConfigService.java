@@ -105,15 +105,6 @@ public class RuleConfigService {
         return result;
     }
 
-    /** Flush all caches (invoked when a rule changes). */
-    public void invalidateAll() {
-        rulesByTenant.invalidateAll();
-        groupOverridesByTenant.invalidateAll();
-        typeAssignmentsByTenant.invalidateAll();
-        vehicleGroup.invalidateAll();
-        vehicleType.invalidateAll();
-    }
-
     private Optional<String> loadVehicleType(Long vehicleId) {
         return jdbc.query("SELECT type FROM vehicle WHERE id = ?",
                 (ResultSetExtractor<Optional<String>>) rs ->

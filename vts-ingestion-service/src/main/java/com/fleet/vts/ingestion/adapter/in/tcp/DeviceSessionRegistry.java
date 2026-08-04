@@ -57,7 +57,4 @@ public class DeviceSessionRegistry {
                 .filter(s -> s.channel().isActive());
     }
 
-    public int size() {
-        return sessions.size();
-    }
 }
