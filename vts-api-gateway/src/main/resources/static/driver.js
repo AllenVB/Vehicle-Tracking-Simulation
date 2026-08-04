@@ -99,6 +99,8 @@
     startGps();
     flushBacklog();
     updateQueued();
+    loadReplyOptions();
+    startMessages();
   }
 
   $("stopBtn").onclick = function () {
@@ -107,6 +109,7 @@
       body: JSON.stringify({ sessionToken: session && session.sessionToken }), keepalive: true
     }).catch(function () {});
     stopGps();
+    stopMessages();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     session = null;
@@ -292,6 +295,7 @@
   function sessionLost() {
     setStatus("off", "Bu araca başka bir cihaz giriş yaptı.");
     stopGps();
+    stopMessages();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     setTimeout(function () {
@@ -344,6 +348,84 @@
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible" && session && !wakeLock) requestWakeLock();
   });
+
+  // ── Mesajlaşma: merkezden gelen mesajları TTS ile oku + tek-tık yanıt ──────
+  var MSG_POLL_MS = 5000;
+  var msgTimer = null;
+  var msgEmpty = true;   // "Henüz mesaj yok." yer tutucusu hâlâ duruyor mu
+
+  function startMessages() {
+    pollMessages();
+    msgTimer = setInterval(pollMessages, MSG_POLL_MS);
+  }
+  function stopMessages() {
+    if (msgTimer) { clearInterval(msgTimer); msgTimer = null; }
+    if (window.speechSynthesis) speechSynthesis.cancel();
+  }
+
+  function pollMessages() {
+    if (!session || !navigator.onLine) return;
+    fetch("/api/v1/track/messages", { headers: { "X-Device-Session": session.sessionToken } })
+      .then(function (r) {
+        if (r.status === 401) { sessionLost(); return []; }
+        if (!r.ok) return [];
+        return r.json();
+      })
+      .then(function (list) {
+        (list || []).forEach(function (m) { appendMsg(m, false); speak(m.body); });
+      })
+      .catch(function () {});
+  }
+
+  function appendMsg(m, mine) {
+    var box = $("msgList");
+    if (msgEmpty) { box.innerHTML = ""; msgEmpty = false; }
+    var el = document.createElement("div");
+    el.className = "msg" + (mine ? " me" : "");
+    var cat = document.createElement("div"); cat.className = "cat";
+    cat.textContent = mine ? "Yanıtın" : (m.category || "MESAJ");
+    var body = document.createElement("div"); body.className = "body";
+    body.textContent = m.body || "";
+    el.appendChild(cat); el.appendChild(body);
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // Türkçe sesli okuma. Uygun bir tr-TR sesi varsa onu seçer.
+  function speak(text) {
+    if (!text || !window.speechSynthesis) return;
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = "tr-TR";
+    var tr = speechSynthesis.getVoices().filter(function (v) { return /tr/i.test(v.lang); })[0];
+    if (tr) u.voice = tr;
+    speechSynthesis.speak(u);
+  }
+
+  function loadReplyOptions() {
+    fetch("/api/v1/track/reply-options")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (opts) {
+        var box = $("replies"); box.innerHTML = "";
+        (opts || []).forEach(function (o) {
+          var b = document.createElement("button");
+          b.type = "button"; b.textContent = o.label;
+          b.onclick = function () { sendReply(o.code, o.label, b); };
+          box.appendChild(b);
+        });
+      }).catch(function () {});
+  }
+
+  function sendReply(code, label, btn) {
+    if (btn) btn.disabled = true;
+    fetch("/api/v1/track/reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Device-Session": session.sessionToken },
+      body: JSON.stringify({ code: code })
+    }).then(function (r) {
+      if (r.status === 401) return sessionLost();
+      if (r.ok) appendMsg({ body: label }, true);
+    }).catch(function () {}).then(function () { if (btn) btn.disabled = false; });
+  }
 
   // ── PWA service worker ────────────────────────────────────────────────────
   if ("serviceWorker" in navigator) {

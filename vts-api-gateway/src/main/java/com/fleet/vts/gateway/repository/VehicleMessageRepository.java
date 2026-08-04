@@ -61,4 +61,44 @@ public class VehicleMessageRepository {
     public List<String> validVehicleTypes() {
         return new ArrayList<>(jdbc.queryForList("SELECT code FROM vehicle_type", String.class));
     }
+
+    /** The vehicle's plate for a device already authenticated to it (no tenant needed). */
+    public String plateOf(long vehicleId) {
+        return jdbc.query("SELECT plate FROM vehicle WHERE id = ?",
+                (ResultSetExtractor<String>) rs -> rs.next() ? rs.getString(1) : null, vehicleId);
+    }
+
+    /**
+     * Undelivered operator→driver messages for a vehicle, claimed atomically: a single
+     * {@code UPDATE ... RETURNING} marks them delivered and returns them in the same statement, so
+     * two concurrent polls from the same phone can never read the same message twice (the second
+     * finds nothing left to claim). Ordering is applied by the caller (by {@code at}).
+     */
+    public List<Map<String, Object>> pullForDevice(long vehicleId) {
+        return jdbc.query("""
+                        UPDATE vehicle_message SET delivered_at = now()
+                        WHERE id IN (
+                            SELECT id FROM vehicle_message
+                            WHERE vehicle_id = ? AND direction = 'TO_DRIVER' AND delivered_at IS NULL
+                        )
+                        RETURNING category, body, created_at
+                        """,
+                (rs, n) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("category", rs.getString("category"));
+                    m.put("body", rs.getString("body"));
+                    m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
+                    return m;
+                },
+                vehicleId);
+    }
+
+    /** A driver's one-tap reply, stored FROM_DRIVER (and already "delivered", it is outbound). */
+    public void insertDeviceReply(long vehicleId, String category, String body) {
+        jdbc.update("""
+                        INSERT INTO vehicle_message (tenant_id, vehicle_id, category, body, direction, delivered_at)
+                        SELECT tenant_id, id, ?, ?, 'FROM_DRIVER', now() FROM vehicle WHERE id = ?
+                        """,
+                category, body, vehicleId);
+    }
 }
