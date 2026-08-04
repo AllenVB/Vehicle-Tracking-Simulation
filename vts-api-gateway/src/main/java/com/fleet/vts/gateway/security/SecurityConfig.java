@@ -53,6 +53,11 @@ public class SecurityConfig {
                         // has to resolve to a known vehicle downstream, and streaming only starts
                         // after a human confirms the 2-digit pairing code.
                         .requestMatchers("/tracker.html", "/tracker.js").permitAll()
+                        // Driver app (plate+model+password sign-in, PWA shell): the page, its
+                        // script, the installable manifest/service-worker and icon. Its login and
+                        // telemetry live under /api/v1/track/** below.
+                        .requestMatchers("/driver.html", "/driver.js", "/manifest.webmanifest",
+                                "/sw.js", "/driver-icon.svg").permitAll()
                         .requestMatchers("/api/v1/track", "/api/v1/track/**").permitAll()
                         .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/actuator/health", "/actuator/prometheus",

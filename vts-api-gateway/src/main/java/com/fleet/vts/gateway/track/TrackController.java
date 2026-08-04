@@ -2,10 +2,11 @@ package com.fleet.vts.gateway.track;
 
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestClient;
 
@@ -32,18 +33,32 @@ public class TrackController {
     private static final String INGEST_BATCH_PATH = "/api/v1/telemetry/batch";
 
     private final RestClient ingestion;
+    private final DriverSessionService sessions;
 
-    public TrackController(RestClient ingestionRestClient) {
+    public TrackController(RestClient ingestionRestClient, DriverSessionService sessions) {
         this.ingestion = ingestionRestClient;
+        this.sessions = sessions;
     }
 
+    /**
+     * A driver-app phone echoes its {@code X-Device-Session} token here on every fix: it both
+     * refreshes the vehicle's single-driver lease and detects a takeover — if another device has
+     * since signed in, {@link DriverSessionService#refresh} returns false and we answer 409 so the
+     * phone stops streaming and re-prompts. The legacy QR tracker sends no such header; then the
+     * check is skipped and the fix is forwarded exactly as before (fully public, unchanged).
+     */
     @PostMapping
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    public void ingest(@Valid @RequestBody TrackRequest request) {
+    public ResponseEntity<Void> ingest(
+            @Valid @RequestBody TrackRequest request,
+            @RequestHeader(value = "X-Device-Session", required = false) String session) {
+        if (session != null && !session.isBlank() && !sessions.refresh(session)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
         ingestion.post()
                 .uri(INGEST_BATCH_PATH)
                 .body(List.of(request))
                 .retrieve()
                 .toBodilessEntity();
+        return ResponseEntity.accepted().build();
     }
 }

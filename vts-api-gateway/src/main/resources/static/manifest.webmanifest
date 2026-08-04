@@ -1,0 +1,14 @@
+{
+  "name": "FleetFlow Sürücü",
+  "short_name": "Sürücü",
+  "description": "Araca özel giriş ile canlı konum paylaşımı.",
+  "start_url": "/driver.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1220",
+  "theme_color": "#00f5d4",
+  "icons": [
+    { "src": "/driver-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
