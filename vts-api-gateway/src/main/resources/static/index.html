@@ -22,12 +22,13 @@
   ::-webkit-scrollbar-thumb { background:#2e3734; border-radius:10px; } ::-webkit-scrollbar-thumb:hover { background:#4edea3; }
   /* position:relative + z-index:0 → tüm Leaflet katmanlarını (marker/kontrol z~1000)
      kendi stacking context'ine hapseder; paneller ve giriş ekranı üstte kalır. */
-  #map { position:relative; height:100vh; width:100vw; z-index:0; background:#dfe4e8; }
+  #map { position:relative; height:100vh; width:100vw; z-index:0; background:#0e0e0e; }
   .nav-indicator { transition:all .3s cubic-bezier(.4,0,.2,1); }
   .fade-content { transition:opacity .3s ease, transform .3s ease; }
   .hidden-content { opacity:0; pointer-events:none; position:absolute; transform:translateY(10px); }
-  /* Açık, kullanıcı dostu harita (CartoDB Positron) — invert yok, ferah ve okunaklı. */
-  .leaflet-container { background:#dfe4e8; }
+  /* Koyu harita (OSM invert) — renkler yumuşatıldı: daha düşük doygunluk/kontrast, göz yormaz. */
+  .leaflet-tile { filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.88) saturate(.72); }
+  .leaflet-container { background:#0e0e0e; }
   .anim-in { animation:animIn .5s cubic-bezier(.2,.7,.2,1) both; }
   @keyframes animIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 </style>

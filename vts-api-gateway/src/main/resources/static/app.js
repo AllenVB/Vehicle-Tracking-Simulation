@@ -39,7 +39,7 @@
 
   async function start() {
     map = L.map("map", { zoomControl: false, attributionControl: false }).setView([41.02, 29.0], 11);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 20, subdomains: "abcd" }).addTo(map);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
     // Marker kümeleme: yakın araçlar zoom-out'ta tek daireye toplanır (üzerinde adet),
     // zoom ≥16'da tek tek gösterilir. Küme ikonu emerald temaya uygun.
     cluster = L.markerClusterGroup({
