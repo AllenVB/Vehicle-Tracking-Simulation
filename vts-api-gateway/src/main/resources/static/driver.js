@@ -461,16 +461,36 @@
   var msgEmpty = true;   // "Henüz mesaj yok." yer tutucusu hâlâ duruyor mu
 
   function startMessages() {
-    pollMessages();
-    msgTimer = setInterval(pollMessages, MSG_POLL_MS);
+    if (msgTimer) clearInterval(msgTimer);   // idempotent: çift interval → çift/üçlü mesaj olmasın
+    loadDriverHistory().then(function () {
+      pollMessages();
+      msgTimer = setInterval(pollMessages, MSG_POLL_MS);
+    });
+  }
+
+  // Tam sohbet geçmişini yükle (iki yön, kronolojik) + merkez mesajlarını "görüldü" işaretle,
+  // böylece hemen ardından çalışan poll onları TEKRAR getirmez (tekrar okumaz/basmaz).
+  function loadDriverHistory() {
+    if (!session) return Promise.resolve();
+    return fetch("/api/v1/track/history", { headers: { "X-Device-Session": session.sessionToken } })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (list) {
+        var box = $("msgList"); box.innerHTML = "";
+        if (!list || !list.length) { box.innerHTML = '<div class="note" style="text-align:left">Henüz mesaj yok.</div>'; msgEmpty = true; return; }
+        msgEmpty = false;
+        list.forEach(function (m) { appendMsg(m, m.direction === "FROM_DRIVER"); });
+      })
+      .catch(function () {});
   }
   function stopMessages() {
     if (msgTimer) { clearInterval(msgTimer); msgTimer = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
   }
 
+  var polling = false;
   function pollMessages() {
-    if (!session || !navigator.onLine) return;
+    if (!session || !navigator.onLine || polling) return;   // örtüşen poll'leri engelle
+    polling = true;
     fetch("/api/v1/track/messages", { headers: { "X-Device-Session": session.sessionToken } })
       .then(function (r) {
         if (r.status === 401) { sessionLost(); return []; }
@@ -480,7 +500,8 @@
       .then(function (list) {
         (list || []).forEach(function (m) { appendMsg(m, false); speak(m.body); });
       })
-      .catch(function () {});
+      .catch(function () {})
+      .then(function () { polling = false; });
   }
 
   function appendMsg(m, mine) {
@@ -488,11 +509,12 @@
     if (msgEmpty) { box.innerHTML = ""; msgEmpty = false; }
     var el = document.createElement("div");
     el.className = "msg" + (mine ? " me" : "");
-    var cat = document.createElement("div"); cat.className = "cat";
-    cat.textContent = mine ? "Yanıtın" : (m.category || "MESAJ");
+    var head = document.createElement("div"); head.className = "cat";
+    var t = m.at ? new Date(m.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+    head.textContent = (mine ? "Sen" : "Merkez") + (t ? " · " + t : "");
     var body = document.createElement("div"); body.className = "body";
     body.textContent = m.body || "";
-    el.appendChild(cat); el.appendChild(body);
+    el.appendChild(head); el.appendChild(body);
     box.appendChild(el);
     box.scrollTop = box.scrollHeight;
   }
@@ -532,7 +554,7 @@
       body: JSON.stringify({ text: text })
     }).then(function (r) {
       if (r.status === 401) return sessionLost();
-      if (r.ok) { appendMsg({ body: text }, true); $("msgInput").value = ""; }
+      if (r.ok) { appendMsg({ body: text, at: new Date().toISOString() }, true); $("msgInput").value = ""; }
     }).catch(function () {}).then(function () { if (btn) btn.disabled = false; });
   }
 

@@ -68,6 +68,24 @@ public class DriverMessageController {
         return ResponseEntity.ok(pulled);
     }
 
+    /**
+     * Full conversation history for the driver app (both directions, oldest first). Loaded once when
+     * the app opens; marks the operator messages as seen so the {@code /messages} poll won't read
+     * them again (and won't read them aloud a second time).
+     */
+    @GetMapping("/history")
+    public ResponseEntity<List<Map<String, Object>>> history(
+            @RequestHeader(value = "X-Device-Session", required = false) String session) {
+        Optional<DriverSessionService.Identity> id = sessions.identify(session);
+        if (id.isEmpty()) {
+            return ResponseEntity.status(401).build();
+        }
+        long vehicleId = id.get().vehicleId();
+        List<Map<String, Object>> history = messages.conversation(vehicleId);
+        messages.markDelivered(vehicleId);
+        return ResponseEntity.ok(history);
+    }
+
     @GetMapping("/reply-options")
     public List<Map<String, String>> replyOptions() {
         return REPLIES.entrySet().stream()

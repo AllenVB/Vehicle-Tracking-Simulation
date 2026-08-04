@@ -89,6 +89,29 @@ class DriverMessageControllerTest {
         verify(messaging).convertAndSend(eq("/topic/vehicle-messages"), (Object) any());
     }
 
+    @Test
+    void historyReturnsTheConversationAndMarksOperatorMessagesSeen() {
+        when(sessions.identify("tok")).thenReturn(Optional.of(new DriverSessionService.Identity(7, "devA")));
+        when(messages.conversation(7)).thenReturn(new ArrayList<>(List.of(
+                msg("2026-01-01T00:00:01Z", "merkez"), msg("2026-01-01T00:00:02Z", "surucu"))));
+
+        ResponseEntity<List<Map<String, Object>>> res = controller.history("tok");
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(res.getBody()).hasSize(2);
+        verify(messages).markDelivered(7);   // geçmişi açınca merkez mesajları "görüldü"
+    }
+
+    @Test
+    void historyWithoutASessionIs401() {
+        when(sessions.identify(null)).thenReturn(Optional.empty());
+
+        ResponseEntity<List<Map<String, Object>>> res = controller.history(null);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verify(messages, never()).conversation(org.mockito.ArgumentMatchers.anyLong());
+    }
+
     private static Map<String, Object> msg(String at, String body) {
         Map<String, Object> m = new HashMap<>();
         m.put("at", at);

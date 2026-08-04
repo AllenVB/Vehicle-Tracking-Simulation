@@ -66,18 +66,16 @@ public class VehicleMessageRepository {
     }
 
     /**
-     * Undelivered operator→driver messages for a vehicle, claimed atomically: a single
-     * {@code UPDATE ... RETURNING} marks them delivered and returns them in the same statement, so
-     * two concurrent polls from the same phone can never read the same message twice (the second
-     * finds nothing left to claim). Ordering is applied by the caller (by {@code at}).
+     * Undelivered operator→driver messages, claimed atomically. The {@code delivered_at IS NULL}
+     * predicate is in the UPDATE's own WHERE (not a subquery), so under READ COMMITTED a second
+     * concurrent poll re-evaluates each row after the first commits, sees it is no longer NULL and
+     * skips it — a message is therefore returned to the phone exactly once, even if several polls
+     * overlap. Ordering is applied by the caller (by {@code at}).
      */
     public List<Map<String, Object>> pullForDevice(long vehicleId) {
         return jdbc.query("""
                         UPDATE vehicle_message SET delivered_at = now()
-                        WHERE id IN (
-                            SELECT id FROM vehicle_message
-                            WHERE vehicle_id = ? AND direction = 'TO_DRIVER' AND delivered_at IS NULL
-                        )
+                        WHERE vehicle_id = ? AND direction = 'TO_DRIVER' AND delivered_at IS NULL
                         RETURNING category, body, created_at
                         """,
                 (rs, n) -> {
@@ -88,6 +86,37 @@ public class VehicleMessageRepository {
                     return m;
                 },
                 vehicleId);
+    }
+
+    /**
+     * The vehicle's full conversation (both directions, last 50, oldest first) for the DRIVER app's
+     * history — session-scoped, so no tenant filter. Does not mark anything delivered; the caller
+     * marks the operator messages seen separately.
+     */
+    public List<Map<String, Object>> conversation(long vehicleId) {
+        return jdbc.query("""
+                        SELECT category, body, direction, created_at FROM (
+                            SELECT category, body, direction, created_at
+                            FROM vehicle_message
+                            WHERE vehicle_id = ?
+                            ORDER BY created_at DESC LIMIT 50
+                        ) t ORDER BY created_at ASC
+                        """,
+                (rs, n) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("category", rs.getString("category"));
+                    m.put("body", rs.getString("body"));
+                    m.put("direction", rs.getString("direction"));
+                    m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
+                    return m;
+                },
+                vehicleId);
+    }
+
+    /** Mark all undelivered operator→driver messages as seen (used when the driver loads history). */
+    public void markDelivered(long vehicleId) {
+        jdbc.update("UPDATE vehicle_message SET delivered_at = now() "
+                + "WHERE vehicle_id = ? AND direction = 'TO_DRIVER' AND delivered_at IS NULL", vehicleId);
     }
 
     /** A driver's one-tap reply, stored FROM_DRIVER (and already "delivered", it is outbound). */
