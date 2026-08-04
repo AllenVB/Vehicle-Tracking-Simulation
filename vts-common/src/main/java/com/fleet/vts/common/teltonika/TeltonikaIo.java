@@ -29,7 +29,4 @@ public final class TeltonikaIo {
 
     /** Fuel level from the CAN adapter, percent. */
     public static final int FUEL_LEVEL_PCT = 89;
-
-    /** GSM signal strength, 0-5. */
-    public static final int GSM_SIGNAL = 21;
 }

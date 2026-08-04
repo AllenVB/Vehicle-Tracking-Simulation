@@ -25,10 +25,6 @@ public final class Topics {
     /** Poison telemetry payloads that failed validation/parsing. */
     public static final String TELEMETRY_DLQ = "vehicle.telemetry.dlq";
 
-    /** Retry chain for transient processing failures (exponential backoff). */
-    public static final String TELEMETRY_RETRY_5S = "vehicle.telemetry.raw.retry-5s";
-    public static final String TELEMETRY_RETRY_1M = "vehicle.telemetry.raw.retry-1m";
-
     /** Violations produced by stateless (processing) and stateful (analytics) rules. */
     public static final String VIOLATION = "vehicle.violation";
 
@@ -40,9 +36,6 @@ public final class Topics {
 
     /** Driver-facing notifications produced by the notification service. */
     public static final String NOTIFICATION = "vehicle.notification";
-
-    /** Broadcast to invalidate rule/threshold caches when a rule changes. */
-    public static final String RULE_CACHE_INVALIDATION = "vehicle.rule.cache-invalidation";
 
     /**
      * Operator instructions for devices (Codec 12), consumed by every ingestion instance.

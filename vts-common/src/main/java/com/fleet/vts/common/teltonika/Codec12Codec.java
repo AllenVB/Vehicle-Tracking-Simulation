@@ -57,15 +57,6 @@ public final class Codec12Codec {
         return encode(command, TYPE_COMMAND);
     }
 
-    /** Device to server. */
-    public static byte[] encodeResponse(String response) {
-        return encode(response, TYPE_RESPONSE);
-    }
-
-    public static String decodeCommand(byte[] packet) {
-        return decode(packet, TYPE_COMMAND);
-    }
-
     public static String decodeResponse(byte[] packet) {
         return decode(packet, TYPE_RESPONSE);
     }
