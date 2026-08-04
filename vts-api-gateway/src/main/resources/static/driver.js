@@ -34,6 +34,15 @@
   var sentCount = 0;
   var battery = null;
 
+  // 1d — akıllı hız limiti (client): Overpass'tan yol limiti, hücre önbelleği, tolerans.
+  var SPEED_CACHE_KEY = "vts_speedcache";
+  var OVERPASS_MIN_MS = 12000;    // Overpass'a en sık istek aralığı (maliyet/rate-limit)
+  var OVER_TOLERANCE_MS = 15000;  // kesintisiz aşım süresi — anlık ceza yok
+  var SPEED_NOISE = 3;            // km/s GPS gürültü payı
+  var speedLimit = null;          // bilinen limit (km/s) veya null
+  var overStart = 0, overWarned = false, lastOverpassAt = 0;
+  var speedCache = loadSpeedCache();
+
   // ── QR / derin bağlantı ile plaka+model ön-doldurma ───────────────────────
   var qs = new URLSearchParams(location.search);
   if (qs.get("plate")) $("plate").value = qs.get("plate");
@@ -140,6 +149,7 @@
 
     $("mSpeed").textContent = speedKmh == null ? "–" : speedKmh;
     $("mAcc").textContent = c.accuracy == null ? "–" : Math.round(c.accuracy);
+    checkSpeedLimit(c.latitude, c.longitude, speedKmh);
 
     if (now - lastSentAt < MIN_INTERVAL_MS) return;   // ≤1/sn kıs
     lastSentAt = now;
@@ -180,6 +190,91 @@
     var a = Math.sin(dLa / 2) * Math.sin(dLa / 2) +
       Math.cos(la1 * rad) * Math.cos(la2 * rad) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // ── Akıllı hız limiti (Overpass + hücre önbelleği + tolerans) ─────────────
+  // Yolun hız limiti OSM'den (Overpass) çekilir ve ~110m'lik hücrelerde önbelleğe
+  // alınır (aynı yolda tekrar sorgu yok → API maliyeti düşer). Aşım ANLIK
+  // cezalandırılmaz: kesintisiz OVER_TOLERANCE_MS boyunca aşılırsa sürücü uyarılır.
+  // Bu bir sürücü UYARISIDIR; resmi ihlal kararını backend kural motoru verir.
+  var HW_DEFAULT = {
+    motorway: 120, motorway_link: 80, trunk: 90, trunk_link: 70,
+    primary: 90, primary_link: 50, secondary: 70, secondary_link: 50,
+    tertiary: 60, tertiary_link: 40, residential: 50, living_street: 20,
+    service: 20, unclassified: 50
+  };
+
+  function loadSpeedCache() {
+    try { return JSON.parse(localStorage.getItem(SPEED_CACHE_KEY) || "{}"); } catch (e) { return {}; }
+  }
+  function cellKey(lat, lon) { return lat.toFixed(3) + "," + lon.toFixed(3); }   // ~110m ızgara
+
+  function checkSpeedLimit(lat, lon, speedKmh) {
+    var key = cellKey(lat, lon);
+    if (Object.prototype.hasOwnProperty.call(speedCache, key)) {
+      speedLimit = speedCache[key];                 // önbellekten (null = bilinmiyor)
+    } else if (navigator.onLine && Date.now() - lastOverpassAt > OVERPASS_MIN_MS) {
+      lastOverpassAt = Date.now();
+      fetchOverpass(lat, lon, key);
+    }
+    setLimitUI();
+    if (speedKmh != null) evaluateOverspeed(speedKmh);
+  }
+
+  function fetchOverpass(lat, lon, key) {
+    var q = "[out:json][timeout:8];way(around:30," + lat + "," + lon + ")[highway];out tags 8;";
+    fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST", headers: { "Content-Type": "text/plain" }, body: "data=" + encodeURIComponent(q)
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var limit = d ? bestLimit(d.elements || []) : null;
+        speedCache[key] = limit;                    // null da saklanır: hücre tekrar sorgulanmaz
+        try { localStorage.setItem(SPEED_CACHE_KEY, JSON.stringify(speedCache)); } catch (e) {}
+        speedLimit = limit; setLimitUI();
+      }).catch(function () {});
+  }
+
+  // Önce maxspeed etiketli yolu; yoksa yakındaki en büyük highway sınıfının varsayılanı.
+  function bestLimit(els) {
+    for (var i = 0; i < els.length; i++) {
+      var v = parseMaxspeed(els[i].tags);
+      if (v) return v;
+    }
+    var best = null;
+    for (var j = 0; j < els.length; j++) {
+      var t = els[j].tags || {}, d = HW_DEFAULT[t.highway];
+      if (d && (best == null || d > best)) best = d;
+    }
+    return best;
+  }
+
+  function parseMaxspeed(tags) {
+    if (!tags || !tags.maxspeed) return null;
+    var ms = String(tags.maxspeed);
+    if (/mph/i.test(ms)) { var n = parseInt(ms, 10); return n ? Math.round(n * 1.60934) : null; }
+    var k = parseInt(ms, 10);
+    return k ? k : null;                             // "RO:urban" gibi sayısal olmayan → yok say
+  }
+
+  function setLimitUI() {
+    $("mLimit").textContent = "Limit: " + (speedLimit ? speedLimit + " km/s" : "–");
+  }
+
+  function evaluateOverspeed(speedKmh) {
+    if (speedLimit && speedKmh > speedLimit + SPEED_NOISE) {
+      if (!overStart) overStart = Date.now();
+      if (Date.now() - overStart >= OVER_TOLERANCE_MS) {
+        $("speedTile").classList.add("over");
+        if (!overWarned) {
+          overWarned = true;
+          if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+          speak("Hız limitini aştınız");
+        }
+      }
+    } else {
+      overStart = 0; overWarned = false;
+      $("speedTile").classList.remove("over");
+    }
   }
 
   // ── Çevrimdışı depo (Store & Forward): IndexedDB, localStorage'a fallback ──
