@@ -616,19 +616,26 @@
   }
   function showTab(id) {
     ["tabDrive", "tabMap", "tabMsg", "tabAnnounce"].forEach(function (t) {
-      var el = $(t); if (el) el.classList.toggle("hidden", t !== id);
+      var el = $(t); if (!el) return;
+      var show = t === id;
+      el.classList.toggle("hidden", !show);
+      // Yumuşak giriş: paneli yeniden akışa sokarken enter animasyonunu baştan tetikle.
+      if (show) { el.classList.remove("tab-enter"); void el.offsetWidth; el.classList.add("tab-enter"); }
     });
     document.querySelectorAll(".navBtn").forEach(function (b) {
       b.classList.toggle("active", b.getAttribute("data-tab") === id);
     });
     if (id === "tabMap") {
       initMap();
-      // Harita gizliyken kurulduysa boyutu 0 olur; görünür olunca yeniden ölç.
-      setTimeout(function () {
+      // Harita gizliyken kurulduysa boyutu 0 olur; görünür olunca ve giriş animasyonu
+      // bitince iki kez yeniden ölç (kayma/gri alan olmasın).
+      var remeasure = function () {
         if (!lmap) return;
         lmap.invalidateSize();
         if (meMarker && mapFollow) lmap.setView(meMarker.getLatLng(), Math.max(lmap.getZoom(), 15));
-      }, 60);
+      };
+      setTimeout(remeasure, 80);
+      setTimeout(remeasure, 380);
     }
     if (id === "tabAnnounce") clearAnnounceBadge();
   }

@@ -46,9 +46,6 @@ public class DriverMessageController {
     static {
         REPLIES.put("YOLDA", "Yoldayım");
         REPLIES.put("MUSTERI", "Müşterideyim");
-        REPLIES.put("MOLA", "Moladayım");
-        REPLIES.put("TESLIM", "Teslim tamamlandı");
-        REPLIES.put("YARDIM", "Yardım gerekiyor");
     }
 
     private final DriverSessionService sessions;

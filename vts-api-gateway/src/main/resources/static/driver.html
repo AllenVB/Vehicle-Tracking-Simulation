@@ -43,7 +43,9 @@
     button {
       width: 100%; margin-top: 18px; padding: 15px; border: 0; border-radius: 12px; cursor: pointer;
       background: linear-gradient(180deg, var(--teal), var(--teal-dim)); color: #04231f; font-size: 16px; font-weight: 700;
+      transition: transform .12s ease, opacity .2s ease; touch-action: manipulation;
     }
+    button:active:not(:disabled) { transform: scale(.98); }
     button:disabled { opacity: .55; }
     button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
     .err { color: var(--danger); min-height: 18px; font-size: 13px; margin-top: 10px; }
@@ -70,7 +72,8 @@
 
     /* Mesajlaşma */
     .sectionLabel { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; margin: 4px 0 8px; }
-    .msgList { display: flex; flex-direction: column; gap: 8px; max-height: 48dvh; overflow-y: auto; }
+    .msgList { display: flex; flex-direction: column; gap: 8px; max-height: 48dvh; overflow-y: auto;
+      -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
     /* WhatsApp gibi: gelen (Merkez) solda, kendi mesajın (Sen) sağda. */
     .msg { max-width: 82%; align-self: flex-start; background: #12324a; border: 1px solid var(--line);
       border-radius: 12px 12px 12px 4px; padding: 8px 12px; }
@@ -92,6 +95,9 @@
 
     /* ── Sekmeler (SPA) ─────────────────────────────────────── */
     .tabPanel { display: flex; flex-direction: column; }
+    /* Sekme geçişi: yeni panel yumuşakça yukarı kayarak açılır (tek yönlü, jank yok). */
+    .tabPanel.tab-enter { animation: tabIn .34s cubic-bezier(.2, .7, .2, 1) both; }
+    @keyframes tabIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
     /* Gömülü harita: koyu tema (OSM invert), kendi konum + rota izi */
     #map { height: calc(100dvh - 260px); min-height: 300px; width: 100%; border-radius: 18px;
       border: 1px solid var(--line); overflow: hidden; background: #0c1a2b; z-index: 0; }
@@ -110,7 +116,8 @@
     .mapRecenter svg { width: 24px; height: 24px; }
 
     /* ── Duyurular ──────────────────────────────────────────── */
-    .announceList { display: flex; flex-direction: column; gap: 10px; max-height: calc(100dvh - 210px); overflow-y: auto; }
+    .announceList { display: flex; flex-direction: column; gap: 10px; max-height: calc(100dvh - 210px); overflow-y: auto;
+      -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
     .announce { background: #0c1a2b; border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 14px; padding: 12px 14px; }
     .announce .t { font-weight: 800; margin-bottom: 3px; }
     .announce .meta { color: var(--muted); font-size: 11px; margin-top: 6px; }
@@ -131,13 +138,23 @@
     .bottomNav { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: 100%; max-width: 520px;
       display: flex; background: rgba(9,16,26,.94); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
       border-top: 1px solid var(--line); padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); z-index: 50; }
-    .navBtn { flex: 1; width: auto; margin: 0; padding: 5px 0; background: none; border: 0; color: var(--muted);
-      display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; position: relative; }
-    .navBtn svg { width: 24px; height: 24px; }
-    .navBtn.active { color: var(--teal); }
+    .navBtn { flex: 1; width: auto; margin: 0 3px; padding: 6px 0; background: none; border: 0; border-radius: 14px; color: var(--muted);
+      display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; position: relative;
+      transition: color .25s ease, background-color .25s ease, transform .12s ease; }
+    .navBtn svg { width: 24px; height: 24px; transition: transform .28s cubic-bezier(.2, .7, .2, 1); }
+    .navBtn.active { color: var(--teal); background: rgba(0, 245, 212, .10); }
+    .navBtn.active svg { transform: translateY(-1px) scale(1.1); }
+    .navBtn:active { transform: scale(.93); }
     .navBtn .navBadge { position: absolute; top: -2px; right: calc(50% - 24px); min-width: 17px; height: 17px; padding: 0 4px;
       border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 800;
-      display: flex; align-items: center; justify-content: center; border: 2px solid #0b1220; }
+      display: flex; align-items: center; justify-content: center; border: 2px solid #0b1220; animation: badgePop .28s cubic-bezier(.2, .7, .2, 1); }
+    @keyframes badgePop { from { transform: scale(0); } to { transform: scale(1); } }
+
+    /* Erişilebilirlik: hareket azaltma tercihinde tüm geçiş/animasyonları kapat. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important; scroll-behavior: auto !important; }
+    }
   </style>
 </head>
 <body>
