@@ -515,10 +515,9 @@
     head.textContent = (mine ? "Sen" : "Merkez") + (t ? " · " + t : "");
     var body = document.createElement("div"); body.className = "body";
     if (m.audio) {
-      var pb = document.createElement("button"); pb.type = "button"; pb.className = "audioBtn";
-      pb.textContent = "▶ Sesli mesaj";
-      pb.onclick = function () { try { new Audio("/api/v1/track/audio/" + m.audio).play(); } catch (e) {} };
-      body.appendChild(pb);
+      var au = document.createElement("audio"); au.controls = true; au.preload = "metadata";
+      au.src = "/api/v1/track/audio/" + m.audio; au.style.maxWidth = "210px"; au.style.height = "40px";
+      body.appendChild(au);
     } else { body.textContent = m.body || ""; }
     el.appendChild(head); el.appendChild(body);
     box.appendChild(el);

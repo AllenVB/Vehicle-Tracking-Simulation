@@ -376,10 +376,10 @@
     wrap.scrollTop = wrap.scrollHeight;
   }
   function audioButton(ref) {
-    const b = document.createElement("button"); b.type = "button"; b.className = "audio-btn";
-    b.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px">play_arrow</span> Sesli mesaj';
-    b.onclick = function () { try { new Audio("/api/v1/track/audio/" + ref).play(); } catch (e) {} };
-    return b;
+    const a = document.createElement("audio");
+    a.controls = true; a.preload = "metadata"; a.src = "/api/v1/track/audio/" + ref;
+    a.style.maxWidth = "210px"; a.style.height = "40px"; a.style.display = "block";
+    return a;
   }
   // Tek tık başlat / durdur ses kaydı (MediaRecorder), 60 sn üst sınır.
   var mediaRec = null, recChunks = [];

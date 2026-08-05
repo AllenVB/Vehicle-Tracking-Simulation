@@ -65,11 +65,14 @@
 
     /* Mesajlaşma */
     .sectionLabel { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; margin: 16px 0 6px; }
-    .msgList { display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; }
-    .msg { background: #0c1a2b; border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 10px; padding: 10px 12px; }
-    .msg .cat { color: var(--teal-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+    .msgList { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; }
+    /* WhatsApp gibi: gelen (Merkez) solda, kendi mesajın (Sen) sağda. */
+    .msg { max-width: 82%; align-self: flex-start; background: #12324a; border: 1px solid var(--line);
+      border-radius: 12px 12px 12px 4px; padding: 8px 12px; }
+    .msg .cat { color: var(--teal-dim); font-size: 10px; }
     .msg .body { margin-top: 2px; }
-    .msg.me { border-left-color: var(--muted); opacity: .85; }
+    .msg.me { align-self: flex-end; background: rgba(0, 245, 212, .16); border-radius: 12px 12px 4px 12px; }
+    .msg.me .cat { color: var(--teal); text-align: right; }
     .replies { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .replies button { width: auto; margin-top: 0; padding: 12px 14px; font-size: 14px; flex: 1 1 42%;
       background: #12324a; color: var(--text); border: 1px solid var(--line); font-weight: 600; }
