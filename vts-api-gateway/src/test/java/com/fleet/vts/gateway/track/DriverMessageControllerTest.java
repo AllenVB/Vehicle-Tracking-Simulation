@@ -1,5 +1,6 @@
 package com.fleet.vts.gateway.track;
 
+import com.fleet.vts.gateway.repository.BroadcastMessageRepository;
 import com.fleet.vts.gateway.repository.VehicleMessageRepository;
 import com.fleet.vts.gateway.web.AudioStore;
 import org.junit.jupiter.api.Test;
@@ -31,9 +32,11 @@ class DriverMessageControllerTest {
 
     private final DriverSessionService sessions = mock(DriverSessionService.class);
     private final VehicleMessageRepository messages = mock(VehicleMessageRepository.class);
+    private final BroadcastMessageRepository broadcasts = mock(BroadcastMessageRepository.class);
     private final SimpMessagingTemplate messaging = mock(SimpMessagingTemplate.class);
     private final AudioStore audio = mock(AudioStore.class);
-    private final DriverMessageController controller = new DriverMessageController(sessions, messages, messaging, audio);
+    private final DriverMessageController controller =
+            new DriverMessageController(sessions, messages, broadcasts, messaging, audio);
 
     @Test
     void inboxWithoutASessionIs401() {
@@ -112,6 +115,28 @@ class DriverMessageControllerTest {
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         verify(messages, never()).conversation(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void broadcastsAreScopedToTheSessionsVehicleTenant() {
+        when(sessions.identify("tok")).thenReturn(Optional.of(new DriverSessionService.Identity(7, "devA")));
+        when(broadcasts.recentForVehicle(7)).thenReturn(new ArrayList<>(List.of(msg("2026-01-01T00:00:01Z", "duyuru"))));
+
+        ResponseEntity<List<Map<String, Object>>> res = controller.broadcasts("tok");
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(res.getBody()).hasSize(1);
+        verify(broadcasts).recentForVehicle(7);
+    }
+
+    @Test
+    void broadcastsWithoutASessionIs401() {
+        when(sessions.identify(null)).thenReturn(Optional.empty());
+
+        ResponseEntity<List<Map<String, Object>>> res = controller.broadcasts(null);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verify(broadcasts, never()).recentForVehicle(org.mockito.ArgumentMatchers.anyLong());
     }
 
     private static Map<String, Object> msg(String at, String body) {

@@ -105,12 +105,15 @@
     $("platePill").textContent = session.plate || "";
     $("loginBtn").disabled = false;
     setStatus("wait", "Konum bekleniyor…");
+    initTabs();
+    showTab("tabDrive");
     requestWakeLock();
     startGps();
     flushBacklog();
     updateQueued();
     loadReplyOptions();
     startMessages();
+    startBroadcasts();
   }
 
   $("stopBtn").onclick = function () {
@@ -120,6 +123,7 @@
     }).catch(function () {});
     stopGps();
     stopMessages();
+    stopBroadcasts();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     session = null;
@@ -161,6 +165,7 @@
 
     $("mSpeed").textContent = speedKmh == null ? "–" : speedKmh;
     $("mAcc").textContent = c.accuracy == null ? "–" : Math.round(c.accuracy);
+    updateMap(c.latitude, c.longitude, speedKmh);
     checkSpeedLimit(c.latitude, c.longitude, speedKmh);
 
     if (now - lastSentAt < MIN_INTERVAL_MS) return;   // ≤1/sn kıs
@@ -270,6 +275,7 @@
 
   function setLimitUI() {
     $("mLimit").textContent = "Limit: " + (speedLimit ? speedLimit + " km/s" : "–");
+    var ml = $("mapLimit"); if (ml) ml.textContent = speedLimit ? speedLimit : "–";
   }
 
   function evaluateOverspeed(speedKmh) {
@@ -277,6 +283,7 @@
       if (!overStart) overStart = Date.now();
       if (Date.now() - overStart >= OVER_TOLERANCE_MS) {
         $("speedTile").classList.add("over");
+        $("mapSpeedChip").classList.add("over");
         if (!overWarned) {
           overWarned = true;
           if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -286,6 +293,7 @@
     } else {
       overStart = 0; overWarned = false;
       $("speedTile").classList.remove("over");
+      $("mapSpeedChip").classList.remove("over");
     }
   }
 
@@ -403,6 +411,7 @@
     setStatus("off", "Bu araca başka bir cihaz giriş yaptı.");
     stopGps();
     stopMessages();
+    stopBroadcasts();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     setTimeout(function () {
@@ -591,6 +600,150 @@
       .then(function (d) { if (d && d.audio) appendMsg({ body: "🎤 Sesli mesaj", at: d.at, audio: d.audio }, true); })
       .catch(function () {});
   }
+
+  // ── Sekmeler (alt bar ile SPA geçişi) ─────────────────────────────────────
+  var tabsInit = false;
+  function initTabs() {
+    if (tabsInit) return; tabsInit = true;
+    document.querySelectorAll(".navBtn").forEach(function (b) {
+      b.onclick = function () { showTab(b.getAttribute("data-tab")); };
+    });
+    var rc = $("mapRecenter");
+    if (rc) rc.onclick = function () {
+      mapFollow = true;
+      if (mapReady && meMarker) lmap.setView(meMarker.getLatLng(), Math.max(lmap.getZoom(), 16));
+    };
+  }
+  function showTab(id) {
+    ["tabDrive", "tabMap", "tabMsg", "tabAnnounce"].forEach(function (t) {
+      var el = $(t); if (el) el.classList.toggle("hidden", t !== id);
+    });
+    document.querySelectorAll(".navBtn").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-tab") === id);
+    });
+    if (id === "tabMap") {
+      initMap();
+      // Harita gizliyken kurulduysa boyutu 0 olur; görünür olunca yeniden ölç.
+      setTimeout(function () {
+        if (!lmap) return;
+        lmap.invalidateSize();
+        if (meMarker && mapFollow) lmap.setView(meMarker.getLatLng(), Math.max(lmap.getZoom(), 15));
+      }, 60);
+    }
+    if (id === "tabAnnounce") clearAnnounceBadge();
+  }
+
+  // ── Gömülü harita (kendi konum + rota izi) ────────────────────────────────
+  var lmap = null, meMarker = null, trail = null, trailPts = [], mapFollow = true, mapReady = false;
+  function initMap() {
+    if (mapReady || typeof L === "undefined") return;
+    lmap = L.map("map", { zoomControl: true, attributionControl: false }).setView([41.02, 29.0], 15);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(lmap);
+    trail = L.polyline(trailPts, { color: "#00f5d4", weight: 4, opacity: .85 }).addTo(lmap);
+    lmap.on("dragstart", function () { mapFollow = false; });   // kullanıcı gezerken takibi bırak
+    mapReady = true;
+    if (lastFix) placeMe(lastFix.lat, lastFix.lon);
+  }
+  function meIcon() {
+    return L.divIcon({ className: "", iconSize: [18, 18], iconAnchor: [9, 9],
+      html: '<div style="width:14px;height:14px;border-radius:50%;background:#00f5d4;border:3px solid #0b1220;box-shadow:0 0 10px rgba(0,245,212,.9)"></div>' });
+  }
+  function placeMe(lat, lon) {
+    if (!mapReady) return;
+    if (!meMarker) meMarker = L.marker([lat, lon], { icon: meIcon(), zIndexOffset: 1000 }).addTo(lmap);
+    else meMarker.setLatLng([lat, lon]);
+    if (mapFollow) lmap.panTo([lat, lon], { animate: true, duration: .4 });
+  }
+  // onPos'tan beslenir: iz noktası ekle (harita kapalıyken bile birikir), marker'ı taşı.
+  function updateMap(lat, lon, speedKmh) {
+    var last = trailPts[trailPts.length - 1];
+    if (!last || haversine(last[0], last[1], lat, lon) > 4) {   // >4 m: gürültüyle iz şişmesin
+      trailPts.push([lat, lon]);
+      if (trailPts.length > 1000) trailPts.shift();
+      if (trail) trail.setLatLngs(trailPts);
+    }
+    placeMe(lat, lon);
+    var ms = $("mapSpeed"); if (ms) ms.textContent = speedKmh == null ? "–" : speedKmh;
+  }
+
+  // ── Admin duyuruları (poll — telefonda JWT yok, /topic yerine anket) ───────
+  var BC_POLL_MS = 12000, bcTimer = null, bcPolling = false;
+  var BC_SEEN_KEY = "vts_bcast_seen";
+  var bcSeen = loadBcSeen();
+  var bcPrimed = localStorage.getItem(BC_SEEN_KEY) != null;   // daha önce açıldıysa geçmiş "görülmüş"
+  var bcUnread = 0, bcBannerTimer = null;
+
+  function loadBcSeen() { try { return new Set(JSON.parse(localStorage.getItem(BC_SEEN_KEY) || "[]")); } catch (e) { return new Set(); } }
+  function saveBcSeen() { try { localStorage.setItem(BC_SEEN_KEY, JSON.stringify(Array.from(bcSeen).slice(-300))); } catch (e) {} }
+
+  function startBroadcasts() { if (bcTimer) clearInterval(bcTimer); pollBroadcasts(); bcTimer = setInterval(pollBroadcasts, BC_POLL_MS); }
+  function stopBroadcasts() { if (bcTimer) { clearInterval(bcTimer); bcTimer = null; } hideBcBanner(); }
+
+  function pollBroadcasts() {
+    if (!session || !navigator.onLine || bcPolling) return;
+    bcPolling = true;
+    fetch("/api/v1/track/broadcasts", { headers: { "X-Device-Session": session.sessionToken } })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (list) {
+        list = list || [];
+        renderAnnounce(list);
+        var fresh = list.filter(function (b) { return b.id != null && !bcSeen.has(b.id); });
+        list.forEach(function (b) { if (b.id != null) bcSeen.add(b.id); });
+        saveBcSeen();
+        if (!bcPrimed) { bcPrimed = true; return; }        // ilk yükleme: banner yok (geçmiş)
+        fresh.slice().reverse().forEach(onNewBroadcast);   // eskiden yeniye sırayla göster
+      })
+      .catch(function () {})
+      .then(function () { bcPolling = false; });
+  }
+
+  function onNewBroadcast(b) {
+    if ($("tabAnnounce").classList.contains("hidden")) { bcUnread++; updateAnnounceBadge(); }
+    showBcBanner(b);
+    if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+    speak((b.title ? b.title + ". " : "") + (b.body || ""));   // sürüşte sesli okunur
+  }
+
+  function showBcBanner(b) {
+    var el = $("bcastBanner");
+    var tt = $("bcastBannerTitle");
+    tt.textContent = b.title || ""; tt.style.display = b.title ? "" : "none";
+    $("bcastBannerBody").textContent = b.body || "";
+    el.classList.remove("hidden");
+    el.onclick = function () { hideBcBanner(); showTab("tabAnnounce"); };
+    el.style.top = "-200px"; el.style.opacity = "0";
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      el.style.top = "calc(env(safe-area-inset-top) + 10px)"; el.style.opacity = "1";
+    }); });
+    if (bcBannerTimer) clearTimeout(bcBannerTimer);
+    bcBannerTimer = setTimeout(hideBcBanner, 10000);   // 10 sn ekranda kalır
+  }
+  function hideBcBanner() {
+    var el = $("bcastBanner"); if (!el) return;
+    el.style.top = "-200px"; el.style.opacity = "0";
+    setTimeout(function () { el.classList.add("hidden"); }, 420);
+  }
+
+  function renderAnnounce(list) {
+    var box = $("announceList");
+    if (!list.length) { box.innerHTML = '<div class="note" style="text-align:left">Henüz duyuru yok.</div>'; return; }
+    box.innerHTML = "";
+    list.forEach(function (b) {
+      var el = document.createElement("div"); el.className = "announce";
+      if (b.title) { var t = document.createElement("div"); t.className = "t"; t.textContent = b.title; el.appendChild(t); }
+      var body = document.createElement("div"); body.textContent = b.body || ""; el.appendChild(body);
+      var meta = document.createElement("div"); meta.className = "meta";
+      var when = b.at ? new Date(b.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+      meta.textContent = (b.sender || "admin") + (when ? " · " + when : ""); el.appendChild(meta);
+      box.appendChild(el);
+    });
+  }
+  function updateAnnounceBadge() {
+    var el = $("announceBadge");
+    if (bcUnread > 0) { el.textContent = bcUnread > 99 ? "99+" : bcUnread; el.classList.remove("hidden"); }
+    else el.classList.add("hidden");
+  }
+  function clearAnnounceBadge() { bcUnread = 0; updateAnnounceBadge(); }
 
   // ── PWA service worker ────────────────────────────────────────────────────
   if ("serviceWorker" in navigator) {

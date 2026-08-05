@@ -1,5 +1,6 @@
 package com.fleet.vts.gateway.track;
 
+import com.fleet.vts.gateway.repository.BroadcastMessageRepository;
 import com.fleet.vts.gateway.repository.VehicleMessageRepository;
 import com.fleet.vts.gateway.web.AudioStore;
 import org.springframework.http.ResponseEntity;
@@ -52,13 +53,16 @@ public class DriverMessageController {
 
     private final DriverSessionService sessions;
     private final VehicleMessageRepository messages;
+    private final BroadcastMessageRepository broadcasts;
     private final SimpMessagingTemplate messaging;
     private final AudioStore audio;
 
     public DriverMessageController(DriverSessionService sessions, VehicleMessageRepository messages,
-                                   SimpMessagingTemplate messaging, AudioStore audio) {
+                                   BroadcastMessageRepository broadcasts, SimpMessagingTemplate messaging,
+                                   AudioStore audio) {
         this.sessions = sessions;
         this.messages = messages;
+        this.broadcasts = broadcasts;
         this.messaging = messaging;
         this.audio = audio;
     }
@@ -91,6 +95,22 @@ public class DriverMessageController {
         List<Map<String, Object>> history = messages.conversation(vehicleId);
         messages.markDelivered(vehicleId);
         return ResponseEntity.ok(history);
+    }
+
+    /**
+     * Admin broadcast announcements for the driver's fleet, newest first. The phone has no JWT, so it
+     * cannot subscribe to the {@code /topic/broadcast} STOMP channel the operator panel uses; instead
+     * it polls here (device-session scoped to the vehicle's tenant) and shows new items as a top
+     * banner + a Duyurular tab, deduplicating by id on the client.
+     */
+    @GetMapping("/broadcasts")
+    public ResponseEntity<List<Map<String, Object>>> broadcasts(
+            @RequestHeader(value = "X-Device-Session", required = false) String session) {
+        Optional<DriverSessionService.Identity> id = sessions.identify(session);
+        if (id.isEmpty()) {
+            return ResponseEntity.status(401).build();
+        }
+        return ResponseEntity.ok(broadcasts.recentForVehicle(id.get().vehicleId()));
     }
 
     @GetMapping("/reply-options")
