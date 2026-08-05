@@ -9,6 +9,11 @@
   const tripCache = new Map();  // id -> {distanceKm, ecoScore, score}
   const recentVios = [];        // {vehicleId,ruleCode,value,threshold,occurredAt}
   let fleetFilter = "all", dash = null, cluster = null;
+  const broadcasts = [];          // {id, sender, title, body, at} — en yeni önce (bildirim paneli)
+  const bcastSeen = new Set();    // aynı duyuruyu iki kez işlemeyi önle (id)
+  let bcastUnread = 0;            // çandaki okunmamış rozet sayısı
+  const bannerQueue = []; let bannerBusy = false;   // ortadaki 10 sn banner kuyruğu (üst üste binmesin)
+  const BANNER_MS = 10000;        // "10 saniye boyunca kalsın"
   const STALE_MS = 30000, VIO_SPEED = 82, STOP_SPEED = 3, MIN_STOP_SEC = 120, STOP_RADIUS_M = 40;
   const RED_WINDOW_MS = 120000;   // 6b: bir nokta, gerçek hız ihlalinin ±2 dk'sındaysa kırmızı
 
@@ -63,6 +68,8 @@
     initPlayback();
     initFleet();
     initChat();
+    initBroadcast();
+    loadBroadcasts();
     loadDashboard();
     setInterval(loadVehicles, 15000);
     setInterval(sweep, 5000);
@@ -115,6 +122,7 @@
       stomp.subscribe("/topic/fleet/live", m => apply(JSON.parse(m.body).vehicles || []));
       stomp.subscribe("/topic/violations", m => onViolation(JSON.parse(m.body), true));
       stomp.subscribe("/topic/vehicle-messages", m => onDriverMessage(JSON.parse(m.body)));
+      stomp.subscribe("/topic/broadcast", m => onBroadcast(JSON.parse(m.body)));   // admin duyurusu (pub/sub)
     };
     stomp.onWebSocketClose = () => setConn(false);
     stomp.activate();
@@ -299,6 +307,145 @@
     el.style.display = "flex";
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.style.display = "none"; }, 5000);
+  }
+
+  // ── Genel duyuru (admin → tüm kullanıcılar, pub/sub) ──────────────────────
+  // Akış: admin duyuru gönderir → backend /topic/broadcast'e yayınlar → her bağlı
+  // panelde önce ORTADA üstten bir banner düşer (10 sn), sonra sağ üstteki çana
+  // "gider" (rozet artar). Geçmiş duyurular çan panelinde kalır. Araç sohbetinden
+  // (vehicle-messages) tamamen ayrıdır — ona dokunulmaz.
+  function initBroadcast() {
+    const composer = $("bcastComposer"), panel = $("bellPanel");
+    $("bcastComposeBtn").onclick = e => { e.stopPropagation(); panel.classList.add("hidden"); composer.classList.toggle("hidden");
+      if (!composer.classList.contains("hidden")) $("bcastBody").focus(); };
+    $("bcastClose").onclick = () => composer.classList.add("hidden");
+    $("bcastSend").onclick = sendBroadcast;
+    $("bcastBody").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBroadcast(); });
+    $("bellBtn").onclick = e => { e.stopPropagation(); composer.classList.add("hidden");
+      panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) markBroadcastsRead(); };
+    $("bellClear").onclick = markBroadcastsRead;
+    // Panel/composer dışına tıklayınca kapan.
+    document.addEventListener("click", e => {
+      if (!panel.classList.contains("hidden") && !panel.contains(e.target) && e.target.closest("#bellBtn") == null) panel.classList.add("hidden");
+      if (!composer.classList.contains("hidden") && !composer.contains(e.target) && e.target.closest("#bcastComposeBtn") == null) composer.classList.add("hidden");
+    });
+  }
+
+  async function loadBroadcasts() {
+    try {
+      const r = await fetch("/api/v1/broadcasts", { headers: auth() });
+      if (!r.ok) return;
+      const list = await r.json();   // en yeni önce
+      broadcasts.length = 0;
+      list.forEach(b => { broadcasts.push(b); if (b.id != null) bcastSeen.add(b.id); });
+    } catch (_) {}
+    renderBellPanel();   // geçmiş = okunmuş sayılır; rozet artmaz
+  }
+
+  async function sendBroadcast() {
+    const title = $("bcastTitle").value.trim(), body = $("bcastBody").value.trim(), msg = $("bcastMsg");
+    if (!body) { msg.textContent = "Mesaj boş olamaz."; return; }
+    msg.textContent = "Gönderiliyor…";
+    try {
+      const r = await fetch("/api/v1/broadcasts", { method: "POST",
+        headers: { ...auth(), "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title || null, body: body }) });
+      if (!r.ok) throw 0;
+      $("bcastTitle").value = ""; $("bcastBody").value = ""; msg.textContent = "";
+      $("bcastComposer").classList.add("hidden");   // görünen sonuç WS ile gelir (banner + çan)
+    } catch (_) { msg.textContent = "Gönderilemedi."; }
+  }
+
+  // WS'ten gelen canlı duyuru: geçmişe ekle, panele yaz, banner kuyruğuna al.
+  function onBroadcast(e) {
+    if (!e || !e.body) return;
+    if (e.id != null && bcastSeen.has(e.id)) return;   // idempotent (yeniden abone olunca tekrar gelebilir)
+    if (e.id != null) bcastSeen.add(e.id);
+    broadcasts.unshift(e);
+    while (broadcasts.length > 50) broadcasts.pop();
+    renderBellPanel();
+    bannerQueue.push(e);
+    pumpBanner();
+  }
+
+  // Ortadaki banner'ları sırayla göster (üst üste binmesin). Her biri 10 sn kalır,
+  // sonra çana "gider": rozet artar + çan sallanır (panel açıksa okunmuş sayılır).
+  function pumpBanner() {
+    if (bannerBusy || !bannerQueue.length) return;
+    bannerBusy = true;
+    const e = bannerQueue.shift();
+    showBanner(e, () => {
+      moveToBell();
+      bannerBusy = false;
+      pumpBanner();
+    });
+  }
+
+  function showBanner(e, onDone) {
+    let el = $("bcastBanner");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "bcastBanner";
+      el.className = "fixed left-1/2 z-[80] w-[min(92vw,460px)] glass-panel rounded-2xl p-4 flex items-start gap-3 cursor-pointer";
+      el.style.borderLeft = "3px solid #4edea3";
+      el.style.transform = "translate(-50%,0)";
+      el.style.transition = "top .5s cubic-bezier(.2,.7,.2,1), opacity .4s ease";
+      document.body.appendChild(el);
+    }
+    if (el._timer) clearTimeout(el._timer);
+    const title = e.title ? `<div class="text-body-md font-bold text-on-surface mb-0.5">${esc(e.title)}</div>` : "";
+    el.innerHTML =
+      `<span class="material-symbols-outlined text-primary" style="font-variation-settings:'FILL' 1">campaign</span>
+       <div class="flex-1 min-w-0">
+         <div class="text-label-sm uppercase tracking-widest text-primary mb-1">Genel duyuru</div>
+         ${title}
+         <div class="text-body-md text-on-surface" style="word-break:break-word">${esc(e.body)}</div>
+         <div class="text-[10px] text-on-surface-variant mt-1">${esc(e.sender || "admin")}</div>
+       </div>
+       <span class="material-symbols-outlined text-on-surface-variant text-body-md">close</span>`;
+    el.style.display = "flex";
+    el.style.top = "-160px"; el.style.opacity = "0";
+    let closed = false;
+    const finish = () => { if (closed) return; closed = true; if (el._timer) clearTimeout(el._timer);
+      el.style.top = "-160px"; el.style.opacity = "0";
+      setTimeout(() => { el.style.display = "none"; onDone(); }, 420); };
+    el.onclick = finish;
+    // düşür (bir sonraki frame'de geçiş tetiklensin)
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.top = "5.5rem"; el.style.opacity = "1"; }));
+    el._timer = setTimeout(finish, BANNER_MS);
+  }
+
+  function moveToBell() {
+    const panelOpen = !$("bellPanel").classList.contains("hidden");
+    if (panelOpen) { markBroadcastsRead(); return; }   // zaten görüyor → okunmuş
+    bcastUnread++;
+    updateBellBadge();
+    const bell = $("bellIcon");
+    if (bell) { bell.classList.remove("bell-shake"); void bell.offsetWidth; bell.classList.add("bell-shake"); }
+  }
+
+  function updateBellBadge() {
+    const badge = $("bellBadge");
+    if (!badge) return;
+    if (bcastUnread > 0) { badge.textContent = bcastUnread > 99 ? "99+" : bcastUnread; badge.classList.remove("hidden"); }
+    else badge.classList.add("hidden");
+  }
+
+  function markBroadcastsRead() { bcastUnread = 0; updateBellBadge(); }
+
+  function renderBellPanel() {
+    const list = $("bellList");
+    if (!list) return;
+    if (!broadcasts.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-6">Henüz duyuru yok.</div>'; return; }
+    list.innerHTML = broadcasts.map(b => {
+      const when = b.at ? new Date(b.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+      const title = b.title ? `<div class="text-body-md font-bold text-on-surface">${esc(b.title)}</div>` : "";
+      return `<div class="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+        ${title}
+        <div class="text-body-md text-on-surface" style="word-break:break-word">${esc(b.body)}</div>
+        <div class="text-[10px] text-on-surface-variant mt-1">${esc(b.sender || "admin")} · ${when}</div>
+      </div>`;
+    }).join("");
   }
 
   // ── Haritada gör: canlı yoksa son bilinen konumu göster ───────────────────
