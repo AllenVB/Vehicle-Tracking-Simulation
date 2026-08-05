@@ -153,6 +153,7 @@
 
   function onErr(e) {
     setStatus("off", e.code === 1 ? "Konum izni verilmedi." : "Konum alınamıyor.");
+    setGpsOff();
     showPerm(true);
   }
   function showPerm(show) { $("permBanner").classList.toggle("hidden", !show); }
@@ -165,6 +166,7 @@
 
     $("mSpeed").textContent = speedKmh == null ? "–" : speedKmh;
     $("mAcc").textContent = c.accuracy == null ? "–" : Math.round(c.accuracy);
+    setGpsChip(c.accuracy);
     updateMap(c.latitude, c.longitude, speedKmh);
     checkSpeedLimit(c.latitude, c.longitude, speedKmh);
 
@@ -613,6 +615,33 @@
       mapFollow = true;
       if (mapReady && meMarker) lmap.setView(meMarker.getLatLng(), Math.max(lmap.getZoom(), 16));
     };
+    initSwipe();
+  }
+
+  // Kaydırarak sekme geçişi: sola kaydır → sonraki sekme, sağa → önceki.
+  var TAB_ORDER = ["tabDrive", "tabMap", "tabMsg", "tabAnnounce"];
+  function currentTabId() {
+    var a = document.querySelector(".navBtn.active");
+    return a ? a.getAttribute("data-tab") : "tabDrive";
+  }
+  var swipeInit = false, lastSwipeAt = 0;
+  function initSwipe() {
+    if (swipeInit) return; swipeInit = true;   // dinleyici yalnızca bir kez bağlansın
+    var view = $("trackView");
+    if (!view) return;
+    var sx = 0, sy = 0, tracking = false;
+    view.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 1 || (e.target.closest && e.target.closest("#map"))) { tracking = false; return; }
+      tracking = true; sx = e.touches[0].clientX; sy = e.touches[0].clientY;   // harita dokunuşu Leaflet'in
+    }, { passive: true });
+    view.addEventListener("touchend", function (e) {
+      if (!tracking) return; tracking = false;
+      var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;       // belirgin + yatay
+      if (Date.now() - lastSwipeAt < 400) return;                               // çift-tetiklemeye karşı
+      var i = TAB_ORDER.indexOf(currentTabId()), ni = dx < 0 ? i + 1 : i - 1;
+      if (ni >= 0 && ni < TAB_ORDER.length) { lastSwipeAt = Date.now(); showTab(TAB_ORDER[ni]); }
+    }, { passive: true });
   }
   function showTab(id) {
     ["tabDrive", "tabMap", "tabMsg", "tabAnnounce"].forEach(function (t) {
@@ -661,16 +690,54 @@
     else meMarker.setLatLng([lat, lon]);
     if (mapFollow) lmap.panTo([lat, lon], { animate: true, duration: .4 });
   }
+  // "Bugün" mini özeti (mesafe/süre/durak) — iz noktalarından türetilir.
+  var tripDistM = 0, tripStartMs = 0, tripStops = 0, stopStartMs = 0, stopCounted = false;
+  var STOP_KMH = 3, TRIP_MIN_STOP_MS = 120000;   // hız<3 km/s ve 2 dk → 1 durak
+
   // onPos'tan beslenir: iz noktası ekle (harita kapalıyken bile birikir), marker'ı taşı.
   function updateMap(lat, lon, speedKmh) {
+    var now = Date.now();
     var last = trailPts[trailPts.length - 1];
     if (!last || haversine(last[0], last[1], lat, lon) > 4) {   // >4 m: gürültüyle iz şişmesin
+      if (last) tripDistM += haversine(last[0], last[1], lat, lon);
       trailPts.push([lat, lon]);
       if (trailPts.length > 1000) trailPts.shift();
       if (trail) trail.setLatLngs(trailPts);
     }
+    if (!tripStartMs) tripStartMs = now;
+    if (speedKmh != null && speedKmh <= STOP_KMH) {            // durak tespiti (kesintisiz duruş)
+      if (!stopStartMs) stopStartMs = now;
+      else if (!stopCounted && now - stopStartMs >= TRIP_MIN_STOP_MS) { tripStops++; stopCounted = true; }
+    } else if (speedKmh != null) { stopStartMs = 0; stopCounted = false; }
     placeMe(lat, lon);
     var ms = $("mapSpeed"); if (ms) ms.textContent = speedKmh == null ? "–" : speedKmh;
+    updateTripSummary();
+  }
+  function updateTripSummary() {
+    var d = $("tripDist"); if (d) d.textContent = (tripDistM / 1000).toFixed(1);
+    var du = $("tripDur"); if (du) du.textContent = fmtDur(tripStartMs ? Date.now() - tripStartMs : 0);
+    var s = $("tripStops"); if (s) s.textContent = tripStops;
+  }
+  function fmtDur(ms) {
+    var m = Math.floor(ms / 60000);
+    return m < 60 ? m + "dk" : Math.floor(m / 60) + "s " + (m % 60) + "dk";
+  }
+
+  // GPS kalite mikro-göstergesi: doğruluğa göre iyi/orta/zayıf.
+  function setGpsChip(acc) {
+    var chip = $("gpsChip"), txt = $("gpsText");
+    if (!chip) return;
+    chip.classList.remove("good", "mid", "low");
+    if (acc == null) { txt.textContent = "GPS —"; return; }
+    var a = Math.round(acc);
+    if (a <= 20) { chip.classList.add("good"); txt.textContent = "GPS iyi"; }
+    else if (a <= 50) { chip.classList.add("mid"); txt.textContent = "GPS orta ±" + a + "m"; }
+    else { chip.classList.add("low"); txt.textContent = "GPS zayıf ±" + a + "m"; }
+  }
+  function setGpsOff() {
+    var chip = $("gpsChip"), txt = $("gpsText");
+    if (!chip) return;
+    chip.classList.remove("good", "mid"); chip.classList.add("low"); txt.textContent = "GPS yok";
   }
 
   // ── Admin duyuruları (poll — telefonda JWT yok, /topic yerine anket) ───────
@@ -707,13 +774,17 @@
   function onNewBroadcast(b) {
     if ($("tabAnnounce").classList.contains("hidden")) { bcUnread++; updateAnnounceBadge(); }
     showBcBanner(b);
-    if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
-    speak((b.title ? b.title + ". " : "") + (b.body || ""));   // sürüşte sesli okunur
+    // Acil duyuruda daha güçlü/uzun titreşim.
+    if (navigator.vibrate) navigator.vibrate(b.severity === "URGENT" ? [300, 120, 300, 120, 300] : [120, 60, 120]);
+    speak((b.severity === "URGENT" ? "Acil. " : "") + (b.title ? b.title + ". " : "") + (b.body || ""));
   }
 
   function showBcBanner(b) {
     var el = $("bcastBanner");
     var tt = $("bcastBannerTitle");
+    var urgent = b.severity === "URGENT";
+    el.classList.toggle("urgent", urgent);
+    var lab = el.querySelector(".lab"); if (lab) lab.textContent = urgent ? "Acil duyuru" : "Genel duyuru";
     tt.textContent = b.title || ""; tt.style.display = b.title ? "" : "none";
     $("bcastBannerBody").textContent = b.body || "";
     el.classList.remove("hidden");
@@ -736,8 +807,13 @@
     if (!list.length) { box.innerHTML = '<div class="note" style="text-align:left">Henüz duyuru yok.</div>'; return; }
     box.innerHTML = "";
     list.forEach(function (b) {
-      var el = document.createElement("div"); el.className = "announce";
-      if (b.title) { var t = document.createElement("div"); t.className = "t"; t.textContent = b.title; el.appendChild(t); }
+      var urgent = b.severity === "URGENT";
+      var el = document.createElement("div"); el.className = "announce" + (urgent ? " urgent" : "");
+      if (b.title || urgent) {
+        var t = document.createElement("div"); t.className = "t"; t.textContent = b.title || "";
+        if (urgent) { var sv = document.createElement("span"); sv.className = "sev"; sv.textContent = "Acil"; t.appendChild(sv); }
+        el.appendChild(t);
+      }
       var body = document.createElement("div"); body.textContent = b.body || ""; el.appendChild(body);
       var meta = document.createElement("div"); meta.className = "meta";
       var when = b.at ? new Date(b.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";

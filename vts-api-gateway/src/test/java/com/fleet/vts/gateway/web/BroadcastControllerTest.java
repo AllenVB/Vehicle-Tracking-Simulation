@@ -37,15 +37,16 @@ class BroadcastControllerTest {
 
     @Test
     void persistsOnceAndFansOutToTheBroadcastTopic() {
-        when(repo.insert(eq(1L), eq("admin"), eq("Duyuru"), eq("Yarın bakım var"))).thenReturn(7L);
+        when(repo.insert(eq(1L), eq("admin"), eq("URGENT"), eq("Duyuru"), eq("Yarın bakım var"))).thenReturn(7L);
 
         ResponseEntity<Map<String, Object>> res =
-                controller.send(JWT, new BroadcastController.BroadcastRequest("Duyuru", "Yarın bakım var"));
+                controller.send(JWT, new BroadcastController.BroadcastRequest("Duyuru", "Yarın bakım var", "URGENT"));
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(res.getBody())
                 .containsEntry("id", 7L)
                 .containsEntry("sender", "admin")
+                .containsEntry("severity", "URGENT")
                 .containsEntry("body", "Yarın bakım var");
 
         @SuppressWarnings("unchecked")
@@ -57,22 +58,22 @@ class BroadcastControllerTest {
     @Test
     void rejectsBlankBodyWithoutStoringOrPublishing() {
         ResponseEntity<Map<String, Object>> res =
-                controller.send(JWT, new BroadcastController.BroadcastRequest("Duyuru", "   "));
+                controller.send(JWT, new BroadcastController.BroadcastRequest("Duyuru", "   ", null));
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        verify(repo, never()).insert(anyLong(), anyString(), any(), anyString());
+        verify(repo, never()).insert(anyLong(), anyString(), anyString(), any(), anyString());
         verify(messaging, never()).convertAndSend(anyString(), (Object) any());
     }
 
     @Test
-    void clipsAnOverLongBodyToTheColumnLimit() {
+    void clipsAnOverLongBodyToTheColumnLimitAndDefaultsSeverityToInfo() {
         String longBody = "x".repeat(1200);
-        when(repo.insert(anyLong(), anyString(), any(), anyString())).thenReturn(1L);
+        when(repo.insert(anyLong(), anyString(), anyString(), any(), anyString())).thenReturn(1L);
 
-        controller.send(JWT, new BroadcastController.BroadcastRequest(null, longBody));
+        controller.send(JWT, new BroadcastController.BroadcastRequest(null, longBody, "gibberish"));
 
         ArgumentCaptor<String> stored = ArgumentCaptor.forClass(String.class);
-        verify(repo).insert(eq(1L), eq("admin"), eq(null), stored.capture());
+        verify(repo).insert(eq(1L), eq("admin"), eq("INFO"), eq(null), stored.capture());   // bilinmeyen önem -> INFO
         assertThat(stored.getValue()).hasSize(1000);
     }
 

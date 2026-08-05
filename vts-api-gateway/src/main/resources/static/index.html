@@ -39,6 +39,10 @@
     45%{transform:rotate(9deg)} 60%{transform:rotate(-6deg)} 75%{transform:rotate(3deg)} }
   .audio-btn { display:inline-flex; align-items:center; gap:6px; background:rgba(78,222,163,.16); color:#e5e2e1;
     border:1px solid rgba(78,222,163,.3); border-radius:10px; padding:6px 10px; font-size:13px; cursor:pointer; }
+  /* Haritada plaka etiketi (Leaflet tooltip) — koyu pill, oksuz. */
+  .plate-label { background:rgba(19,19,19,.9); color:#e5e2e1; border:1px solid rgba(78,222,163,.4); border-radius:6px;
+    font-size:10px; font-weight:700; padding:1px 6px; box-shadow:none; white-space:nowrap; }
+  .plate-label:before { display:none !important; }
 </style>
 <script>
   tailwind.config = { darkMode:"class", theme:{ extend:{
@@ -121,6 +125,11 @@
   <p class="text-[11px] text-on-surface-variant mb-3">Tüm bağlı kullanıcılara anlık düşer, bildirim panelinde kalır.</p>
   <input id="bcastTitle" maxlength="120" placeholder="Başlık (opsiyonel)" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface mb-2 focus:outline-none focus:border-primary">
   <textarea id="bcastBody" maxlength="1000" rows="3" placeholder="Mesaj…" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface mb-2 focus:outline-none focus:border-primary resize-none"></textarea>
+  <div class="flex items-center gap-2 mb-2" id="bcastSevSel">
+    <span class="text-[11px] text-on-surface-variant uppercase tracking-wide">Önem</span>
+    <button type="button" data-sev="INFO" class="bcast-sev px-3 py-1 rounded-lg text-label-sm font-bold bg-primary text-on-primary">Bilgi</button>
+    <button type="button" data-sev="URGENT" class="bcast-sev px-3 py-1 rounded-lg text-label-sm font-bold bg-white/5 text-on-surface-variant border border-white/10">Acil</button>
+  </div>
   <div class="flex items-center justify-between gap-2">
     <span id="bcastMsg" class="text-label-sm text-on-surface-variant"></span>
     <button id="bcastSend" class="px-4 py-2 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95 flex items-center gap-1"><span class="material-symbols-outlined text-body-md">send</span> Gönder</button>
@@ -238,6 +247,9 @@
     <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-error"></span><span class="text-[10px] uppercase font-bold text-on-surface-variant tracking-tight">İhlal</span></div>
     <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-primary"></span><span class="text-[10px] uppercase font-bold text-on-surface-variant tracking-tight">Durak</span></div>
   </div>
+  <button id="plateToggle" title="Plaka etiketlerini aç/kapa" class="glass-panel rounded-full px-4 py-2 flex items-center gap-2 text-label-sm font-bold text-on-surface-variant active:scale-95 transition-transform">
+    <span class="material-symbols-outlined text-body-md">label</span> Plakalar
+  </button>
 </div>
 
 <!-- ── QR pairing ──────────────────────────────────────────────────────────── -->
@@ -296,6 +308,10 @@
       </div>
       <div class="flex items-center gap-3">
         <button id="fleetNewBtn" class="flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary font-bold text-label-sm active:scale-95 emerald-glow"><span class="material-symbols-outlined text-body-md">add</span> Yeni araç</button>
+        <div class="relative">
+          <span class="material-symbols-outlined text-body-md text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
+          <input id="fleetSearch" type="search" placeholder="Plaka ara…" class="bg-surface-container border border-white/10 rounded-full pl-9 pr-4 py-2 text-label-sm text-on-surface focus:outline-none focus:border-primary w-44">
+        </div>
         <div class="flex bg-surface-container rounded-full p-1 border border-white/5" id="fleetFilters">
           <button data-f="all" class="px-4 py-1.5 rounded-full text-label-sm font-bold bg-primary text-on-primary">Tümü</button>
           <button data-f="move" class="px-4 py-1.5 rounded-full text-label-sm font-medium text-on-surface-variant hover:text-on-surface">Harekette</button>

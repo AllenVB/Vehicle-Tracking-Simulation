@@ -20,11 +20,12 @@ public class BroadcastMessageRepository {
     /** How many past announcements the notification panel shows on load. */
     private static final int HISTORY_LIMIT = 50;
 
-    /** id/sender/title/body/at — the shape both operator and driver clients consume. */
+    /** id/sender/severity/title/body/at — the shape both operator and driver clients consume. */
     private static final RowMapper<Map<String, Object>> ROW = (rs, n) -> {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", rs.getLong("id"));
         m.put("sender", rs.getString("sender"));
+        m.put("severity", rs.getString("severity"));
         m.put("title", rs.getString("title"));
         m.put("body", rs.getString("body"));
         m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
@@ -38,19 +39,19 @@ public class BroadcastMessageRepository {
     }
 
     /** Stores a broadcast and returns its generated id. */
-    public long insert(long tenantId, String sender, String title, String body) {
+    public long insert(long tenantId, String sender, String severity, String title, String body) {
         return jdbc.queryForObject("""
-                        INSERT INTO broadcast_message (tenant_id, sender, title, body)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO broadcast_message (tenant_id, sender, severity, title, body)
+                        VALUES (?, ?, ?, ?, ?)
                         RETURNING id
                         """,
-                Long.class, tenantId, sender, title, body);
+                Long.class, tenantId, sender, severity, title, body);
     }
 
     /** The tenant's most recent announcements, newest first — for the operator notification panel. */
     public List<Map<String, Object>> recent(long tenantId) {
         return jdbc.query("""
-                        SELECT id, sender, title, body, created_at
+                        SELECT id, sender, severity, title, body, created_at
                         FROM broadcast_message
                         WHERE tenant_id = ?
                         ORDER BY created_at DESC
@@ -65,7 +66,7 @@ public class BroadcastMessageRepository {
      */
     public List<Map<String, Object>> recentForVehicle(long vehicleId) {
         return jdbc.query("""
-                        SELECT b.id, b.sender, b.title, b.body, b.created_at
+                        SELECT b.id, b.sender, b.severity, b.title, b.body, b.created_at
                         FROM broadcast_message b
                         JOIN vehicle v ON v.tenant_id = b.tenant_id
                         WHERE v.id = ?

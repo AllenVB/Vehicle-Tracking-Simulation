@@ -41,7 +41,12 @@ public class BroadcastController {
         this.messaging = messaging;
     }
 
-    public record BroadcastRequest(String title, String body) {
+    public record BroadcastRequest(String title, String body, String severity) {
+    }
+
+    /** Only INFO (default) or URGENT are accepted; anything else falls back to INFO. */
+    private static String normalizeSeverity(String value) {
+        return "URGENT".equalsIgnoreCase(value == null ? null : value.trim()) ? "URGENT" : "INFO";
     }
 
     @PostMapping
@@ -51,16 +56,18 @@ public class BroadcastController {
         String sender = jwt.getSubject() == null ? "admin" : jwt.getSubject();
         String title = trimToLimit(request == null ? null : request.title(), MAX_TITLE);
         String body = trimToLimit(request == null ? null : request.body(), MAX_BODY);
+        String severity = normalizeSeverity(request == null ? null : request.severity());
         if (body == null || body.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
 
-        long id = broadcasts.insert(tenant, sender, title, body);
+        long id = broadcasts.insert(tenant, sender, severity, title, body);
 
         Map<String, Object> msg = new LinkedHashMap<>();
         msg.put("id", id);
         msg.put("tenantId", tenant);
         msg.put("sender", sender);
+        msg.put("severity", severity);
         msg.put("title", title);
         msg.put("body", body);
         msg.put("at", Instant.now().toString());

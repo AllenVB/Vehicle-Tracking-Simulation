@@ -8,10 +8,11 @@
   const markers = new Map();    // id -> L.marker
   const tripCache = new Map();  // id -> {distanceKm, ecoScore, score}
   const recentVios = [];        // {vehicleId,ruleCode,value,threshold,occurredAt}
-  let fleetFilter = "all", dash = null, cluster = null;
+  let fleetFilter = "all", dash = null, cluster = null, showPlates = false;
   const broadcasts = [];          // {id, sender, title, body, at} — en yeni önce (bildirim paneli)
   const bcastSeen = new Set();    // aynı duyuruyu iki kez işlemeyi önle (id)
   let bcastUnread = 0;            // çandaki okunmamış rozet sayısı
+  let bcastSeverity = "INFO";     // composer'da seçili önem (INFO | URGENT)
   const bannerQueue = []; let bannerBusy = false;   // ortadaki 10 sn banner kuyruğu (üst üste binmesin)
   const BANNER_MS = 10000;        // "10 saniye boyunca kalsın"
   const STALE_MS = 30000, VIO_SPEED = 82, STOP_SPEED = 3, MIN_STOP_SEC = 120, STOP_RADIUS_M = 40;
@@ -70,7 +71,7 @@
     initChat();
     initBroadcast();
     loadBroadcasts();
-    loadDashboard();
+    loadDashboard().then(maybeDailySummary);
     setInterval(loadVehicles, 15000);
     setInterval(sweep, 5000);
     setInterval(loadDashboard, 30000);
@@ -169,6 +170,24 @@
     let m = markers.get(p.vehicleId);
     if (!m) { m = L.marker([p.lat, p.lon], { icon }); m.on("click", () => select(p.vehicleId)); markers.set(p.vehicleId, m); if (cluster) cluster.addLayer(m); }
     else { m.setLatLng([p.lat, p.lon]); m.setIcon(icon); }
+    applyPlateLabel(m, p.vehicleId);
+  }
+  // Haritada plaka etiketi (kalıcı Leaflet tooltip) — toggle ile açılır/kapanır.
+  function applyPlateLabel(m, id) {
+    if (!m) return;
+    if (showPlates) {
+      if (!m.getTooltip()) {
+        const v = vehicles.get(id);
+        m.bindTooltip(esc(v ? v.plate : ""), { permanent: true, direction: "top", className: "plate-label", offset: [0, -8] });
+      }
+    } else if (m.getTooltip()) { m.unbindTooltip(); }
+  }
+  function togglePlates() {
+    showPlates = !showPlates;
+    const btn = $("plateToggle");
+    if (btn) { btn.classList.toggle("text-primary", showPlates); btn.classList.toggle("text-on-surface-variant", !showPlates); }
+    markers.forEach((m, id) => applyPlateLabel(m, id));
+    if (cluster) cluster.refreshClusters();
   }
   function sweep() { pos.forEach(p => drawMarker(p)); updateStats(); refreshCards(); if (cluster && view !== "history") cluster.refreshClusters(); if (selected != null) updateOverlay(); if (view === "fleet") renderFleet(); }
   function fitAll() {
@@ -236,6 +255,7 @@
       if (followId != null) { const p = pos.get(followId); if (p) map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15)); }
     };
     $("selMsgBtn").onclick = () => { if (selected != null) openChat(selected); };
+    if ($("plateToggle")) $("plateToggle").onclick = togglePlates;
   }
 
   // ── İhlal akışı ──────────────────────────────────────────────────────────
@@ -319,6 +339,21 @@
     $("bcastComposeBtn").onclick = e => { e.stopPropagation(); panel.classList.add("hidden"); composer.classList.toggle("hidden");
       if (!composer.classList.contains("hidden")) $("bcastBody").focus(); };
     $("bcastClose").onclick = () => composer.classList.add("hidden");
+    // Önem seçici (Bilgi/Acil) — segmented toggle.
+    document.querySelectorAll(".bcast-sev").forEach(btn => btn.onclick = () => {
+      bcastSeverity = btn.dataset.sev;
+      document.querySelectorAll(".bcast-sev").forEach(b => {
+        const on = b === btn, urgent = b.dataset.sev === "URGENT";
+        b.classList.toggle("bg-primary", on && !urgent);
+        b.classList.toggle("text-on-primary", on && !urgent);
+        b.classList.toggle("bg-error", on && urgent);
+        b.classList.toggle("text-on-error-container", on && urgent);
+        b.classList.toggle("bg-white/5", !on);
+        b.classList.toggle("text-on-surface-variant", !on);
+        b.classList.toggle("border", !on);
+        b.classList.toggle("border-white/10", !on);
+      });
+    });
     $("bcastSend").onclick = sendBroadcast;
     $("bcastBody").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBroadcast(); });
     $("bellBtn").onclick = e => { e.stopPropagation(); composer.classList.add("hidden");
@@ -349,7 +384,7 @@
     try {
       const r = await fetch("/api/v1/broadcasts", { method: "POST",
         headers: { ...auth(), "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title || null, body: body }) });
+        body: JSON.stringify({ title: title || null, body: body, severity: bcastSeverity }) });
       if (!r.ok) throw 0;
       $("bcastTitle").value = ""; $("bcastBody").value = ""; msg.textContent = "";
       $("bcastComposer").classList.add("hidden");   // görünen sonuç WS ile gelir (banner + çan)
@@ -393,11 +428,14 @@
       document.body.appendChild(el);
     }
     if (el._timer) clearTimeout(el._timer);
+    const urgent = e.severity === "URGENT";
+    el.style.borderLeft = "3px solid " + (urgent ? "#ffb4ab" : "#4edea3");
+    const accent = urgent ? "text-error" : "text-primary";
     const title = e.title ? `<div class="text-body-md font-bold text-on-surface mb-0.5">${esc(e.title)}</div>` : "";
     el.innerHTML =
-      `<span class="material-symbols-outlined text-primary" style="font-variation-settings:'FILL' 1">campaign</span>
+      `<span class="material-symbols-outlined ${accent}" style="font-variation-settings:'FILL' 1">campaign</span>
        <div class="flex-1 min-w-0">
-         <div class="text-label-sm uppercase tracking-widest text-primary mb-1">Genel duyuru</div>
+         <div class="text-label-sm uppercase tracking-widest ${accent} mb-1">${urgent ? "Acil duyuru" : "Genel duyuru"}</div>
          ${title}
          <div class="text-body-md text-on-surface" style="word-break:break-word">${esc(e.body)}</div>
          <div class="text-[10px] text-on-surface-variant mt-1">${esc(e.sender || "admin")}</div>
@@ -439,8 +477,10 @@
     if (!broadcasts.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-6">Henüz duyuru yok.</div>'; return; }
     list.innerHTML = broadcasts.map(b => {
       const when = b.at ? new Date(b.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
-      const title = b.title ? `<div class="text-body-md font-bold text-on-surface">${esc(b.title)}</div>` : "";
-      return `<div class="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+      const urgent = b.severity === "URGENT";
+      const badge = urgent ? ` <span class="text-[9px] font-extrabold uppercase tracking-wide text-error border border-error/60 rounded px-1 py-0.5 align-middle">Acil</span>` : "";
+      const title = (b.title || urgent) ? `<div class="text-body-md font-bold text-on-surface">${esc(b.title || "")}${badge}</div>` : "";
+      return `<div class="p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors border ${urgent ? "border-l-2 border-error/60" : "border-white/5"}">
         ${title}
         <div class="text-body-md text-on-surface" style="word-break:break-word">${esc(b.body)}</div>
         <div class="text-[10px] text-on-surface-variant mt-1">${esc(b.sender || "admin")} · ${when}</div>
@@ -581,6 +621,7 @@
     if (nb) nb.onclick = () => { const f = $("fleetNewForm"); f.classList.toggle("hidden"); if (!f.classList.contains("hidden")) $("nvPlate").focus(); };
     if ($("nvCreate")) $("nvCreate").onclick = createVehicle;
     if ($("nvPlate")) $("nvPlate").addEventListener("keydown", e => { if (e.key === "Enter") createVehicle(); });
+    if ($("fleetSearch")) $("fleetSearch").oninput = renderFleet;   // plakaya göre anında süz
   }
 
   // Admin yeni araç oluşturur (sürücüler oluşturamaz — yalnızca adminin araçlarına girer).
@@ -632,6 +673,17 @@
   async function loadDashboard() {
     try { const r = await fetch("/api/v1/dashboard/summary", { headers: auth() }); if (r.ok) dash = await r.json(); } catch (_) {}
     updateFleetHealth();
+  }
+
+  // Günlük özet bildirimi: gün içinde bir kez, mevcut toast() bildirimiyle.
+  function maybeDailySummary() {
+    if (!vehicles.size) return;
+    const key = "vts_daily_summary", today = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(key) === today) return;
+    localStorage.setItem(key, today);
+    const total = vehicles.size, live = liveCount();
+    const vio = dash && dash.violations24h != null ? dash.violations24h : recentVios.length;
+    toast(`Günlük özet · ${live}/${total} araç canlı · ${vio} ihlal (24s)`);
   }
   function updateFleetHealth() {
     if (!$("fhRatio")) return;
@@ -686,13 +738,15 @@
   function renderFleet() {
     const grid = $("fleetGrid"); if (!grid) return;
     const ids = [...vehicles.keys()];
+    const q = ($("fleetSearch") ? $("fleetSearch").value : "").trim().toLocaleLowerCase("tr");
     const filtered = ids.filter(id => {
+      if (q) { const v = vehicles.get(id); if (!v || !(v.plate || "").toLocaleLowerCase("tr").includes(q)) return false; }
       if (fleetFilter === "all") return true;
       const k = stateOf(id).key;
       if (fleetFilter === "move") return k === "move" || k === "vio";  // ihlal = hızlı giden = harekette
       return k === fleetFilter;
     });
-    $("fleetCount").textContent = vehicles.size + " araç yönetiliyor" + (fleetFilter !== "all" ? " · " + filtered.length + " gösteriliyor" : "");
+    $("fleetCount").textContent = vehicles.size + " araç yönetiliyor" + ((fleetFilter !== "all" || q) ? " · " + filtered.length + " gösteriliyor" : "");
     $("fleetEmpty").classList.toggle("hidden", vehicles.size > 0);
     grid.innerHTML = filtered.map(fleetCard).join("");
     grid.querySelectorAll("[data-map]").forEach(b => b.onclick = () => showOnMap(+b.dataset.map));

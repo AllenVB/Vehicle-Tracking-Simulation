@@ -93,6 +93,27 @@
     .audioBtn { display: inline-flex; align-items: center; gap: 6px; background: rgba(0,245,212,.14); color: var(--text);
       border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 14px; cursor: pointer; }
 
+    /* GPS kalite mikro-göstergesi (statusRow) */
+    .gpsChip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 700; border: 1px solid var(--line); color: var(--muted); }
+    .gpsChip .d { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .gpsChip.good { color: var(--ok); border-color: rgba(52, 211, 153, .4); } .gpsChip.good .d { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .gpsChip.mid { color: var(--warn); border-color: rgba(255, 207, 92, .4); } .gpsChip.mid .d { background: var(--warn); }
+    .gpsChip.low { color: var(--danger); border-color: rgba(255, 93, 108, .4); } .gpsChip.low .d { background: var(--danger); }
+
+    /* Haritada "bugün" mini özeti */
+    .tripSummary { position: absolute; left: 12px; bottom: 12px; z-index: 5; display: flex; gap: 16px;
+      background: rgba(11, 18, 30, .82); border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; backdrop-filter: blur(8px); }
+    .tripSummary .k { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .5px; }
+    .tripSummary .v { font-weight: 800; font-size: 15px; }
+
+    /* Duyuru önem derecesi (acil) */
+    .bcastBanner.urgent { border-color: var(--danger); border-left-color: var(--danger); }
+    .bcastBanner.urgent .ic, .bcastBanner.urgent .lab { color: var(--danger); }
+    .announce.urgent { border-left-color: var(--danger); }
+    .announce .sev { display: inline-block; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+      color: var(--danger); border: 1px solid var(--danger); border-radius: 6px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+
     /* ── Sekmeler (SPA) ─────────────────────────────────────── */
     .tabPanel { display: flex; flex-direction: column; }
     /* Sekme geçişi: yeni panel yumuşakça yukarı kayarak açılır (tek yönlü, jank yok). */
@@ -190,6 +211,7 @@
       <div id="tabDrive" class="tabPanel card">
         <div class="statusRow">
           <span id="statusPill" class="pill"><span class="beat"></span><span id="statusText">Hazırlanıyor…</span></span>
+          <span id="gpsChip" class="gpsChip"><span class="d"></span><span id="gpsText">GPS —</span></span>
         </div>
 
         <div id="permBanner" class="hidden" style="margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--danger);background:rgba(255,93,108,.10)">
@@ -216,6 +238,11 @@
           <div class="chip"><div class="k">Limit</div><div class="v"><span id="mapLimit">–</span></div></div>
         </div>
         <button class="mapRecenter" id="mapRecenter" title="Konumuma dön"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button>
+        <div class="tripSummary">
+          <div><div class="k">Bugün</div><div class="v"><span id="tripDist">0.0</span> km</div></div>
+          <div><div class="k">Süre</div><div class="v" id="tripDur">0dk</div></div>
+          <div><div class="k">Durak</div><div class="v" id="tripStops">0</div></div>
+        </div>
       </div>
 
       <!-- Sekme: Mesajlar -->
