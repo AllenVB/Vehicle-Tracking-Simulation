@@ -3,6 +3,10 @@ spring:
     name: vts-api-gateway
   profiles:
     default: dev
+  servlet:
+    multipart:              # sesli mesaj yüklemesi (kod ayrıca ≤1MB doğrular)
+      max-file-size: 2MB
+      max-request-size: 2MB
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/vts}
     username: ${DB_USER:vts}

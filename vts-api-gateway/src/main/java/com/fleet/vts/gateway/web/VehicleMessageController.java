@@ -11,8 +11,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,10 +37,13 @@ public class VehicleMessageController {
 
     private final VehicleMessageRepository messages;
     private final SimpMessagingTemplate messaging;
+    private final AudioStore audio;
 
-    public VehicleMessageController(VehicleMessageRepository messages, SimpMessagingTemplate messaging) {
+    public VehicleMessageController(VehicleMessageRepository messages, SimpMessagingTemplate messaging,
+                                    AudioStore audio) {
         this.messages = messages;
         this.messaging = messaging;
+        this.audio = audio;
     }
 
     public record MessageRequest(String category, String body) {
@@ -71,6 +77,36 @@ public class VehicleMessageController {
         msg.put("body", body);
         msg.put("at", Instant.now().toString());
         messaging.convertAndSend("/topic/vehicle-messages", msg);   // live notification
+        return ResponseEntity.ok(msg);
+    }
+
+    /** Operator→driver voice message: multipart upload, stored as a file, broadcast + polled by the phone. */
+    @PostMapping("/{id}/messages/audio")
+    public ResponseEntity<?> sendAudio(@AuthenticationPrincipal Jwt jwt, @PathVariable Long id,
+                                       @RequestParam("file") MultipartFile file) throws IOException {
+        long tenant = CurrentUser.tenantId(jwt);
+        String plate = messages.findPlate(id, tenant);
+        if (plate == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "EMPTY"));
+        }
+        if (file.getSize() > AudioStore.MAX_BYTES) {
+            return ResponseEntity.status(413).body(Map.of("error", "TOO_LARGE"));
+        }
+        String type = file.getContentType() != null ? file.getContentType() : "audio/webm";
+        String ref = audio.save(file.getBytes());
+        messages.insertOperatorAudio(tenant, id, "🎤 Sesli mesaj", ref, type);
+
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("vehicleId", id);
+        msg.put("plate", plate);
+        msg.put("category", "SES");
+        msg.put("body", "🎤 Sesli mesaj");
+        msg.put("audio", ref);
+        msg.put("at", Instant.now().toString());
+        messaging.convertAndSend("/topic/vehicle-messages", msg);
         return ResponseEntity.ok(msg);
     }
 

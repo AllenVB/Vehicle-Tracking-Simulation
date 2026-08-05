@@ -1,15 +1,20 @@
 package com.fleet.vts.gateway.track;
 
 import com.fleet.vts.gateway.repository.VehicleMessageRepository;
+import com.fleet.vts.gateway.web.AudioStore;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,12 +53,14 @@ public class DriverMessageController {
     private final DriverSessionService sessions;
     private final VehicleMessageRepository messages;
     private final SimpMessagingTemplate messaging;
+    private final AudioStore audio;
 
     public DriverMessageController(DriverSessionService sessions, VehicleMessageRepository messages,
-                                   SimpMessagingTemplate messaging) {
+                                   SimpMessagingTemplate messaging, AudioStore audio) {
         this.sessions = sessions;
         this.messages = messages;
         this.messaging = messaging;
+        this.audio = audio;
     }
 
     @GetMapping("/messages")
@@ -127,6 +134,52 @@ public class DriverMessageController {
         msg.put("at", Instant.now().toString());
         messaging.convertAndSend("/topic/vehicle-messages", msg);   // operatörlere anlık bildirim
         return ResponseEntity.ok(msg);
+    }
+
+    /** Driver→operator voice message: multipart upload, stored as a file, broadcast to operators. */
+    @PostMapping("/audio")
+    public ResponseEntity<?> audio(@RequestParam("file") MultipartFile file,
+                                   @RequestHeader(value = "X-Device-Session", required = false) String session)
+            throws IOException {
+        Optional<DriverSessionService.Identity> id = sessions.identify(session);
+        if (id.isEmpty()) {
+            return ResponseEntity.status(401).body(Map.of("error", "NO_SESSION"));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "EMPTY"));
+        }
+        if (file.getSize() > AudioStore.MAX_BYTES) {
+            return ResponseEntity.status(413).body(Map.of("error", "TOO_LARGE"));
+        }
+        String type = file.getContentType() != null ? file.getContentType() : "audio/webm";
+        String ref = audio.save(file.getBytes());
+        long vehicleId = id.get().vehicleId();
+        messages.insertDeviceAudio(vehicleId, "🎤 Sesli mesaj", ref, type);
+
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("vehicleId", vehicleId);
+        msg.put("plate", messages.plateOf(vehicleId));
+        msg.put("category", "SES");
+        msg.put("body", "🎤 Sesli mesaj");
+        msg.put("direction", "FROM_DRIVER");
+        msg.put("audio", ref);
+        msg.put("at", Instant.now().toString());
+        messaging.convertAndSend("/topic/vehicle-messages", msg);
+        return ResponseEntity.ok(msg);
+    }
+
+    /** Serve a voice clip by ref (public, UUID-gated); both the driver and operators fetch here. */
+    @GetMapping("/audio/{ref}")
+    public ResponseEntity<byte[]> serveAudio(@PathVariable String ref) throws IOException {
+        String type = messages.audioTypeOf(ref);
+        byte[] data = audio.load(ref);
+        if (type == null || data == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .header("Content-Type", type)
+                .header("Cache-Control", "private, max-age=604800")
+                .body(data);
     }
 
     private static final int MAX_TEXT = 500;

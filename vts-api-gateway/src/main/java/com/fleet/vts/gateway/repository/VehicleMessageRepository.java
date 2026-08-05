@@ -41,8 +41,8 @@ public class VehicleMessageRepository {
     /** The vehicle's last 50 messages (both directions), oldest first — for the support chat panel. */
     public List<Map<String, Object>> recent(long tenantId, long vehicleId) {
         return jdbc.query("""
-                        SELECT category, body, direction, created_at FROM (
-                            SELECT category, body, direction, created_at
+                        SELECT category, body, direction, audio_ref, created_at FROM (
+                            SELECT category, body, direction, audio_ref, created_at
                             FROM vehicle_message
                             WHERE tenant_id = ? AND vehicle_id = ?
                             ORDER BY created_at DESC LIMIT 50
@@ -52,6 +52,7 @@ public class VehicleMessageRepository {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("category", rs.getString("category"));
                     m.put("body", rs.getString("body"));
+                    m.put("audio", rs.getString("audio_ref"));
                     m.put("direction", rs.getString("direction"));
                     m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
                     return m;
@@ -76,12 +77,13 @@ public class VehicleMessageRepository {
         return jdbc.query("""
                         UPDATE vehicle_message SET delivered_at = now()
                         WHERE vehicle_id = ? AND direction = 'TO_DRIVER' AND delivered_at IS NULL
-                        RETURNING category, body, created_at
+                        RETURNING category, body, audio_ref, created_at
                         """,
                 (rs, n) -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("category", rs.getString("category"));
                     m.put("body", rs.getString("body"));
+                    m.put("audio", rs.getString("audio_ref"));
                     m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
                     return m;
                 },
@@ -95,8 +97,8 @@ public class VehicleMessageRepository {
      */
     public List<Map<String, Object>> conversation(long vehicleId) {
         return jdbc.query("""
-                        SELECT category, body, direction, created_at FROM (
-                            SELECT category, body, direction, created_at
+                        SELECT category, body, direction, audio_ref, created_at FROM (
+                            SELECT category, body, direction, audio_ref, created_at
                             FROM vehicle_message
                             WHERE vehicle_id = ?
                             ORDER BY created_at DESC LIMIT 50
@@ -106,6 +108,7 @@ public class VehicleMessageRepository {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("category", rs.getString("category"));
                     m.put("body", rs.getString("body"));
+                    m.put("audio", rs.getString("audio_ref"));
                     m.put("direction", rs.getString("direction"));
                     m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
                     return m;
@@ -126,5 +129,42 @@ public class VehicleMessageRepository {
                         SELECT tenant_id, id, ?, ?, 'FROM_DRIVER', now() FROM vehicle WHERE id = ?
                         """,
                 category, body, vehicleId);
+    }
+
+    /** Operator→driver voice message (TO_DRIVER, undelivered so the driver's poll picks it up). */
+    public void insertOperatorAudio(long tenantId, long vehicleId, String body, String audioRef, String audioType) {
+        jdbc.update("""
+                        INSERT INTO vehicle_message (tenant_id, vehicle_id, category, body, audio_ref, audio_type)
+                        VALUES (?, ?, 'SES', ?, ?, ?)
+                        """,
+                tenantId, vehicleId, body, audioRef, audioType);
+    }
+
+    /** Driver→operator voice message (FROM_DRIVER, outbound so already delivered). */
+    public void insertDeviceAudio(long vehicleId, String body, String audioRef, String audioType) {
+        jdbc.update("""
+                        INSERT INTO vehicle_message (tenant_id, vehicle_id, category, body, direction, delivered_at, audio_ref, audio_type)
+                        SELECT tenant_id, id, 'SES', ?, 'FROM_DRIVER', now(), ?, ? FROM vehicle WHERE id = ?
+                        """,
+                body, audioRef, audioType, vehicleId);
+    }
+
+    /** Content type stored for an audio ref, or null if the ref is unknown (the serving 404 signal). */
+    public String audioTypeOf(String audioRef) {
+        return jdbc.query("SELECT audio_type FROM vehicle_message WHERE audio_ref = ? LIMIT 1",
+                (ResultSetExtractor<String>) rs -> rs.next() ? rs.getString(1) : null, audioRef);
+    }
+
+    /** Audio refs of messages older than the retention window — their files must be deleted. */
+    public List<String> audioRefsOlderThan(int days) {
+        return jdbc.queryForList(
+                "SELECT audio_ref FROM vehicle_message "
+                        + "WHERE audio_ref IS NOT NULL AND created_at < now() - make_interval(days => ?)",
+                String.class, days);
+    }
+
+    /** Delete all messages older than the retention window; returns how many rows went. */
+    public int deleteOlderThan(int days) {
+        return jdbc.update("DELETE FROM vehicle_message WHERE created_at < now() - make_interval(days => ?)", days);
     }
 }

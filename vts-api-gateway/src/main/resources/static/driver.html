@@ -76,7 +76,11 @@
     .replies button:active { background: #16405e; }
     .compose { display: flex; gap: 8px; margin-top: 10px; }
     .compose input { flex: 1; }
-    .compose button { width: auto; margin-top: 0; padding: 0 18px; font-size: 14px; }
+    .compose button { width: auto; margin-top: 0; padding: 0 16px; font-size: 15px; }
+    .compose button.recording { background: var(--danger); color: #fff; animation: recPulse 1s infinite; }
+    @keyframes recPulse { 50% { opacity: .55; } }
+    .audioBtn { display: inline-flex; align-items: center; gap: 6px; background: rgba(0,245,212,.14); color: var(--text);
+      border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 14px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -119,6 +123,7 @@
       <div id="replies" class="replies"></div>
       <div class="compose">
         <input id="msgInput" autocomplete="off" placeholder="Merkeze mesaj yaz…" maxlength="500">
+        <button id="msgMic" title="Sesli mesaj — bas / durdur">🎤</button>
         <button id="msgSend">Gönder</button>
       </div>
 

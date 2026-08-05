@@ -233,6 +233,7 @@ services:
     volumes:
       - ./vts-api-gateway/src/main/resources/static:/app/static:ro
       - ./vts-api-gateway/src/main/resources/db/migration:/app/db/migration:ro
+      - audio-data:/data/audio   # sesli mesaj dosyalari (1 hafta retention ile temizlenir)
     restart: unless-stopped
 
   ingestion-service:
@@ -307,3 +308,4 @@ volumes:
   redis-data:
   prometheus-data:
   grafana-data:
+  audio-data:

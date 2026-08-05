@@ -63,6 +63,7 @@
   $("password").addEventListener("keydown", function (e) { if (e.key === "Enter") doLogin(); });
   $("msgSend").onclick = function () { sendText($("msgInput").value); };
   $("msgInput").addEventListener("keydown", function (e) { if (e.key === "Enter") sendText($("msgInput").value); });
+  $("msgMic").onclick = function () { toggleRecord($("msgMic"), sendDriverAudio); };
 
   function doLogin() {
     var err = $("loginErr"); err.textContent = "";
@@ -498,7 +499,7 @@
         return r.json();
       })
       .then(function (list) {
-        (list || []).forEach(function (m) { appendMsg(m, false); speak(m.body); });
+        (list || []).forEach(function (m) { appendMsg(m, false); if (!m.audio) speak(m.body); });
       })
       .catch(function () {})
       .then(function () { polling = false; });
@@ -513,7 +514,12 @@
     var t = m.at ? new Date(m.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
     head.textContent = (mine ? "Sen" : "Merkez") + (t ? " · " + t : "");
     var body = document.createElement("div"); body.className = "body";
-    body.textContent = m.body || "";
+    if (m.audio) {
+      var pb = document.createElement("button"); pb.type = "button"; pb.className = "audioBtn";
+      pb.textContent = "▶ Sesli mesaj";
+      pb.onclick = function () { try { new Audio("/api/v1/track/audio/" + m.audio).play(); } catch (e) {} };
+      body.appendChild(pb);
+    } else { body.textContent = m.body || ""; }
     el.appendChild(head); el.appendChild(body);
     box.appendChild(el);
     box.scrollTop = box.scrollHeight;
@@ -556,6 +562,35 @@
       if (r.status === 401) return sessionLost();
       if (r.ok) { appendMsg({ body: text, at: new Date().toISOString() }, true); $("msgInput").value = ""; }
     }).catch(function () {}).then(function () { if (btn) btn.disabled = false; });
+  }
+
+  // ── Sesli mesaj kaydı (MediaRecorder) + gönderme ─────────────────────────
+  var mediaRec = null, recChunks = [];
+  function toggleRecord(btn, onDone) {
+    if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { alert("Bu cihaz ses kaydını desteklemiyor."); return; }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      recChunks = []; mediaRec = new MediaRecorder(stream);
+      mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) recChunks.push(e.data); };
+      var to = setTimeout(function () { if (mediaRec && mediaRec.state === "recording") mediaRec.stop(); }, 60000);
+      mediaRec.onstop = function () {
+        clearTimeout(to); stream.getTracks().forEach(function (t) { t.stop(); }); btn.classList.remove("recording");
+        var blob = new Blob(recChunks, { type: (mediaRec && mediaRec.mimeType) || "audio/webm" }); mediaRec = null;
+        if (blob.size) onDone(blob);
+      };
+      mediaRec.start(); btn.classList.add("recording");
+    }).catch(function () { alert("Mikrofon izni gerekli."); });
+  }
+  function sendDriverAudio(blob) {
+    if (!session) return;
+    var fd = new FormData(); fd.append("file", blob, "voice.webm");
+    fetch("/api/v1/track/audio", { method: "POST", headers: { "X-Device-Session": session.sessionToken }, body: fd })
+      .then(function (r) {
+        if (r.status === 401) return sessionLost();
+        return r.ok ? r.json() : null;
+      })
+      .then(function (d) { if (d && d.audio) appendMsg({ body: "🎤 Sesli mesaj", at: d.at, audio: d.audio }, true); })
+      .catch(function () {});
   }
 
   // ── PWA service worker ────────────────────────────────────────────────────

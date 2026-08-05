@@ -1,6 +1,7 @@
 package com.fleet.vts.gateway.track;
 
 import com.fleet.vts.gateway.repository.VehicleMessageRepository;
+import com.fleet.vts.gateway.web.AudioStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,7 +32,8 @@ class DriverMessageControllerTest {
     private final DriverSessionService sessions = mock(DriverSessionService.class);
     private final VehicleMessageRepository messages = mock(VehicleMessageRepository.class);
     private final SimpMessagingTemplate messaging = mock(SimpMessagingTemplate.class);
-    private final DriverMessageController controller = new DriverMessageController(sessions, messages, messaging);
+    private final AudioStore audio = mock(AudioStore.class);
+    private final DriverMessageController controller = new DriverMessageController(sessions, messages, messaging, audio);
 
     @Test
     void inboxWithoutASessionIs401() {

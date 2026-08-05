@@ -280,7 +280,7 @@
     feed.prepend(item);
     while (feed.children.length > 30) feed.removeChild(feed.lastChild);
     toast((v ? "#" + v.trackId + " " + esc(v.plate) : "Sürücü") + ": " + esc(e.body));
-    if (chatVehicle === e.vehicleId && !$("chatPanel").classList.contains("hidden")) renderChatMsg("FROM_DRIVER", e.body, e.at);
+    if (chatVehicle === e.vehicleId && !$("chatPanel").classList.contains("hidden")) renderChatMsg("FROM_DRIVER", e.body, e.at, e.audio);
   }
 
   // Kısa süreli, tıklanınca kapanan bildirim balonu (sürücü yanıtı için).
@@ -336,6 +336,7 @@
   function initChat() {
     $("chatClose").onclick = () => $("chatPanel").classList.add("hidden");
     $("chatSend").onclick = sendChat;
+    $("chatMic").onclick = () => toggleRecord($("chatMic"), sendChatAudio);
     $("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
   }
   function openChat(id) {
@@ -354,11 +355,11 @@
       const list = r.ok ? await r.json() : [];
       $("chatBody").innerHTML = "";
       if (!list.length) { $("chatBody").innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-4">Henüz mesaj yok. İlk mesajı sen yaz.</div>'; return; }
-      list.forEach(m => renderChatMsg(m.direction, m.body, m.at));
+      list.forEach(m => renderChatMsg(m.direction, m.body, m.at, m.audio));
       const b = $("chatBody"); b.scrollTop = b.scrollHeight;
     } catch (_) {}
   }
-  function renderChatMsg(direction, body, at) {
+  function renderChatMsg(direction, body, at, audio) {
     const wrap = $("chatBody"); const ph = wrap.querySelector(".text-center"); if (ph) ph.remove();
     const mine = direction !== "FROM_DRIVER";   // admin (TO_DRIVER) sağda, sürücü solda
     const time = at ? new Date(at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
@@ -366,10 +367,44 @@
     el.className = "max-w-[82%] rounded-xl px-3 py-2 " + (mine ? "self-end" : "self-start");
     el.style.background = mine ? "rgba(78,222,163,.16)" : "rgba(255,255,255,.06)";
     if (!mine) el.style.borderLeft = "2px solid #4edea3";
-    el.innerHTML = `<div class="text-body-md text-on-surface" style="word-break:break-word">${esc(body)}</div>
-      <div class="text-[10px] text-on-surface-variant mt-0.5 ${mine ? "text-right" : ""}">${(mine ? "Merkez · " : "Sürücü · ") + time}</div>`;
+    const content = document.createElement("div"); content.className = "text-body-md text-on-surface"; content.style.wordBreak = "break-word";
+    if (audio) content.appendChild(audioButton(audio)); else content.textContent = body || "";
+    const meta = document.createElement("div"); meta.className = "text-[10px] text-on-surface-variant mt-0.5" + (mine ? " text-right" : "");
+    meta.textContent = (mine ? "Merkez · " : "Sürücü · ") + time;
+    el.appendChild(content); el.appendChild(meta);
     wrap.appendChild(el);
     wrap.scrollTop = wrap.scrollHeight;
+  }
+  function audioButton(ref) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "audio-btn";
+    b.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px">play_arrow</span> Sesli mesaj';
+    b.onclick = function () { try { new Audio("/api/v1/track/audio/" + ref).play(); } catch (e) {} };
+    return b;
+  }
+  // Tek tık başlat / durdur ses kaydı (MediaRecorder), 60 sn üst sınır.
+  var mediaRec = null, recChunks = [];
+  function toggleRecord(btn, onDone) {
+    if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) { alert("Bu tarayıcı ses kaydını desteklemiyor."); return; }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      recChunks = []; mediaRec = new MediaRecorder(stream);
+      mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) recChunks.push(e.data); };
+      var to = setTimeout(function () { if (mediaRec && mediaRec.state === "recording") mediaRec.stop(); }, 60000);
+      mediaRec.onstop = function () {
+        clearTimeout(to); stream.getTracks().forEach(function (t) { t.stop(); }); btn.classList.remove("recording");
+        var blob = new Blob(recChunks, { type: (mediaRec && mediaRec.mimeType) || "audio/webm" }); mediaRec = null;
+        if (blob.size) onDone(blob);
+      };
+      mediaRec.start(); btn.classList.add("recording");
+    }).catch(function () { alert("Mikrofon izni gerekli."); });
+  }
+  function sendChatAudio(blob) {
+    if (chatVehicle == null) return;
+    var fd = new FormData(); fd.append("file", blob, "voice.webm");
+    fetch("/api/v1/vehicles/" + chatVehicle + "/messages/audio", { method: "POST", headers: auth(), body: fd })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) renderChatMsg("TO_DRIVER", "🎤 Sesli mesaj", d.at, d.audio); else alert("Ses gönderilemedi."); })
+      .catch(function () { alert("Ses gönderilemedi."); });
   }
   async function sendChat() {
     if (chatVehicle == null) return;

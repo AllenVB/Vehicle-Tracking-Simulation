@@ -31,6 +31,10 @@
   .leaflet-container { background:#0e0e0e; }
   .anim-in { animation:animIn .5s cubic-bezier(.2,.7,.2,1) both; }
   @keyframes animIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  button.recording { background:#93000a !important; color:#fff !important; animation:recPulse 1s infinite; }
+  @keyframes recPulse { 50% { opacity:.55; } }
+  .audio-btn { display:inline-flex; align-items:center; gap:6px; background:rgba(78,222,163,.16); color:#e5e2e1;
+    border:1px solid rgba(78,222,163,.3); border-radius:10px; padding:6px 10px; font-size:13px; cursor:pointer; }
 </style>
 <script>
   tailwind.config = { darkMode:"class", theme:{ extend:{
@@ -309,6 +313,7 @@
   <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2" id="chatBody"></div>
   <div class="p-3 border-t border-white/10 flex gap-2">
     <input id="chatInput" placeholder="Mesaj yaz…" maxlength="500" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
+    <button id="chatMic" title="Sesli mesaj — bas / durdur" class="px-3 bg-white/5 border border-white/10 rounded-lg text-on-surface active:scale-95"><span class="material-symbols-outlined text-body-md">mic</span></button>
     <button id="chatSend" class="px-3 bg-primary text-on-primary rounded-lg font-bold text-label-sm active:scale-95"><span class="material-symbols-outlined text-body-md">send</span></button>
   </div>
 </div>
