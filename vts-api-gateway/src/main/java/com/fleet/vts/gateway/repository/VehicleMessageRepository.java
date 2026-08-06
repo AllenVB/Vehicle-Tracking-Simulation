@@ -60,6 +60,31 @@ public class VehicleMessageRepository {
                 tenantId, vehicleId);
     }
 
+    /**
+     * Recent driver→operator messages across the whole tenant (newest first) — feeds the admin
+     * notification bell so incoming messages are visible later even if no chat was open when they
+     * arrived. Joins the plate so the bell can show it.
+     */
+    public List<Map<String, Object>> recentIncoming(long tenantId, int limit) {
+        return jdbc.query("""
+                        SELECT vm.id, vm.vehicle_id, v.plate, vm.body, vm.audio_ref, vm.created_at
+                        FROM vehicle_message vm JOIN vehicle v ON v.id = vm.vehicle_id
+                        WHERE vm.tenant_id = ? AND vm.direction = 'FROM_DRIVER'
+                        ORDER BY vm.created_at DESC LIMIT ?
+                        """,
+                (rs, n) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", rs.getLong("id"));
+                    m.put("vehicleId", rs.getLong("vehicle_id"));
+                    m.put("plate", rs.getString("plate"));
+                    m.put("body", rs.getString("body"));
+                    m.put("audio", rs.getString("audio_ref"));
+                    m.put("at", rs.getObject("created_at", OffsetDateTime.class).toInstant().toString());
+                    return m;
+                },
+                tenantId, limit);
+    }
+
     /** The vehicle's plate for a device already authenticated to it (no tenant needed). */
     public String plateOf(long vehicleId) {
         return jdbc.query("SELECT plate FROM vehicle WHERE id = ?",

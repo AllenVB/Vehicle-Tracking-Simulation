@@ -10,6 +10,8 @@
   const recentVios = [];        // {vehicleId,ruleCode,value,threshold,occurredAt}
   let fleetFilter = "all", dash = null, cluster = null, showPlates = false;
   const broadcasts = [];          // {id, sender, title, body, at} — en yeni önce (bildirim paneli)
+  let inbox = [];                 // {id, vehicleId, plate, body, audio, at} — gelen sürücü mesajları
+  const inboxDismissed = new Set(JSON.parse(localStorage.getItem("vts_inbox_dismissed") || "[]"));
   const bcastSeen = new Set();    // aynı duyuruyu iki kez işlemeyi önle (id)
   let bcastUnread = 0;            // çandaki okunmamış rozet sayısı
   let bcastSeverity = "INFO";     // composer'da seçili önem (INFO | URGENT)
@@ -81,6 +83,7 @@
     initChat();
     initBroadcast();
     loadBroadcasts();
+    loadInbox();
     loadDashboard().then(maybeDailySummary);
     setInterval(loadVehicles, 15000);
     setInterval(sweep, 5000);
@@ -333,6 +336,25 @@
     while (feed.children.length > 30) feed.removeChild(feed.lastChild);
     toast((v ? "#" + v.trackId + " " + esc(v.plate) : "Sürücü") + ": " + esc(e.body));
     if (chatVehicle === e.vehicleId && !$("chatPanel").classList.contains("hidden")) renderChatMsg("FROM_DRIVER", e.body, e.at, e.audio);
+    loadInbox();     // sağ üst bildirim paneline de düşür (kalıcı)
+    moveToBell();    // panel kapalıysa rozet + çan sallanır
+  }
+
+  // ── Gelen sürücü mesajları (admin bildirim paneli) ────────────────────────
+  async function loadInbox() {
+    try {
+      const r = await fetch("/api/v1/inbox", { headers: auth() });
+      if (!r.ok) return;
+      const list = await r.json();
+      inbox = list.filter(m => !inboxDismissed.has(m.id));   // silinmişleri gösterme
+    } catch (_) {}
+    renderBellPanel();
+  }
+  function dismissInbox(id) {
+    inboxDismissed.add(id);
+    try { localStorage.setItem("vts_inbox_dismissed", JSON.stringify([...inboxDismissed].slice(-500))); } catch (_) {}
+    inbox = inbox.filter(m => m.id !== id);
+    renderBellPanel();
   }
 
   // Kısa süreli, tıklanınca kapanan bildirim balonu (sürücü yanıtı için).
@@ -495,21 +517,34 @@
 
   function markBroadcastsRead() { bcastUnread = 0; updateBellBadge(); }
 
+  const bellWhen = at => at ? new Date(at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  function bcastRow(b) {
+    const urgent = b.severity === "URGENT";
+    const badge = urgent ? ` <span class="text-[9px] font-extrabold uppercase tracking-wide text-error border border-error/60 rounded px-1 py-0.5 align-middle">Acil</span>` : "";
+    const title = (b.title || urgent) ? `<div class="text-body-md font-bold text-on-surface">${esc(b.title || "")}${badge}</div>` : "";
+    return `<div class="p-3 rounded-xl bg-white/5 border ${urgent ? "border-l-2 border-error/60" : "border-white/5"}">
+      ${title}<div class="text-body-md text-on-surface" style="word-break:break-word">${esc(b.body)}</div>
+      <div class="text-[10px] text-on-surface-variant mt-1">📣 ${esc(b.sender || "admin")} · ${bellWhen(b.at)}</div></div>`;
+  }
+  function driverRow(m) {
+    const snippet = m.audio ? "🎤 Sesli mesaj" : esc((m.body || "").slice(0, 45));
+    return `<div class="p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 flex gap-2 items-start cursor-pointer" data-iopen="${m.vehicleId}">
+      <span class="material-symbols-outlined text-primary text-body-md" style="font-variation-settings:'FILL' 1">chat</span>
+      <div class="flex-1 min-w-0"><div class="text-body-md font-bold text-on-surface truncate">${esc(m.plate || "Araç")} · sürücü</div>
+        <div class="text-label-sm text-on-surface-variant truncate">${snippet} · ${bellWhen(m.at)}</div></div>
+      <button data-idel="${m.id}" title="Bildirimi kaldır" class="p-1 hover:bg-white/10 rounded-full flex-none"><span class="material-symbols-outlined text-on-surface-variant text-body-md">close</span></button>
+    </div>`;
+  }
   function renderBellPanel() {
     const list = $("bellList");
     if (!list) return;
-    if (!broadcasts.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-6">Henüz duyuru yok.</div>'; return; }
-    list.innerHTML = broadcasts.map(b => {
-      const when = b.at ? new Date(b.at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
-      const urgent = b.severity === "URGENT";
-      const badge = urgent ? ` <span class="text-[9px] font-extrabold uppercase tracking-wide text-error border border-error/60 rounded px-1 py-0.5 align-middle">Acil</span>` : "";
-      const title = (b.title || urgent) ? `<div class="text-body-md font-bold text-on-surface">${esc(b.title || "")}${badge}</div>` : "";
-      return `<div class="p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors border ${urgent ? "border-l-2 border-error/60" : "border-white/5"}">
-        ${title}
-        <div class="text-body-md text-on-surface" style="word-break:break-word">${esc(b.body)}</div>
-        <div class="text-[10px] text-on-surface-variant mt-1">${esc(b.sender || "admin")} · ${when}</div>
-      </div>`;
-    }).join("");
+    const items = broadcasts.map(b => ({ kind: "b", at: b.at || "", data: b }))
+      .concat(inbox.map(m => ({ kind: "d", at: m.at || "", data: m })))
+      .sort((a, b) => b.at.localeCompare(a.at));   // en yeni önce (duyuru + gelen mesaj karışık)
+    if (!items.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-6">Henüz bildirim yok.</div>'; return; }
+    list.innerHTML = items.map(it => it.kind === "b" ? bcastRow(it.data) : driverRow(it.data)).join("");
+    list.querySelectorAll("[data-idel]").forEach(btn => btn.onclick = e => { e.stopPropagation(); dismissInbox(+btn.dataset.idel); });
+    list.querySelectorAll("[data-iopen]").forEach(el => el.onclick = () => { $("bellPanel").classList.add("hidden"); openChat(+el.dataset.iopen); });
   }
 
   // ── Haritada gör: canlı yoksa son bilinen konumu göster ───────────────────
