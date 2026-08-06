@@ -975,7 +975,8 @@
     $("pbEnd").onclick = () => { pbIndex = Math.max(0, histPts.length - 1); renderPb(); };
     $("pbSpeed").onchange = () => { pbSpeed = +$("pbSpeed").value || 1; if (pbPlaying) { stopPlayback(); playPlayback(); } };
   }
-  function resetPlayback() { stopPlayback(); pbIndex = 0; if (pbMarker) { map.removeLayer(pbMarker); pbMarker = null; } }
+  function resetPlayback() { stopPlayback(); pbIndex = 0; if (pbMarker) { map.removeLayer(pbMarker); pbMarker = null; }
+    const sp = $("pbSpeedNow"); if (sp) sp.textContent = histPts[0] && histPts[0].speedKmh != null ? histPts[0].speedKmh : "–"; }
   function renderPb() {
     const p = histPts[pbIndex]; if (!p) return;
     const icon = L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
@@ -983,6 +984,7 @@
     if (!pbMarker) pbMarker = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1000 }).addTo(map);
     else { pbMarker.setLatLng([p.lat, p.lon]); pbMarker.setIcon(icon); }
     map.panTo([p.lat, p.lon], { animate: true, duration: .3 });
+    const sp = $("pbSpeedNow"); if (sp) sp.textContent = p.speedKmh != null ? p.speedKmh : "–";
   }
   function playPlayback() {
     if (histPts.length < 2) return;
