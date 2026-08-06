@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -71,12 +72,15 @@ public class PositionCache {
 
     private String toJson(TelemetryEvent e) {
         try {
-            return objectMapper.writeValueAsString(Map.of(
-                    "lat", e.lat(),
-                    "lon", e.lon(),
-                    "speedKmh", e.speedKmh(),
-                    "heading", e.heading(),
-                    "ts", e.ts().toString()));
+            // NOT Map.of: heading/speed/lat/lon can be null (phone with no fix yet), and Map.of
+            // rejects null values with an NPE — which used to break the whole position cache.
+            Map<String, Object> pos = new HashMap<>();
+            pos.put("lat", e.lat());
+            pos.put("lon", e.lon());
+            pos.put("speedKmh", e.speedKmh());
+            pos.put("heading", e.heading());
+            pos.put("ts", e.ts() == null ? null : e.ts().toString());
+            return objectMapper.writeValueAsString(pos);
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to serialize position", ex);
         }
