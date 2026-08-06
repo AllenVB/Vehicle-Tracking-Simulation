@@ -53,6 +53,9 @@
   .bell-meta { color:#86948a; font-size:10px; margin-top:4px; }
   .bell-time { color:#86948a; font-size:10px; flex:none; margin-left:6px; }
   #bellList { -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+  /* flex-column'da içerik taşınca öğeler eziliyordu (overflow:hidden'lı swipe satırlari 0'a
+     çöküyordu). Ezilmeyi kapat → düzgün kaydırmalı akış. */
+  #bellList > * { flex-shrink:0; }
   #bellList::-webkit-scrollbar { width:5px; } #bellList::-webkit-scrollbar-thumb { background:#2e3734; border-radius:10px; }
   .bell-actions { display:flex; gap:4px; align-items:center; flex:none; }
   .bell-act { width:28px; height:28px; border-radius:9px; border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.05);
