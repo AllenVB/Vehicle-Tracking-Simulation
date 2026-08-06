@@ -117,6 +117,7 @@
   }
 
   $("stopBtn").onclick = function () {
+    showDriveSummary();
     fetch("/api/v1/track/logout", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionToken: session && session.sessionToken }), keepalive: true
@@ -721,6 +722,31 @@
   function fmtDur(ms) {
     var m = Math.floor(ms / 60000);
     return m < 60 ? m + "dk" : Math.floor(m / 60) + "s " + (m % 60) + "dk";
+  }
+
+  // Sürüş bitince özet kartı (mesafe/süre/durak) — sonra sürüş sayaçlarını sıfırlar.
+  function showDriveSummary() {
+    if (!tripStartMs) return;
+    var km = (tripDistM / 1000).toFixed(1), dur = fmtDur(Date.now() - tripStartMs), stops = tripStops;
+    var el = document.createElement("div");
+    el.id = "driveSummary";
+    el.style.cssText = "position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;background:rgba(5,10,18,.7);backdrop-filter:blur(4px);padding:24px";
+    var tile = "flex:1;background:#0c1a2b;border:1px solid var(--line);border-radius:12px;padding:12px";
+    el.innerHTML = '<div style="background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;max-width:340px;width:100%;text-align:center;backdrop-filter:blur(14px)">'
+      + '<div style="font-size:34px">🚗</div>'
+      + '<div style="font-weight:800;font-size:18px;margin:6px 0 4px">Sürüş özeti</div>'
+      + '<div style="color:var(--muted);font-size:13px;margin-bottom:16px">İyi sürüşler!</div>'
+      + '<div style="display:flex;gap:10px;margin-bottom:18px">'
+      + '<div style="' + tile + '"><div style="font-size:22px;font-weight:800">' + km + '</div><div style="color:var(--muted);font-size:10px;text-transform:uppercase">km</div></div>'
+      + '<div style="' + tile + '"><div style="font-size:22px;font-weight:800">' + dur + '</div><div style="color:var(--muted);font-size:10px;text-transform:uppercase">süre</div></div>'
+      + '<div style="' + tile + '"><div style="font-size:22px;font-weight:800">' + stops + '</div><div style="color:var(--muted);font-size:10px;text-transform:uppercase">durak</div></div>'
+      + '</div><button id="driveSummaryClose">Kapat</button></div>';
+    document.body.appendChild(el);
+    el.querySelector("#driveSummaryClose").onclick = function () { el.remove(); resetTrip(); };
+  }
+  function resetTrip() {
+    tripDistM = 0; tripStartMs = 0; tripStops = 0; stopStartMs = 0; stopCounted = false;
+    trailPts.length = 0; if (trail) trail.setLatLngs([]); updateTripSummary();
   }
 
   // GPS kalite mikro-göstergesi: doğruluğa göre iyi/orta/zayıf.

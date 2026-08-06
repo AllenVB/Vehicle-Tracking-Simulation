@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   let token = null, map = null, stomp = null, view = "live";
-  let selected = null, followId = null, alertCount = 0;
+  let selected = null, followId = null, alertCount = 0, selTrackLayer = null;
   const vehicles = new Map();   // id -> {trackId, plate, make, model, type}
   const pos = new Map();        // id -> position
   const markers = new Map();    // id -> L.marker
@@ -23,6 +23,16 @@
   const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const RULE_TR = { SPEED_LIMIT: "Hız aşımı", HARSH_BRAKING: "Sert fren", HARSH_ACCELERATION: "Ani hızlanma", HARSH_ACCEL: "Ani hızlanma", HARSH_CORNERING: "Sert viraj", IDLING: "Uzun rölanti", GEOFENCE: "Bölge ihlali", ROUTE_DEVIATION: "Rota sapması" };
   const ruleLabel = c => RULE_TR[c] || c || "İhlal";
+  // "Son görülme" relatif zaman: az önce / N dk önce / N sa önce / N gün önce.
+  function relTime(ts) {
+    if (!ts) return "—";
+    const t = Date.parse(ts); if (isNaN(t)) return "—";
+    const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (s < 60) return "az önce";
+    const m = Math.floor(s / 60); if (m < 60) return m + " dk önce";
+    const h = Math.floor(m / 60); if (h < 24) return h + " sa önce";
+    return Math.floor(h / 24) + " gün önce";
+  }
   function vioDetail(e) {
     if (e.value == null) return "";
     const v = Math.round(e.value), t = e.threshold != null ? Math.round(e.threshold) : null;
@@ -216,7 +226,7 @@
     selected = id;
     refreshCards();
     const ov = $("selOverlay");
-    if (id == null) { ov.classList.add("hidden"); followId = null; if (view === "history") clearHistory(); return; }
+    if (id == null) { ov.classList.add("hidden"); followId = null; clearSelTrack(); if (view === "history") clearHistory(); return; }
     updateOverlay();
     loadTrip(id);
     ov.classList.remove("hidden");
@@ -224,7 +234,21 @@
     if (p && view === "live") map.panTo([p.lat, p.lon]);
     $("histVehicle").value = id;
     if (view === "history") loadHistory(id, currentDay(), true);
+    else if (view === "live") showTodayTrack(id);
   }
+
+  // Seçili araç AKTİFSE, bugün geçtiği yerleri canlı haritada mavi rota olarak göster.
+  async function showTodayTrack(id) {
+    clearSelTrack();
+    if (view !== "live" || isStale(pos.get(id))) return;   // yalnızca aktif araç
+    let pts;
+    try { pts = await fetchDay(id, 0); } catch (_) { return; }
+    if (id !== selected || view !== "live" || !pts || !pts.length) return;
+    const latlngs = pts.filter(p => p.lat != null).map(p => [p.lat, p.lon]);
+    if (latlngs.length < 2) return;
+    selTrackLayer = L.polyline(latlngs, { color: "#3b82f6", weight: 4, opacity: .8 }).addTo(map);
+  }
+  function clearSelTrack() { if (selTrackLayer) { map.removeLayer(selTrackLayer); selTrackLayer = null; } }
   function updateOverlay() {
     const v = vehicles.get(selected), p = pos.get(selected);
     $("selTitle").textContent = "#" + (v ? v.trackId : "?") + " · " + (v ? v.plate : "");
@@ -622,6 +646,24 @@
     if ($("nvCreate")) $("nvCreate").onclick = createVehicle;
     if ($("nvPlate")) $("nvPlate").addEventListener("keydown", e => { if (e.key === "Enter") createVehicle(); });
     if ($("fleetSearch")) $("fleetSearch").oninput = renderFleet;   // plakaya göre anında süz
+    if ($("fleetReportBtn")) $("fleetReportBtn").onclick = exportFleetReport;
+  }
+
+  // Tek tık filo durum raporu (CSV): anlık snapshot — ekstra API çağrısı yok.
+  function exportFleetReport() {
+    const rows = [["Plaka", "Durum", "Hiz_kmh", "Yakit_%", "Enlem", "Boylam", "Son_gorulme"]];
+    [...vehicles.values()].forEach(v => {
+      const p = pos.get(v.id), st = stateOf(v.id);
+      rows.push([v.plate, st.label, p && p.speedKmh != null ? p.speedKmh : "", p && p.fuelPct != null ? p.fuelPct : "",
+        p && p.lat != null ? p.lat.toFixed(5) : "", p && p.lon != null ? p.lon.toFixed(5) : "",
+        p && p.ts ? new Date(p.ts).toLocaleString("tr-TR") : ""]);
+    });
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `filo-durum-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+    toast(`Filo raporu indirildi · ${vehicles.size} araç`);
   }
 
   // Admin yeni araç oluşturur (sürücüler oluşturamaz — yalnızca adminin araçlarına girer).
@@ -701,7 +743,7 @@
     const speed = p && p.speedKmh != null ? p.speedKmh : "—";
     const fuel = p && p.fuelPct != null ? p.fuelPct : null;
     const loc = p && p.lat != null ? p.lat.toFixed(4) + ", " + p.lon.toFixed(4) : "Konum bekleniyor";
-    const seen = p && p.ts ? new Date(p.ts).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—";
+    const seen = relTime(p && p.ts);
     return `<div class="glass-panel p-5 rounded-2xl relative overflow-hidden">
       <div class="absolute top-0 right-0 w-28 h-28 rounded-full blur-3xl -mr-14 -mt-14" style="background:${c}22"></div>
       <div class="flex justify-between items-start mb-4 relative">
@@ -922,6 +964,7 @@
   // ── Canlı/Geçmiş toggle ──────────────────────────────────────────────────
   window.toggleView = function (v) {
     view = v;
+    clearSelTrack();
     const live = $("live-panel"), hist = $("history-panel"), ind = $("nav-indicator");
     document.querySelectorAll(".nav-link").forEach(l => {
       const on = l.dataset.view === v;
@@ -943,6 +986,7 @@
     if (v === "live") {
       hist.classList.add("hidden-content"); setTimeout(() => live.classList.remove("hidden-content"), 100);
       clearHistory(); if (cluster) map.addLayer(cluster);
+      if (selected != null) showTodayTrack(selected);
     } else if (v === "history") {
       live.classList.add("hidden-content"); setTimeout(() => hist.classList.remove("hidden-content"), 100);
       if (cluster) map.removeLayer(cluster);
