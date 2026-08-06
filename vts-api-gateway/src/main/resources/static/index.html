@@ -41,7 +41,7 @@
     border:1px solid rgba(78,222,163,.3); border-radius:10px; padding:6px 10px; font-size:13px; cursor:pointer; }
   /* ── Modern bildirim paneli satırları ─────────────────────────────── */
   .bell-row { display:flex; gap:10px; align-items:flex-start; padding:11px 12px; border-radius:16px;
-    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.06); }
+    background:#1b201e; border:1px solid transparent; }   /* opak: swipe'taki kırmızı katman içinden geçmesin */
   .bell-ic { width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex:none; }
   .bell-ic .material-symbols-outlined { font-size:20px; }
   .bell-ic-msg, .bell-ic-bcast { background:rgba(78,222,163,.14); color:#4edea3; }
@@ -61,7 +61,9 @@
   .bell-act:hover { background:rgba(78,222,163,.16); color:#4edea3; border-color:rgba(78,222,163,.3); }
   .bell-act-del:hover { background:rgba(255,93,108,.16); color:#ffb4ab; border-color:rgba(255,93,108,.3); }
   .bell-dot { width:7px; height:7px; border-radius:50%; background:#4edea3; flex:none; box-shadow:0 0 6px rgba(78,222,163,.7); }
-  .bell-unread { background:rgba(78,222,163,.06); border-color:rgba(78,222,163,.2) !important; }
+  /* Okunmamış = belirgin çerçeve (opak); okundu → çerçeve kalkar (düz satır). */
+  .bell-unread { background:#16241d !important; border:1.5px solid rgba(78,222,163,.5) !important; }
+  .bell-unread:hover { background:#1a2a22 !important; }
   .bell-urgent { border-left:2px solid #ffb4ab; }
   .bell-badge-urgent { font-size:9px; font-weight:800; text-transform:uppercase; color:#ffb4ab; border:1px solid rgba(255,180,171,.6); border-radius:6px; padding:1px 5px; }
   /* Swipe ile silme (2 aşama) */
@@ -70,7 +72,7 @@
     background:linear-gradient(90deg, rgba(147,0,10,0), #93000a); color:#fff; }
   .bell-swipe-del .material-symbols-outlined { font-size:22px; }
   .bell-swipe-card { position:relative; cursor:pointer; transition:transform .28s cubic-bezier(.2,.7,.2,1); touch-action:pan-y; }
-  .bell-swipe-card:hover { background:rgba(255,255,255,.07); }
+  .bell-row:hover, .bell-swipe-card:hover { background:#232926; }
   .bell-swipe-card.armed { transform:translateX(-84px); }
   .bell-x { position:absolute; top:8px; right:10px; width:20px; height:20px; border-radius:50%; border:0; cursor:pointer;
     background:rgba(255,255,255,.08); color:#bbcabf; font-size:12px; line-height:1; opacity:0; transition:opacity .15s; }

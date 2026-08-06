@@ -13,7 +13,7 @@
   let inbox = [];                 // {id, vehicleId, plate, body, audio, at} — gelen sürücü mesajları
   const inboxDismissed = new Set(JSON.parse(localStorage.getItem("vts_inbox_dismissed") || "[]"));
   const bcastSeen = new Set();    // aynı duyuruyu iki kez işlemeyi önle (id)
-  const notifRead = new Set(JSON.parse(localStorage.getItem("vts_notif_read") || "[]"));       // okundu anahtarları (b:id / d:id)
+  const notifRead = new Set(JSON.parse(localStorage.getItem("vts_read") || "[]"));              // okundu anahtarları (b:id / d:id)
   const bcastDismissed = new Set(JSON.parse(localStorage.getItem("vts_bcast_dismissed") || "[]")); // silinen duyurular
   let bcastSeverity = "INFO";     // composer'da seçili önem (INFO | URGENT)
   const bannerQueue = []; let bannerBusy = false;   // ortadaki 10 sn banner kuyruğu (üst üste binmesin)
@@ -517,7 +517,7 @@
     const bell = $("bellIcon");
     if (bell) { bell.classList.remove("bell-shake"); void bell.offsetWidth; bell.classList.add("bell-shake"); }
   }
-  function persistRead() { try { localStorage.setItem("vts_notif_read", JSON.stringify([...notifRead].slice(-800))); } catch (_) {} }
+  function persistRead() { try { localStorage.setItem("vts_read", JSON.stringify([...notifRead].slice(-800))); } catch (_) {} }
   function markNotifRead(key) { notifRead.add(key); persistRead(); updateBellBadge(); renderBellPanel(); }
   function markBroadcastsRead() {   // "Tümü okundu"
     broadcasts.forEach(b => { if (b.id != null) notifRead.add("b:" + b.id); });
@@ -530,14 +530,9 @@
     const i = broadcasts.findIndex(b => b.id === id); if (i >= 0) broadcasts.splice(i, 1);
     updateBellBadge(); renderBellPanel();
   }
-  function seedReadOnce() {   // ilk açılış: mevcut geçmiş okundu sayılır (rozet 40'la başlamasın)
-    if (!localStorage.getItem("vts_notif_init")) {
-      broadcasts.forEach(b => { if (b.id != null) notifRead.add("b:" + b.id); });
-      inbox.forEach(m => { if (m.id != null) notifRead.add("d:" + m.id); });
-      persistRead(); localStorage.setItem("vts_notif_init", "1");
-    }
-    updateBellBadge();
-  }
+  // Artık ilk açılışta otomatik "okundu" yapılmaz: bildirimler çerçeveli (okunmamış) gelir,
+  // kullanıcı okundu'ya basınca çerçeve kalkar. Sadece rozeti/sayacı günceller.
+  function seedReadOnce() { updateBellBadge(); }
 
   const bellWhen = at => at ? new Date(at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
   const bellDot = un => un ? '<span class="bell-dot"></span>' : "";
