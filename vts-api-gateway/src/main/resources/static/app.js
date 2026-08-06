@@ -382,8 +382,9 @@
   // (vehicle-messages) tamamen ayrıdır — ona dokunulmaz.
   function initBroadcast() {
     const composer = $("bcastComposer"), panel = $("bellPanel");
+    const pop = el => { el.classList.remove("anim-pop"); void el.offsetWidth; el.classList.add("anim-pop"); };
     $("bcastComposeBtn").onclick = e => { e.stopPropagation(); panel.classList.add("hidden"); composer.classList.toggle("hidden");
-      if (!composer.classList.contains("hidden")) $("bcastBody").focus(); };
+      if (!composer.classList.contains("hidden")) { pop(composer); $("bcastBody").focus(); } };
     $("bcastClose").onclick = () => composer.classList.add("hidden");
     // Önem seçici (Bilgi/Acil) — segmented toggle.
     document.querySelectorAll(".bcast-sev").forEach(btn => btn.onclick = () => {
@@ -403,7 +404,7 @@
     $("bcastSend").onclick = sendBroadcast;
     $("bcastBody").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBroadcast(); });
     $("bellBtn").onclick = e => { e.stopPropagation(); composer.classList.add("hidden");
-      panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) markBroadcastsRead(); };
+      panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) { pop(panel); markBroadcastsRead(); } };
     $("bellClear").onclick = markBroadcastsRead;
     // Panel/composer dışına tıklayınca kapan.
     document.addEventListener("click", e => {
@@ -520,20 +521,24 @@
   const bellWhen = at => at ? new Date(at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
   function bcastRow(b) {
     const urgent = b.severity === "URGENT";
-    const badge = urgent ? ` <span class="text-[9px] font-extrabold uppercase tracking-wide text-error border border-error/60 rounded px-1 py-0.5 align-middle">Acil</span>` : "";
-    const title = (b.title || urgent) ? `<div class="text-body-md font-bold text-on-surface">${esc(b.title || "")}${badge}</div>` : "";
-    return `<div class="p-3 rounded-xl bg-white/5 border ${urgent ? "border-l-2 border-error/60" : "border-white/5"}">
-      ${title}<div class="text-body-md text-on-surface" style="word-break:break-word">${esc(b.body)}</div>
-      <div class="text-[10px] text-on-surface-variant mt-1">📣 ${esc(b.sender || "admin")} · ${bellWhen(b.at)}</div></div>`;
+    const badge = urgent ? `<span class="bell-badge-urgent">Acil</span>` : "";
+    return `<div class="bell-row${urgent ? " bell-urgent" : ""}">
+      <div class="bell-ic ${urgent ? "bell-ic-urgent" : "bell-ic-bcast"}"><span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">campaign</span></div>
+      <div class="bell-main"><div class="bell-title">${esc(b.title || "Duyuru")} ${badge}</div>
+        <div class="bell-sub" style="white-space:normal">${esc(b.body)}</div>
+        <div class="bell-meta">${esc(b.sender || "admin")} · ${bellWhen(b.at)}</div></div></div>`;
   }
   function driverRow(m) {
-    const snippet = m.audio ? "🎤 Sesli mesaj" : esc((m.body || "").slice(0, 45));
-    return `<div class="p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 flex gap-2 items-start cursor-pointer" data-iopen="${m.vehicleId}">
-      <span class="material-symbols-outlined text-primary text-body-md" style="font-variation-settings:'FILL' 1">chat</span>
-      <div class="flex-1 min-w-0"><div class="text-body-md font-bold text-on-surface truncate">${esc(m.plate || "Araç")} · sürücü</div>
-        <div class="text-label-sm text-on-surface-variant truncate">${snippet} · ${bellWhen(m.at)}</div></div>
-      <button data-idel="${m.id}" title="Bildirimi kaldır" class="p-1 hover:bg-white/10 rounded-full flex-none"><span class="material-symbols-outlined text-on-surface-variant text-body-md">close</span></button>
-    </div>`;
+    const snippet = m.audio ? "🎤 Sesli mesaj" : esc((m.body || "").slice(0, 48));
+    return `<div class="bell-swipe" data-idel="${m.id}">
+      <div class="bell-swipe-del"><span class="material-symbols-outlined">delete</span></div>
+      <div class="bell-swipe-card bell-row" data-iopen="${m.vehicleId}">
+        <div class="bell-ic bell-ic-msg"><span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">chat</span></div>
+        <div class="bell-main"><div class="bell-title">${esc(m.plate || "Araç")} <span class="bell-tag">sürücü</span></div>
+          <div class="bell-sub">${snippet}</div></div>
+        <div class="bell-time">${bellWhen(m.at)}</div>
+        <button class="bell-x" title="Kaldır">✕</button>
+      </div></div>`;
   }
   function renderBellPanel() {
     const list = $("bellList");
@@ -541,10 +546,28 @@
     const items = broadcasts.map(b => ({ kind: "b", at: b.at || "", data: b }))
       .concat(inbox.map(m => ({ kind: "d", at: m.at || "", data: m })))
       .sort((a, b) => b.at.localeCompare(a.at));   // en yeni önce (duyuru + gelen mesaj karışık)
-    if (!items.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-6">Henüz bildirim yok.</div>'; return; }
+    if (!items.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-8">Henüz bildirim yok.</div>'; return; }
     list.innerHTML = items.map(it => it.kind === "b" ? bcastRow(it.data) : driverRow(it.data)).join("");
-    list.querySelectorAll("[data-idel]").forEach(btn => btn.onclick = e => { e.stopPropagation(); dismissInbox(+btn.dataset.idel); });
-    list.querySelectorAll("[data-iopen]").forEach(el => el.onclick = () => { $("bellPanel").classList.add("hidden"); openChat(+el.dataset.iopen); });
+    wireBellSwipe();
+  }
+  // Gelen mesaj satırında modern etkileşim: tıkla→sohbet, kaydır→sil (2 aşama: 1. kaydırış
+  // "Sil"i açar, 2. kaydırış siler; ✕ masaüstü için).
+  function wireBellSwipe() {
+    document.querySelectorAll("#bellList .bell-swipe").forEach(sw => {
+      const card = sw.querySelector(".bell-swipe-card"), id = +sw.dataset.idel;
+      let sx = 0, dx = 0, dragging = false, armed = false, moved = false;
+      const reset = () => { armed = false; card.classList.remove("armed"); card.style.transform = ""; };
+      sw.querySelector(".bell-swipe-del").onclick = () => dismissInbox(id);
+      sw.querySelector(".bell-x").onclick = e => { e.stopPropagation(); dismissInbox(id); };
+      card.addEventListener("touchstart", e => { if (e.touches.length !== 1) return; dragging = true; moved = false; sx = e.touches[0].clientX; card.style.transition = "none"; }, { passive: true });
+      card.addEventListener("touchmove", e => { if (!dragging) return; dx = e.touches[0].clientX - sx; if (Math.abs(dx) > 6) moved = true;
+        card.style.transform = "translateX(" + Math.min(0, Math.max(-140, (armed ? -84 : 0) + dx)) + "px)"; }, { passive: true });
+      card.addEventListener("touchend", () => { if (!dragging) return; dragging = false; card.style.transition = "";
+        if (armed) { if (dx < -20) return dismissInbox(id); if (dx > 20) return reset(); card.style.transform = "translateX(-84px)"; return; }
+        if (dx < -44) { armed = true; card.classList.add("armed"); card.style.transform = ""; } else reset(); }, { passive: true });
+      card.addEventListener("click", () => { if (moved) { moved = false; return; } if (armed) return reset();
+        $("bellPanel").classList.add("hidden"); openChat(+card.dataset.iopen); });
+    });
   }
 
   // ── Haritada gör: canlı yoksa son bilinen konumu göster ───────────────────
@@ -598,7 +621,9 @@
   async function loadChat(id) {
     try {
       const r = await fetch(`/api/v1/vehicles/${id}/messages`, { headers: auth() });
+      if (id !== chatVehicle) return;                 // bu arada başka araca geçildi → eski cevabı çizme
       const list = r.ok ? await r.json() : [];
+      if (id !== chatVehicle) return;                 // (await json sonrası tekrar kontrol)
       $("chatBody").innerHTML = "";
       if (!list.length) { $("chatBody").innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-4">Henüz mesaj yok. İlk mesajı sen yaz.</div>'; return; }
       list.forEach(m => renderChatMsg(m.direction, m.body, m.at, m.audio));
@@ -632,8 +657,11 @@
   function toggleRecord(btn, onDone) {
     if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
     if (!navigator.mediaDevices || !window.MediaRecorder) { alert("Bu tarayıcı ses kaydını desteklemiyor."); return; }
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-      recChunks = []; mediaRec = new MediaRecorder(stream);
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }).then(function (stream) {
+      recChunks = [];
+      var opts = (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("audio/webm;codecs=opus"))
+        ? { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 128000 } : {};
+      mediaRec = new MediaRecorder(stream, opts);
       mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) recChunks.push(e.data); };
       var to = setTimeout(function () { if (mediaRec && mediaRec.state === "recording") mediaRec.stop(); }, 60000);
       mediaRec.onstop = function () {

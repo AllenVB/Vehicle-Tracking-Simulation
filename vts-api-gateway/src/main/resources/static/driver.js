@@ -580,8 +580,11 @@
   function toggleRecord(btn, onDone) {
     if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
     if (!navigator.mediaDevices || !window.MediaRecorder) { alert("Bu cihaz ses kaydını desteklemiyor."); return; }
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-      recChunks = []; mediaRec = new MediaRecorder(stream);
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }).then(function (stream) {
+      recChunks = [];
+      var opts = (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("audio/webm;codecs=opus"))
+        ? { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 128000 } : {};
+      mediaRec = new MediaRecorder(stream, opts);
       mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) recChunks.push(e.data); };
       var to = setTimeout(function () { if (mediaRec && mediaRec.state === "recording") mediaRec.stop(); }, 60000);
       mediaRec.onstop = function () {

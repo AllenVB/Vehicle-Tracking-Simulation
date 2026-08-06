@@ -39,6 +39,35 @@
     45%{transform:rotate(9deg)} 60%{transform:rotate(-6deg)} 75%{transform:rotate(3deg)} }
   .audio-btn { display:inline-flex; align-items:center; gap:6px; background:rgba(78,222,163,.16); color:#e5e2e1;
     border:1px solid rgba(78,222,163,.3); border-radius:10px; padding:6px 10px; font-size:13px; cursor:pointer; }
+  /* ── Modern bildirim paneli satırları ─────────────────────────────── */
+  .bell-row { display:flex; gap:10px; align-items:flex-start; padding:11px 12px; border-radius:16px;
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.06); }
+  .bell-ic { width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .bell-ic .material-symbols-outlined { font-size:20px; }
+  .bell-ic-msg, .bell-ic-bcast { background:rgba(78,222,163,.14); color:#4edea3; }
+  .bell-ic-urgent { background:rgba(255,93,108,.16); color:#ffb4ab; }
+  .bell-main { flex:1; min-width:0; }
+  .bell-title { font-weight:700; color:#e5e2e1; font-size:14px; display:flex; align-items:center; gap:6px; }
+  .bell-tag { font-size:10px; font-weight:600; color:#8aa0ad; background:rgba(255,255,255,.06); border-radius:6px; padding:1px 6px; }
+  .bell-sub { color:#bbcabf; font-size:13px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bell-meta { color:#86948a; font-size:10px; margin-top:4px; }
+  .bell-time { color:#86948a; font-size:10px; flex:none; margin-left:6px; }
+  .bell-urgent { border-left:2px solid #ffb4ab; }
+  .bell-badge-urgent { font-size:9px; font-weight:800; text-transform:uppercase; color:#ffb4ab; border:1px solid rgba(255,180,171,.6); border-radius:6px; padding:1px 5px; }
+  /* Swipe ile silme (2 aşama) */
+  .bell-swipe { position:relative; overflow:hidden; border-radius:16px; }
+  .bell-swipe-del { position:absolute; inset:0; display:flex; align-items:center; justify-content:flex-end; padding-right:20px;
+    background:linear-gradient(90deg, rgba(147,0,10,0), #93000a); color:#fff; }
+  .bell-swipe-del .material-symbols-outlined { font-size:22px; }
+  .bell-swipe-card { position:relative; cursor:pointer; transition:transform .28s cubic-bezier(.2,.7,.2,1); touch-action:pan-y; }
+  .bell-swipe-card:hover { background:rgba(255,255,255,.07); }
+  .bell-swipe-card.armed { transform:translateX(-84px); }
+  .bell-x { position:absolute; top:8px; right:10px; width:20px; height:20px; border-radius:50%; border:0; cursor:pointer;
+    background:rgba(255,255,255,.08); color:#bbcabf; font-size:12px; line-height:1; opacity:0; transition:opacity .15s; }
+  .bell-swipe:hover .bell-x { opacity:1; }
+  /* Panel açılış — yumuşak */
+  .anim-pop { animation:popIn .22s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes popIn { from { opacity:0; transform:translateY(-6px) scale(.98); } to { opacity:1; transform:none; } }
   /* Haritada plaka etiketi (Leaflet tooltip) — koyu pill, oksuz. */
   .plate-label { background:rgba(19,19,19,.9); color:#e5e2e1; border:1px solid rgba(78,222,163,.4); border-radius:6px;
     font-size:10px; font-weight:700; padding:1px 6px; box-shadow:none; white-space:nowrap; }
