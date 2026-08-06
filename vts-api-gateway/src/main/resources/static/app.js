@@ -13,7 +13,8 @@
   let inbox = [];                 // {id, vehicleId, plate, body, audio, at} — gelen sürücü mesajları
   const inboxDismissed = new Set(JSON.parse(localStorage.getItem("vts_inbox_dismissed") || "[]"));
   const bcastSeen = new Set();    // aynı duyuruyu iki kez işlemeyi önle (id)
-  let bcastUnread = 0;            // çandaki okunmamış rozet sayısı
+  const notifRead = new Set(JSON.parse(localStorage.getItem("vts_notif_read") || "[]"));       // okundu anahtarları (b:id / d:id)
+  const bcastDismissed = new Set(JSON.parse(localStorage.getItem("vts_bcast_dismissed") || "[]")); // silinen duyurular
   let bcastSeverity = "INFO";     // composer'da seçili önem (INFO | URGENT)
   const bannerQueue = []; let bannerBusy = false;   // ortadaki 10 sn banner kuyruğu (üst üste binmesin)
   const BANNER_MS = 10000;        // "10 saniye boyunca kalsın"
@@ -82,8 +83,7 @@
     initFleet();
     initChat();
     initBroadcast();
-    loadBroadcasts();
-    loadInbox();
+    Promise.all([loadBroadcasts(), loadInbox()]).then(seedReadOnce);   // ilk açılışta geçmiş = okundu
     loadDashboard().then(maybeDailySummary);
     setInterval(loadVehicles, 15000);
     setInterval(sweep, 5000);
@@ -404,7 +404,7 @@
     $("bcastSend").onclick = sendBroadcast;
     $("bcastBody").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBroadcast(); });
     $("bellBtn").onclick = e => { e.stopPropagation(); composer.classList.add("hidden");
-      panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) { pop(panel); markBroadcastsRead(); } };
+      panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) pop(panel); };   // okundu = kullanıcı işaretler
     $("bellClear").onclick = markBroadcastsRead;
     // Panel/composer dışına tıklayınca kapan.
     document.addEventListener("click", e => {
@@ -419,9 +419,9 @@
       if (!r.ok) return;
       const list = await r.json();   // en yeni önce
       broadcasts.length = 0;
-      list.forEach(b => { broadcasts.push(b); if (b.id != null) bcastSeen.add(b.id); });
+      list.forEach(b => { if (b.id != null && bcastDismissed.has(b.id)) return; broadcasts.push(b); if (b.id != null) bcastSeen.add(b.id); });
     } catch (_) {}
-    renderBellPanel();   // geçmiş = okunmuş sayılır; rozet artmaz
+    renderBellPanel();
   }
 
   async function sendBroadcast() {
@@ -500,44 +500,74 @@
     el._timer = setTimeout(finish, BANNER_MS);
   }
 
-  function moveToBell() {
-    const panelOpen = !$("bellPanel").classList.contains("hidden");
-    if (panelOpen) { markBroadcastsRead(); return; }   // zaten görüyor → okunmuş
-    bcastUnread++;
+  // Okunmamış = notifRead'de olmayan (duyuru b:id / gelen mesaj d:id).
+  function notifUnread() {
+    let n = 0;
+    broadcasts.forEach(b => { if (b.id != null && !notifRead.has("b:" + b.id)) n++; });
+    inbox.forEach(m => { if (m.id != null && !notifRead.has("d:" + m.id)) n++; });
+    return n;
+  }
+  function updateBellBadge() {
+    const n = notifUnread(), badge = $("bellBadge"), hdr = $("bellUnread");
+    if (badge) { if (n > 0) { badge.textContent = n > 99 ? "99+" : n; badge.classList.remove("hidden"); } else badge.classList.add("hidden"); }
+    if (hdr) { if (n > 0) { hdr.textContent = n + " okunmamış"; hdr.classList.remove("hidden"); } else hdr.classList.add("hidden"); }
+  }
+  function moveToBell() {   // yeni bildirim geldi: rozeti güncelle + çanı salla
     updateBellBadge();
     const bell = $("bellIcon");
     if (bell) { bell.classList.remove("bell-shake"); void bell.offsetWidth; bell.classList.add("bell-shake"); }
   }
-
-  function updateBellBadge() {
-    const badge = $("bellBadge");
-    if (!badge) return;
-    if (bcastUnread > 0) { badge.textContent = bcastUnread > 99 ? "99+" : bcastUnread; badge.classList.remove("hidden"); }
-    else badge.classList.add("hidden");
+  function persistRead() { try { localStorage.setItem("vts_notif_read", JSON.stringify([...notifRead].slice(-800))); } catch (_) {} }
+  function markNotifRead(key) { notifRead.add(key); persistRead(); updateBellBadge(); renderBellPanel(); }
+  function markBroadcastsRead() {   // "Tümü okundu"
+    broadcasts.forEach(b => { if (b.id != null) notifRead.add("b:" + b.id); });
+    inbox.forEach(m => { if (m.id != null) notifRead.add("d:" + m.id); });
+    persistRead(); updateBellBadge(); renderBellPanel();
+  }
+  function dismissBroadcast(id) {   // duyuruyu panelden kaldır (kalıcı, DB'ye dokunmaz)
+    bcastDismissed.add(id);
+    try { localStorage.setItem("vts_bcast_dismissed", JSON.stringify([...bcastDismissed].slice(-500))); } catch (_) {}
+    const i = broadcasts.findIndex(b => b.id === id); if (i >= 0) broadcasts.splice(i, 1);
+    updateBellBadge(); renderBellPanel();
+  }
+  function seedReadOnce() {   // ilk açılış: mevcut geçmiş okundu sayılır (rozet 40'la başlamasın)
+    if (!localStorage.getItem("vts_notif_init")) {
+      broadcasts.forEach(b => { if (b.id != null) notifRead.add("b:" + b.id); });
+      inbox.forEach(m => { if (m.id != null) notifRead.add("d:" + m.id); });
+      persistRead(); localStorage.setItem("vts_notif_init", "1");
+    }
+    updateBellBadge();
   }
 
-  function markBroadcastsRead() { bcastUnread = 0; updateBellBadge(); }
-
   const bellWhen = at => at ? new Date(at).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  const bellDot = un => un ? '<span class="bell-dot"></span>' : "";
+  // Okundu (yalnızca okunmamışsa) + sil butonları — modern ikon aksiyonları.
+  function bellActs(key, delAttr, unread) {
+    return `<div class="bell-actions">
+      ${unread ? `<button class="bell-act" data-read="${key}" title="Okundu"><span class="material-symbols-outlined">done</span></button>` : ""}
+      <button class="bell-act bell-act-del" ${delAttr} title="Sil"><span class="material-symbols-outlined">delete</span></button></div>`;
+  }
   function bcastRow(b) {
-    const urgent = b.severity === "URGENT";
+    const urgent = b.severity === "URGENT", unread = b.id != null && !notifRead.has("b:" + b.id);
     const badge = urgent ? `<span class="bell-badge-urgent">Acil</span>` : "";
-    return `<div class="bell-row${urgent ? " bell-urgent" : ""}">
+    return `<div class="bell-row${urgent ? " bell-urgent" : ""}${unread ? " bell-unread" : ""}">
       <div class="bell-ic ${urgent ? "bell-ic-urgent" : "bell-ic-bcast"}"><span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">campaign</span></div>
-      <div class="bell-main"><div class="bell-title">${esc(b.title || "Duyuru")} ${badge}</div>
+      <div class="bell-main"><div class="bell-title">${bellDot(unread)}${esc(b.title || "Duyuru")} ${badge}</div>
         <div class="bell-sub" style="white-space:normal">${esc(b.body)}</div>
-        <div class="bell-meta">${esc(b.sender || "admin")} · ${bellWhen(b.at)}</div></div></div>`;
+        <div class="bell-meta">${esc(b.sender || "admin")} · ${bellWhen(b.at)}</div></div>
+      ${bellActs("b:" + b.id, `data-delb="${b.id}"`, unread)}</div>`;
   }
   function driverRow(m) {
     const snippet = m.audio ? "🎤 Sesli mesaj" : esc((m.body || "").slice(0, 48));
+    const unread = m.id != null && !notifRead.has("d:" + m.id);
     return `<div class="bell-swipe" data-idel="${m.id}">
       <div class="bell-swipe-del"><span class="material-symbols-outlined">delete</span></div>
-      <div class="bell-swipe-card bell-row" data-iopen="${m.vehicleId}">
+      <div class="bell-swipe-card bell-row${unread ? " bell-unread" : ""}" data-iopen="${m.vehicleId}">
         <div class="bell-ic bell-ic-msg"><span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">chat</span></div>
-        <div class="bell-main"><div class="bell-title">${esc(m.plate || "Araç")} <span class="bell-tag">sürücü</span></div>
-          <div class="bell-sub">${snippet}</div></div>
-        <div class="bell-time">${bellWhen(m.at)}</div>
-        <button class="bell-x" title="Kaldır">✕</button>
+        <div class="bell-main"><div class="bell-title">${bellDot(unread)}${esc(m.plate || "Araç")} <span class="bell-tag">sürücü</span></div>
+          <div class="bell-sub">${snippet}</div>
+          <div class="bell-meta">${bellWhen(m.at)}</div></div>
+        ${bellActs("d:" + m.id, `data-deld="${m.id}"`, unread)}
       </div></div>`;
   }
   function renderBellPanel() {
@@ -546,9 +576,13 @@
     const items = broadcasts.map(b => ({ kind: "b", at: b.at || "", data: b }))
       .concat(inbox.map(m => ({ kind: "d", at: m.at || "", data: m })))
       .sort((a, b) => b.at.localeCompare(a.at));   // en yeni önce (duyuru + gelen mesaj karışık)
-    if (!items.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-8">Henüz bildirim yok.</div>'; return; }
+    if (!items.length) { list.innerHTML = '<div class="text-label-sm text-on-surface-variant text-center py-8">Henüz bildirim yok.</div>'; updateBellBadge(); return; }
     list.innerHTML = items.map(it => it.kind === "b" ? bcastRow(it.data) : driverRow(it.data)).join("");
+    list.querySelectorAll("[data-read]").forEach(btn => btn.onclick = e => { e.stopPropagation(); markNotifRead(btn.dataset.read); });
+    list.querySelectorAll("[data-delb]").forEach(btn => btn.onclick = e => { e.stopPropagation(); dismissBroadcast(+btn.dataset.delb); });
+    list.querySelectorAll("[data-deld]").forEach(btn => btn.onclick = e => { e.stopPropagation(); dismissInbox(+btn.dataset.deld); });
     wireBellSwipe();
+    updateBellBadge();
   }
   // Gelen mesaj satırında modern etkileşim: tıkla→sohbet, kaydır→sil (2 aşama: 1. kaydırış
   // "Sil"i açar, 2. kaydırış siler; ✕ masaüstü için).
@@ -558,7 +592,6 @@
       let sx = 0, dx = 0, dragging = false, armed = false, moved = false;
       const reset = () => { armed = false; card.classList.remove("armed"); card.style.transform = ""; };
       sw.querySelector(".bell-swipe-del").onclick = () => dismissInbox(id);
-      sw.querySelector(".bell-x").onclick = e => { e.stopPropagation(); dismissInbox(id); };
       card.addEventListener("touchstart", e => { if (e.touches.length !== 1) return; dragging = true; moved = false; sx = e.touches[0].clientX; card.style.transition = "none"; }, { passive: true });
       card.addEventListener("touchmove", e => { if (!dragging) return; dx = e.touches[0].clientX - sx; if (Math.abs(dx) > 6) moved = true;
         card.style.transform = "translateX(" + Math.min(0, Math.max(-140, (armed ? -84 : 0) + dx)) + "px)"; }, { passive: true });

@@ -52,6 +52,16 @@
   .bell-sub { color:#bbcabf; font-size:13px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bell-meta { color:#86948a; font-size:10px; margin-top:4px; }
   .bell-time { color:#86948a; font-size:10px; flex:none; margin-left:6px; }
+  #bellList { -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+  #bellList::-webkit-scrollbar { width:5px; } #bellList::-webkit-scrollbar-thumb { background:#2e3734; border-radius:10px; }
+  .bell-actions { display:flex; gap:4px; align-items:center; flex:none; }
+  .bell-act { width:28px; height:28px; border-radius:9px; border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.05);
+    color:#bbcabf; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all .15s; padding:0; }
+  .bell-act .material-symbols-outlined { font-size:17px; }
+  .bell-act:hover { background:rgba(78,222,163,.16); color:#4edea3; border-color:rgba(78,222,163,.3); }
+  .bell-act-del:hover { background:rgba(255,93,108,.16); color:#ffb4ab; border-color:rgba(255,93,108,.3); }
+  .bell-dot { width:7px; height:7px; border-radius:50%; background:#4edea3; flex:none; box-shadow:0 0 6px rgba(78,222,163,.7); }
+  .bell-unread { background:rgba(78,222,163,.06); border-color:rgba(78,222,163,.2) !important; }
   .bell-urgent { border-left:2px solid #ffb4ab; }
   .bell-badge-urgent { font-size:9px; font-weight:800; text-transform:uppercase; color:#ffb4ab; border:1px solid rgba(255,180,171,.6); border-radius:6px; padding:1px 5px; }
   /* Swipe ile silme (2 aşama) */
@@ -128,10 +138,11 @@
           <div class="flex items-center gap-2">
             <span class="material-symbols-outlined text-primary" style="font-variation-settings:'FILL' 1">notifications</span>
             <span class="text-body-md font-bold text-on-surface">Bildirimler</span>
+            <span id="bellUnread" class="hidden text-[10px] font-extrabold text-on-primary bg-primary rounded-full px-2 py-0.5">0 okunmamış</span>
           </div>
-          <button id="bellClear" class="text-[11px] text-on-surface-variant hover:text-primary transition-colors">Okundu işaretle</button>
+          <button id="bellClear" class="text-[11px] font-semibold text-on-surface-variant hover:text-primary transition-colors">Tümü okundu</button>
         </div>
-        <div id="bellList" class="max-h-[60vh] overflow-y-auto p-2 flex flex-col gap-1">
+        <div id="bellList" class="max-h-[55vh] overflow-y-auto p-2 flex flex-col gap-1.5">
           <div class="text-label-sm text-on-surface-variant text-center py-6">Henüz duyuru yok.</div>
         </div>
       </div>
