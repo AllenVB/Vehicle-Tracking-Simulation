@@ -259,10 +259,29 @@
     $("selSpeed").textContent = p ? (p.speedKmh != null ? p.speedKmh : 0) : "0";
     $("selFuel").textContent = p && p.fuelPct != null ? p.fuelPct : "—";
     $("selAcc").textContent = p && p.accuracy != null ? Math.round(p.accuracy) : "—";
+    // Geçmişte: trip tablosu boş olduğundan eco/skor/km'yi gerçek veriden hesapla
+    // (km = günün track mesafesi, puanlar = o günkü ihlallerden). Canlıda trip cache.
+    const useHist = view === "history" && histScore && selected === histVeh;
     const t = tripCache.get(selected);
-    $("selEco").textContent = t && t.ecoScore != null ? t.ecoScore : "—";
-    $("selScore").textContent = t && t.score != null ? t.score : "—";
-    $("selDist").textContent = t && t.distanceKm != null ? (+t.distanceKm).toFixed(1) : "—";
+    const eco = useHist ? histScore.ecoScore : (t && t.ecoScore != null ? t.ecoScore : null);
+    const sc = useHist ? histScore.score : (t && t.score != null ? t.score : null);
+    const di = useHist ? histScore.distanceKm : (t && t.distanceKm != null ? +t.distanceKm : null);
+    $("selEco").textContent = eco != null ? eco : "—";
+    $("selScore").textContent = sc != null ? sc : "—";
+    $("selDist").textContent = di != null ? di.toFixed(1) : "—";
+  }
+  // Sürüş puanı + eco puanı, o günkü GERÇEK ihlallerden (araç ne yaptıysa ona göre).
+  function scoreFromVios(vios, distKm) {
+    let dPen = 0, ePen = 0;
+    (vios || []).forEach(v => {
+      const c = v.ruleCode || "";
+      if (c.indexOf("SPEED") >= 0) { dPen += 12; ePen += 8; }          // hız aşımı
+      else if (c.indexOf("HARSH") >= 0) { dPen += 12; ePen += 9; }     // sert fren/ivme
+      else if (c.indexOf("IDLING") >= 0) { dPen += 3; ePen += 8; }     // rölanti → yakıt
+      else if (c.indexOf("GEOFENCE") >= 0) { dPen += 8; ePen += 2; }
+      else { dPen += 5; ePen += 4; }
+    });
+    return { score: Math.max(0, 100 - dPen), ecoScore: Math.max(0, 100 - ePen), distanceKm: distKm || 0 };
   }
   async function loadTrip(id) {
     if (tripCache.has(id)) { updateOverlay(); return; }
@@ -907,6 +926,7 @@
   // ── Geçmiş rota (gün seçici + playback) ──────────────────────────────────
   let histLayer = null, histVeh = null, histDay = 0, histPrev = null, histPts = [];
   let histVios = [], speedVios = [];   // 6b: seçili araç+günün gerçek ihlalleri / hız ihlalleri
+  let histScore = null;                // {score, ecoScore, distanceKm} — o günün ihlallerinden
   function currentDay() { const el = $("daySelect"); return el ? (parseInt(el.value, 10) || 0) : 0; }
   function dayLabel(d) { return new Date(Date.now() - d * 86400000).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", weekday: "short" }); }
   function initDaySelect() {
@@ -997,11 +1017,13 @@
     markStops(pts);
     if (pts.length) map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])).pad(0.2));
     const v = vehicles.get(id), s = summarize(pts), realVio = histVios.length;
+    histScore = scoreFromVios(histVios, s.dist);   // km + puanlar (ihlallerden) — overlay bunu gösterir
     $("sumDistance").textContent = s.dist.toFixed(1);
     $("sumViolations").textContent = String(realVio).padStart(2, "0");
     $("sumStops").textContent = String(s.stops).padStart(2, "0");
     $("histInfo").innerHTML = `<b class="text-on-surface">#${v ? v.trackId : "?"} ${v ? esc(v.plate) : ""}</b><br>${dayLabel(day)} · <b>${pts.length}</b> nokta` +
-      (pts.length ? `<br><span class="text-primary">${s.dist.toFixed(1)} km</span> · ${realVio} ihlal · ${s.stops} durak` : '<br><span class="text-error">Bu gün için kayıt yok.</span>');
+      (pts.length ? `<br><span class="text-primary">${s.dist.toFixed(1)} km</span> · ${realVio} ihlal · ${s.stops} durak · Skor <b>${histScore.score}</b> · Eco <b>${histScore.ecoScore}</b>` : '<br><span class="text-error">Bu gün için kayıt yok.</span>');
+    if (selected === id) updateOverlay();   // seçili aracın eco/skor/km kutularını doldur
     resetPlayback();
   }
   function extendHistory(p) {
@@ -1010,7 +1032,7 @@
     if (histPrev && histPrev.lat === cur.lat && histPrev.lon === cur.lon) return;
     histAdd(histPrev, cur); histPrev = cur; histPts.push(cur);
   }
-  function clearHistory() { stopPlayback(); if (histLayer) map.removeLayer(histLayer); histLayer = null; histVeh = null; histPrev = null; histPts = []; histVios = []; speedVios = []; }
+  function clearHistory() { stopPlayback(); if (histLayer) map.removeLayer(histLayer); histLayer = null; histVeh = null; histPrev = null; histPts = []; histVios = []; speedVios = []; histScore = null; }
 
   function exportCsv() {
     if (!histPts.length) return;
