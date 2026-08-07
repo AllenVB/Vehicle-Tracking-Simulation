@@ -116,6 +116,7 @@
              <span class="vchip inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border">
                <span class="vdot w-1.5 h-1.5 rounded-full"></span><span class="vstate">—</span></span>
              <span class="vspeed text-[10px] text-on-surface-variant font-medium">— km/s</span>
+             <span class="vlast text-[9px] opacity-50 font-normal text-on-surface-variant"></span>
            </div>
          </div>`;
       card.onclick = () => select(v.id);
@@ -212,11 +213,13 @@
     document.querySelectorAll(".vcard").forEach(card => {
       const id = +card.dataset.vid, p = pos.get(id), st = stateOf(id);
       const dot = card.querySelector(".vdot"), chip = card.querySelector(".vchip"),
-            state = card.querySelector(".vstate"), spd = card.querySelector(".vspeed");
+            state = card.querySelector(".vstate"), spd = card.querySelector(".vspeed"),
+            last = card.querySelector(".vlast");
       if (dot) dot.style.background = st.color;
       if (state) state.textContent = st.label;
       if (chip) { chip.style.color = st.color; chip.style.borderColor = st.color + "55"; chip.style.background = st.color + "1a"; }
       if (spd) spd.textContent = (p && p.speedKmh != null ? p.speedKmh : "—") + " km/s";
+      if (last) last.textContent = p && p.ts ? relTime(p.ts) : "";
       const on = id === selected;
       card.classList.toggle("emerald-glow", on);
       card.style.background = on ? "rgba(78,222,163,.14)" : "";
@@ -378,7 +381,7 @@
 
   // Kısa süreli, tıklanınca kapanan bildirim balonu (sürücü yanıtı için).
   let toastTimer = null;
-  function toast(html) {
+  function toast(html, icon) {
     let el = $("ffToast");
     if (!el) {
       el = document.createElement("div");
@@ -388,7 +391,8 @@
       el.onclick = () => { el.style.display = "none"; };
       document.body.appendChild(el);
     }
-    el.innerHTML = `<span class="material-symbols-outlined text-primary text-body-md" style="font-variation-settings:'FILL' 1">chat</span><span>${html}</span>`;
+    const ic = icon || "info";
+    el.innerHTML = `<span class="material-symbols-outlined text-primary text-body-md" style="font-variation-settings:'FILL' 1">${esc(ic)}</span><span>${html}</span>`;
     el.style.display = "flex";
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.style.display = "none"; }, 5000);
@@ -425,10 +429,20 @@
     $("bellBtn").onclick = e => { e.stopPropagation(); composer.classList.add("hidden");
       panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) pop(panel); };   // okundu = kullanıcı işaretler
     $("bellClear").onclick = markBroadcastsRead;
-    // Panel/composer dışına tıklayınca kapan.
+    // Panel/composer/QR dışına tıklayınca kapan.
+    const qrPanel = $("pairPanel");
     document.addEventListener("click", e => {
       if (!panel.classList.contains("hidden") && !panel.contains(e.target) && e.target.closest("#bellBtn") == null) panel.classList.add("hidden");
       if (!composer.classList.contains("hidden") && !composer.contains(e.target) && e.target.closest("#bcastComposeBtn") == null) composer.classList.add("hidden");
+      if (qrPanel && !qrPanel.classList.contains("hidden") && !qrPanel.contains(e.target) && e.target.closest("#pairBtn") == null) qrPanel.classList.add("hidden");
+    });
+    // Escape ile tüm açık panelleri kapat.
+    document.addEventListener("keydown", e => {
+      if (e.key !== "Escape") return;
+      panel.classList.add("hidden");
+      composer.classList.add("hidden");
+      if (qrPanel) qrPanel.classList.add("hidden");
+      const cp = $("chatPanel"); if (cp) cp.classList.add("hidden");
     });
   }
 
@@ -773,7 +787,7 @@
     const a = document.createElement("a");
     a.href = url; a.download = `filo-durum-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
     URL.revokeObjectURL(url);
-    toast(`Filo raporu indirildi · ${vehicles.size} araç`);
+    toast(`Filo raporu indirildi · ${vehicles.size} araç`, "download");
   }
 
   // Admin yeni araç oluşturur (sürücüler oluşturamaz — yalnızca adminin araçlarına girer).
@@ -802,7 +816,7 @@
       const r = await fetch(`/api/v1/vehicles/${id}/driver-credential`, { method: "POST",
         headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ password: pw.trim() }) });
       if (!r.ok) throw 0;
-      toast((v ? v.plate : "Araç") + " için şifre belirlendi.");
+      toast((v ? v.plate : "Araç") + " için şifre belirlendi.", "key");
     } catch (_) { alert("Şifre belirlenemedi."); }
   }
 
@@ -818,7 +832,7 @@
       if (selected === id) select(null);
       vehicles.delete(id); pos.delete(id);
       const m = markers.get(id); if (m && cluster) { cluster.removeLayer(m); markers.delete(id); }
-      toast((v ? v.plate : "Araç") + " kalıcı olarak silindi.");
+      toast((v ? v.plate : "Araç") + " kalıcı olarak silindi.", "delete_forever");
       await loadVehicles(); renderFleet();
     } catch (_) { alert("Araç silinemedi."); }
   }
@@ -835,7 +849,7 @@
     localStorage.setItem(key, today);
     const total = vehicles.size, live = liveCount();
     const vio = dash && dash.violations24h != null ? dash.violations24h : recentVios.length;
-    toast(`Günlük özet · ${live}/${total} araç canlı · ${vio} ihlal (24s)`);
+    toast(`Günlük özet · ${live}/${total} araç canlı · ${vio} ihlal (24s)`, "calendar_today");
   }
   function updateFleetHealth() {
     if (!$("fhRatio")) return;

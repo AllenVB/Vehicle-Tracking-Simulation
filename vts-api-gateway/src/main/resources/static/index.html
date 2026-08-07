@@ -87,6 +87,18 @@
   .plate-label { background:rgba(19,19,19,.9); color:#e5e2e1; border:1px solid rgba(78,222,163,.4); border-radius:6px;
     font-size:10px; font-weight:700; padding:1px 6px; box-shadow:none; white-space:nowrap; }
   .plate-label:before { display:none !important; }
+  /* İhlal akışı: altta içerik olduğunda mask ile fade hint */
+  #vioFeed { -webkit-mask-image:linear-gradient(to bottom,black calc(100% - 20px),transparent 100%); mask-image:linear-gradient(to bottom,black calc(100% - 20px),transparent 100%); }
+  /* Bağlantı kopuk: durum metni kırmızı pulse */
+  #connDot { transition:background .4s; }
+  /* Araç kartı son görülme: hızlıca değişince yumuşak */
+  .vlast { transition:opacity .3s; }
+  /* Zoom butonları: basınca küçül animasyonu */
+  #zoomControls button { transition:transform .12s; }
+  #zoomControls button:active { transform:scale(.88); }
+  /* Geçmiş özet kartları: hover'da hafif yüksel */
+  #histSummary > div { transition:transform .18s cubic-bezier(.2,.7,.2,1); }
+  #histSummary > div:hover { transform:translateY(-2px); }
 </style>
 <script>
   tailwind.config = { darkMode:"class", theme:{ extend:{
