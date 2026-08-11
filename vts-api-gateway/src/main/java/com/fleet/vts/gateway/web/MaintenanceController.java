@@ -201,7 +201,7 @@ public class MaintenanceController {
                         row.put("vehicleId", rs.getLong("vehicle_id"));
                         row.put("plate", rs.getString("plate"));
                         row.put("odometerKm", rs.getLong("odometer_km"));
-                        row.put("intervalKm", rs.getObject("interval_km", Long.class));
+                        row.put("intervalKm", rs.getObject("interval_km", Integer.class));
                         row.put("intervalDays", rs.getObject("interval_days", Integer.class));
                         row.put("nextDueKm", rs.getObject("next_due_km", Long.class));
                         OffsetDateTime dueAt = rs.getObject("next_due_at", OffsetDateTime.class);

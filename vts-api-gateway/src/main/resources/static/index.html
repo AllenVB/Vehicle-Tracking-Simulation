@@ -327,7 +327,7 @@
 </div>
 
 <!-- ── Geofence panel ─────────────────────────────────────────────────────────── -->
-<div class="fixed right-6 z-30 glass-panel rounded-2xl p-4 w-72 hidden" id="geoPanel" style="top:12.5rem;max-height:calc(100vh - 14rem);overflow-y:auto">
+<div class="fixed right-6 z-50 glass-panel rounded-2xl p-4 w-72 hidden" id="geoPanel" style="top:18.5rem;max-height:calc(100vh - 20.5rem);overflow-y:auto">
   <div class="flex items-center justify-between mb-3">
     <div class="text-label-sm font-bold flex items-center gap-1.5 text-primary"><span class="material-symbols-outlined text-body-md">pentagon</span> Bölge Yönetimi</div>
     <button id="geoClose" class="text-on-surface-variant hover:text-on-surface">✕</button>
@@ -451,7 +451,7 @@
           <h3 class="text-label-sm font-bold text-on-surface-variant uppercase tracking-widest mb-4">Kritik Uyarılar</h3>
           <div class="space-y-3" id="fleetAlerts"><div class="text-label-sm text-on-surface-variant">Henüz ihlal yok.</div></div>
         </div>
-        <div class="glass-panel p-6 rounded-2xl mt-4">
+        <div class="glass-panel p-6 rounded-2xl">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-label-sm font-bold text-on-surface-variant uppercase tracking-widest">Bakım Takibi</h3>
             <button id="mtnAddToggle" class="text-primary text-label-sm font-bold flex items-center gap-1 hover:opacity-80"><span class="material-symbols-outlined text-body-md">add</span>Plan Ekle</button>
@@ -461,8 +461,8 @@
             <select id="mtnVehicle" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary"></select>
             <input id="mtnName" placeholder="Plan adı (ör. Yağ değişimi)" maxlength="80" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
             <div class="flex gap-2">
-              <input id="mtnKm" type="number" min="0" placeholder="Aralık (km)" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
-              <input id="mtnDays" type="number" min="0" placeholder="Aralık (gün)" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
+              <input id="mtnKm" type="number" min="0" placeholder="Aralık (km)" class="flex-1 min-w-0 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
+              <input id="mtnDays" type="number" min="0" placeholder="Aralık (gün)" class="flex-1 min-w-0 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
             </div>
             <button id="mtnSaveBtn" class="w-full py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95">Kaydet</button>
           </div>
