@@ -13,6 +13,9 @@
 <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<!-- Leaflet.draw: haritada geofence polygon çizimi -->
+<link href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" rel="stylesheet">
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <style>
   .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; vertical-align:middle; }
   .glass-panel { background:rgba(30,30,30,.72); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%);
@@ -99,6 +102,15 @@
   /* Geçmiş özet kartları: hover'da hafif yüksel */
   #histSummary > div { transition:transform .18s cubic-bezier(.2,.7,.2,1); }
   #histSummary > div:hover { transform:translateY(-2px); }
+  /* Geofence çizim paneli giriş animasyonu */
+  #geoPanel { transition:opacity .2s; }
+  /* Bakım listesi: fazla gelince kayan */
+  #maintenanceList { max-height:280px; overflow-y:auto; }
+  /* Leaflet.draw toolbar koyu tema uyumu */
+  .leaflet-draw-toolbar a { background-color:#1b201e !important; border-color:#3c4a42 !important; }
+  .leaflet-draw-toolbar a:hover { background-color:#232926 !important; }
+  .leaflet-draw-guide-dash { background:#4edea3 !important; }
+  .leaflet-draw-tooltip { background:#1b201e !important; color:#e5e2e1 !important; border-color:#3c4a42 !important; }
 </style>
 <script>
   tailwind.config = { darkMode:"class", theme:{ extend:{
@@ -309,6 +321,28 @@
   <button id="plateToggle" title="Plaka etiketlerini aç/kapa" class="glass-panel rounded-full px-4 py-2 flex items-center gap-2 text-label-sm font-bold text-on-surface-variant active:scale-95 transition-transform">
     <span class="material-symbols-outlined text-body-md">label</span> Plakalar
   </button>
+  <button id="geoToggle" title="Bölgeleri yönet (geofence)" class="glass-panel rounded-full px-4 py-2 flex items-center gap-2 text-label-sm font-bold text-on-surface-variant active:scale-95 transition-transform">
+    <span class="material-symbols-outlined text-body-md">pentagon</span> Bölgeler
+  </button>
+</div>
+
+<!-- ── Geofence panel ─────────────────────────────────────────────────────────── -->
+<div class="fixed right-6 z-30 glass-panel rounded-2xl p-4 w-72 hidden" id="geoPanel" style="top:12.5rem;max-height:calc(100vh - 14rem);overflow-y:auto">
+  <div class="flex items-center justify-between mb-3">
+    <div class="text-label-sm font-bold flex items-center gap-1.5 text-primary"><span class="material-symbols-outlined text-body-md">pentagon</span> Bölge Yönetimi</div>
+    <button id="geoClose" class="text-on-surface-variant hover:text-on-surface">✕</button>
+  </div>
+  <div id="geoList" class="space-y-2 mb-4"></div>
+  <div class="border-t border-white/10 pt-3">
+    <p class="text-[10px] text-on-surface-variant uppercase tracking-wide mb-2">Yeni Bölge</p>
+    <input id="geoName" placeholder="Bölge adı" maxlength="80" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary mb-2">
+    <select id="geoKind" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary mb-2">
+      <option value="EXCLUSION">Yasak Bölge (Exclusion)</option>
+      <option value="INCLUSION">Güvenli Bölge (Inclusion)</option>
+    </select>
+    <button id="geoDrawBtn" class="w-full py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 mb-1">Haritada Çiz</button>
+    <button id="geoCancelBtn" class="w-full py-2 bg-white/5 border border-white/10 rounded-xl text-label-sm text-on-surface-variant hidden active:scale-95">Çizimi İptal Et</button>
+  </div>
 </div>
 
 <!-- ── QR pairing ──────────────────────────────────────────────────────────── -->
@@ -354,6 +388,7 @@
   <div class="flex gap-2">
     <button id="selFollow" class="flex-1 py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 transition-all">Bu aracı takip et</button>
     <button id="selMsgBtn" title="Sürücü ile mesajlaş" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
+    <button id="selShareBtn" title="Müşteri takip linki oluştur (24 sa)" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">share</span></button>
   </div>
 </div>
 
@@ -415,6 +450,22 @@
         <div class="glass-panel p-6 rounded-2xl">
           <h3 class="text-label-sm font-bold text-on-surface-variant uppercase tracking-widest mb-4">Kritik Uyarılar</h3>
           <div class="space-y-3" id="fleetAlerts"><div class="text-label-sm text-on-surface-variant">Henüz ihlal yok.</div></div>
+        </div>
+        <div class="glass-panel p-6 rounded-2xl mt-4">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-label-sm font-bold text-on-surface-variant uppercase tracking-widest">Bakım Takibi</h3>
+            <button id="mtnAddToggle" class="text-primary text-label-sm font-bold flex items-center gap-1 hover:opacity-80"><span class="material-symbols-outlined text-body-md">add</span>Plan Ekle</button>
+          </div>
+          <div id="maintenanceList" class="space-y-2 mb-3" style="max-height:260px;overflow-y:auto"><div class="text-label-sm text-on-surface-variant">Bakım planı yükleniyor…</div></div>
+          <div id="mtnAddForm" class="hidden border-t border-white/10 pt-3 space-y-2">
+            <select id="mtnVehicle" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary"></select>
+            <input id="mtnName" placeholder="Plan adı (ör. Yağ değişimi)" maxlength="80" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
+            <div class="flex gap-2">
+              <input id="mtnKm" type="number" min="0" placeholder="Aralık (km)" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
+              <input id="mtnDays" type="number" min="0" placeholder="Aralık (gün)" class="flex-1 bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-1.5 text-body-md text-on-surface focus:outline-none focus:border-primary">
+            </div>
+            <button id="mtnSaveBtn" class="w-full py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95">Kaydet</button>
+          </div>
         </div>
       </div>
     </div>

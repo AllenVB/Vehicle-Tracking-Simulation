@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -175,6 +176,82 @@ public class MaintenanceController {
                 "planId", planId,
                 "nextDueKm", String.valueOf(after.get("next_due_km")),
                 "nextDueAt", String.valueOf(after.get("next_due_at"))));
+    }
+
+    /** Tenant'ın tüm aktif bakım planlarını araç plakasıyla birlikte listeler. */
+    @GetMapping("/plans")
+    public List<Map<String, Object>> plans(@AuthenticationPrincipal Jwt jwt) {
+        long tenant = CurrentUser.tenantId(jwt);
+        return jdbc.query("""
+                        SELECT mp.id, mp.name, mp.vehicle_id, v.plate, v.odometer_km,
+                               mp.interval_km, mp.interval_days,
+                               mp.next_due_km, mp.next_due_at,
+                               mp.last_service_km, mp.last_service_at
+                        FROM maintenance_plan mp
+                        JOIN vehicle v ON v.id = mp.vehicle_id
+                        WHERE mp.tenant_id = ? AND mp.enabled
+                        ORDER BY mp.vehicle_id, mp.id
+                        """,
+                rs -> {
+                    List<Map<String, Object>> out = new ArrayList<>();
+                    while (rs.next()) {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("planId", rs.getLong("id"));
+                        row.put("name", rs.getString("name"));
+                        row.put("vehicleId", rs.getLong("vehicle_id"));
+                        row.put("plate", rs.getString("plate"));
+                        row.put("odometerKm", rs.getLong("odometer_km"));
+                        row.put("intervalKm", rs.getObject("interval_km", Long.class));
+                        row.put("intervalDays", rs.getObject("interval_days", Integer.class));
+                        row.put("nextDueKm", rs.getObject("next_due_km", Long.class));
+                        OffsetDateTime dueAt = rs.getObject("next_due_at", OffsetDateTime.class);
+                        row.put("nextDueAt", dueAt == null ? null : dueAt.toInstant());
+                        OffsetDateTime svcAt = rs.getObject("last_service_at", OffsetDateTime.class);
+                        row.put("lastServiceAt", svcAt == null ? null : svcAt.toInstant());
+                        row.put("overdue", isOverdue(rs.getObject("next_due_km", Long.class), dueAt));
+                        out.add(row);
+                    }
+                    return out;
+                },
+                tenant);
+    }
+
+    public record PlanRequest(Long vehicleId, String name, Long intervalKm, Integer intervalDays) {}
+
+    /** Yeni bakım planı oluşturur; başlangıç noktası aracın mevcut odometre değeridir. */
+    @PostMapping("/plans")
+    @PreAuthorize("hasAnyRole('ADMIN', 'FLEET_MANAGER')")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> createPlan(@AuthenticationPrincipal Jwt jwt,
+                                                          @RequestBody PlanRequest req) {
+        long tenant = CurrentUser.tenantId(jwt);
+        if (req.vehicleId() == null || req.name() == null || req.name().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "vehicleId ve name gerekli"));
+        }
+        Long odometer;
+        try {
+            odometer = jdbc.queryForObject(
+                    "SELECT odometer_km FROM vehicle WHERE id = ? AND tenant_id = ?",
+                    Long.class, req.vehicleId(), tenant);
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+        if (odometer == null) odometer = 0L;
+
+        Long nextDueKm = req.intervalKm() != null ? odometer + req.intervalKm() : null;
+        OffsetDateTime nextDueAt = req.intervalDays() != null
+                ? OffsetDateTime.now().plusDays(req.intervalDays()) : null;
+
+        Long id = jdbc.queryForObject("""
+                INSERT INTO maintenance_plan
+                    (tenant_id, vehicle_id, name, interval_km, interval_days,
+                     last_service_km, last_service_at, next_due_km, next_due_at, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, now(), ?, ?, true)
+                RETURNING id
+                """, Long.class, tenant, req.vehicleId(), req.name().trim(),
+                req.intervalKm(), req.intervalDays(), odometer, nextDueKm, nextDueAt);
+
+        return ResponseEntity.status(201).body(Map.of("planId", id));
     }
 
     private static boolean isOverdue(Long remainingKm, OffsetDateTime dueAt) {

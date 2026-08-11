@@ -1,0 +1,108 @@
+<!DOCTYPE html><html lang="tr"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="theme-color" content="#131313">
+<title>Araç Takibi · FleetFlow</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0}
+  body{font-family:Inter,system-ui,sans-serif;background:#131313;color:#e5e2e1;height:100dvh;display:flex;flex-direction:column}
+  #topBar{padding:10px 16px;background:rgba(30,30,30,.96);backdrop-filter:blur(18px);
+    display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;z-index:10}
+  #plate{font-size:20px;font-weight:800;color:#4edea3;letter-spacing:-.02em}
+  #speed{font-size:13px;color:#bbcabf;margin-top:1px}
+  #lastUpdate{font-size:11px;color:#86948a;margin-left:auto;text-align:right}
+  .logo{font-size:17px;font-weight:900;color:#4edea3;letter-spacing:-.02em;white-space:nowrap}
+  #map{flex:1;background:#0e0e0e}
+  .leaflet-tile{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.88) saturate(.72)}
+  .leaflet-container{background:#0e0e0e}
+  #badge{display:inline-flex;align-items:center;gap:5px;background:rgba(78,222,163,.12);
+    border:1px solid rgba(78,222,163,.3);border-radius:999px;padding:3px 10px 3px 7px;font-size:12px}
+  #badge .dot{width:7px;height:7px;border-radius:50%;background:#4edea3;animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  #expired{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    flex:1;text-align:center;padding:32px;gap:8px}
+  #expired h2{font-size:22px;font-weight:800;color:#ffb4ab}
+  #expired p{color:#86948a;font-size:14px;line-height:1.5}
+  .share-tooltip{background:rgba(19,19,19,.9)!important;color:#e5e2e1!important;
+    border:1px solid rgba(78,222,163,.4)!important;border-radius:6px!important;
+    font-size:11px!important;font-weight:700!important;padding:2px 7px!important;
+    box-shadow:none!important}
+  .share-tooltip::before{display:none!important}
+</style>
+</head>
+<body>
+<div id="topBar">
+  <div>
+    <div id="plate">Bağlanılıyor…</div>
+    <div id="speed"></div>
+  </div>
+  <div id="badge" class="hidden"><span class="dot"></span>Canlı</div>
+  <div id="lastUpdate"></div>
+  <div class="logo">FleetFlow</div>
+</div>
+<div id="map"></div>
+<div id="expired" style="display:none">
+  <span style="font-size:40px">🔗</span>
+  <h2>Bağlantı Geçersiz</h2>
+  <p>Bu takip bağlantısı süresi dolmuş veya geçersiz.<br>Araç sahibinden yeni bağlantı isteyin.</p>
+</div>
+<script>
+(function () {
+  const token = new URLSearchParams(location.search).get("t");
+  if (!token) { showExpired(); return; }
+
+  const map = L.map("map", { zoomControl: true, attributionControl: false }).setView([41.02, 29.0], 13);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+
+  let marker = null, firstFix = true;
+
+  function relAgo(ts) {
+    if (!ts) return "";
+    const s = Math.max(0, Math.floor((Date.now() - Date.parse(ts)) / 1000));
+    if (s < 60) return "az önce güncellendi";
+    const m = Math.floor(s / 60); if (m < 60) return m + " dakika önce";
+    return Math.floor(m / 60) + " saat önce";
+  }
+
+  function update() {
+    fetch("/api/v1/share/" + token)
+      .then(r => { if (r.status === 404) { showExpired(); return null; } return r.json(); })
+      .then(d => {
+        if (!d) return;
+        document.getElementById("plate").textContent = d.plate || "—";
+        const spd = d.speedKmh != null ? Math.round(Number(d.speedKmh)) : null;
+        document.getElementById("speed").textContent = spd != null ? spd + " km/s" : "";
+        document.getElementById("lastUpdate").textContent = relAgo(d.ts);
+        if (d.lat != null && d.lon != null) {
+          document.getElementById("badge").classList.remove("hidden");
+          const ll = [Number(d.lat), Number(d.lon)];
+          if (!marker) {
+            marker = L.circleMarker(ll, {
+              radius: 11, color: "#131313", weight: 3,
+              fillColor: "#4edea3", fillOpacity: 1
+            }).addTo(map);
+            marker.bindTooltip(d.plate || "", {
+              permanent: true, direction: "top", offset: [0, -12],
+              className: "share-tooltip"
+            });
+          } else { marker.setLatLng(ll); }
+          if (firstFix) { map.setView(ll, 15); firstFix = false; }
+        }
+      })
+      .catch(() => {});
+  }
+
+  function showExpired() {
+    document.getElementById("topBar").style.display = "none";
+    document.getElementById("map").style.display = "none";
+    document.getElementById("expired").style.display = "flex";
+    clearInterval(timer);
+  }
+
+  update();
+  const timer = setInterval(update, 5000);
+})();
+</script>
+</body></html>

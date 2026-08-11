@@ -55,6 +55,8 @@ public class SecurityConfig {
                         .requestMatchers("/driver.html", "/driver.js", "/manifest.webmanifest",
                                 "/sw.js", "/driver-icon.svg").permitAll()
                         .requestMatchers("/api/v1/track", "/api/v1/track/**").permitAll()
+                        // Müşteri takip linki: share.html + token pozisyon API'si JWT'siz açık.
+                        .requestMatchers("/share.html", "/api/v1/share/**").permitAll()
                         .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/actuator/health", "/actuator/prometheus",
                                 "/ws/**").permitAll()

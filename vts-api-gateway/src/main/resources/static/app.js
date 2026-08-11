@@ -81,6 +81,8 @@
     initSelActions();
     initPlayback();
     initFleet();
+    initGeofence();
+    initMaintenance();
     initChat();
     initBroadcast();
     Promise.all([loadBroadcasts(), loadInbox()]).then(seedReadOnce);   // ilk açılışta geçmiş = okundu
@@ -304,6 +306,7 @@
       if (followId != null) { const p = pos.get(followId); if (p) map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15)); }
     };
     $("selMsgBtn").onclick = () => { if (selected != null) openChat(selected); };
+    if ($("selShareBtn")) $("selShareBtn").onclick = () => { if (selected != null) shareVehicle(selected); };
     if ($("plateToggle")) $("plateToggle").onclick = togglePlates;
   }
 
@@ -1124,9 +1127,192 @@
       else $("histInfo").textContent = "Soldan bir araç ve gün seç.";
     } else { // fleet
       live.classList.add("hidden-content"); hist.classList.add("hidden-content");
-      clearHistory(); renderFleet(); loadDashboard();
+      clearHistory(); renderFleet(); loadDashboard(); loadMaintenance();
     }
   };
+
+  // ── Müşteri takip linki ───────────────────────────────────────────────────
+  async function shareVehicle(id) {
+    try {
+      const r = await fetch(`/api/v1/vehicles/${id}/share`, { method: "POST", headers: auth() });
+      if (!r.ok) { toast("Paylaşım linki oluşturulamadı", "error"); return; }
+      const d = await r.json();
+      const url = location.origin + "/share.html?t=" + d.token;
+      await navigator.clipboard.writeText(url);
+      toast("Link kopyalandı · 24 saat geçerli", "share");
+    } catch (_) {
+      toast("Kopyalama başarısız", "content_copy");
+    }
+  }
+
+  // ── Geofence çizici ───────────────────────────────────────────────────────
+  let geoLayer = null, drawControl = null, drawingLayer = null;
+
+  function initGeofence() {
+    const toggle = $("geoToggle"), panel = $("geoPanel");
+    if (!toggle || !panel) return;
+    toggle.onclick = () => { const hidden = panel.classList.toggle("hidden"); if (!hidden) loadGeofences(); };
+    $("geoClose").onclick = () => { panel.classList.add("hidden"); cancelDraw(); };
+    $("geoDrawBtn").onclick = startDraw;
+    $("geoCancelBtn").onclick = cancelDraw;
+    geoLayer = L.layerGroup().addTo(map);
+    loadGeofences();
+  }
+
+  async function loadGeofences() {
+    try {
+      const r = await fetch("/api/v1/geofences", { headers: auth() });
+      if (!r.ok) return;
+      const zones = await r.json();
+      renderGeofenceLayers(zones);
+      renderGeoList(zones);
+    } catch (_) {}
+  }
+
+  function renderGeofenceLayers(zones) {
+    if (!geoLayer) return;
+    geoLayer.clearLayers();
+    zones.forEach(z => {
+      try {
+        const geojson = JSON.parse(z.geojson);
+        const color = z.kind === "EXCLUSION" ? "#ff5555" : "#4edea3";
+        L.geoJSON(geojson, { style: { color, weight: 2, fillOpacity: 0.12, fillColor: color } })
+          .bindTooltip(z.name, { permanent: false, className: "share-tooltip" })
+          .addTo(geoLayer);
+      } catch (_) {}
+    });
+  }
+
+  function renderGeoList(zones) {
+    const el = $("geoList"); if (!el) return;
+    if (!zones.length) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Henüz bölge yok.</div>`; return; }
+    el.innerHTML = zones.map(z => `
+      <div class="flex items-center justify-between gap-2 bg-white/5 rounded-lg px-3 py-2">
+        <div>
+          <span class="text-body-md font-bold text-on-surface">${esc(z.name)}</span>
+          <span class="ml-2 text-[10px] uppercase px-1.5 py-0.5 rounded ${z.kind === "EXCLUSION" ? "bg-red-900/40 text-red-400" : "bg-primary/20 text-primary"}">${z.kind === "EXCLUSION" ? "Yasak" : "Güvenli"}</span>
+        </div>
+        <button onclick="deleteGeofence(${z.id})" class="text-on-surface-variant hover:text-error transition-colors" title="Bölgeyi kaldır"><span class="material-symbols-outlined text-body-md">delete</span></button>
+      </div>`).join("");
+  }
+
+  function startDraw() {
+    if (!window.L || !window.L.Draw) { toast("Çizim kütüphanesi yüklenemedi", "error"); return; }
+    cancelDraw();
+    drawingLayer = new L.FeatureGroup().addTo(map);
+    drawControl = new L.Control.Draw({
+      draw: { polygon: { shapeOptions: { color: "#4edea3", fillOpacity: 0.2 } }, polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false },
+      edit: { featureGroup: drawingLayer, remove: false }
+    });
+    map.addControl(drawControl);
+    new L.Draw.Polygon(map, { shapeOptions: { color: "#4edea3", fillOpacity: 0.2 } }).enable();
+    if ($("geoDrawBtn")) $("geoDrawBtn").classList.add("hidden");
+    if ($("geoCancelBtn")) $("geoCancelBtn").classList.remove("hidden");
+    map.once("draw:created", e => { drawingLayer.addLayer(e.layer); saveGeofence(e.layer.getLatLngs()[0]); });
+  }
+
+  function cancelDraw() {
+    if (drawControl) { try { map.removeControl(drawControl); } catch (_) {} drawControl = null; }
+    if (drawingLayer) { try { map.removeLayer(drawingLayer); } catch (_) {} drawingLayer = null; }
+    if ($("geoDrawBtn")) $("geoDrawBtn").classList.remove("hidden");
+    if ($("geoCancelBtn")) $("geoCancelBtn").classList.add("hidden");
+  }
+
+  async function saveGeofence(latlngs) {
+    const flat = Array.isArray(latlngs[0]) ? latlngs.flat(Infinity) : latlngs;
+    const points = flat.map(ll => [ll.lat, ll.lng]);
+    const name = ($("geoName").value || "").trim() || "Yeni bölge";
+    const kind = $("geoKind").value || "EXCLUSION";
+    cancelDraw();
+    try {
+      const r = await fetch("/api/v1/geofences", {
+        method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name, kind, points })
+      });
+      if (!r.ok) { toast("Bölge kaydedilemedi", "error"); return; }
+      $("geoName").value = "";
+      toast(`"${name}" bölgesi oluşturuldu`, "pentagon");
+      loadGeofences();
+    } catch (_) { toast("Bağlantı hatası", "error"); }
+  }
+
+  window.deleteGeofence = async function (id) {
+    try {
+      const r = await fetch(`/api/v1/geofences/${id}`, { method: "DELETE", headers: auth() });
+      if (!r.ok) return;
+      toast("Bölge kaldırıldı", "delete");
+      loadGeofences();
+    } catch (_) {}
+  };
+
+  // ── Bakım takibi ──────────────────────────────────────────────────────────
+  async function loadMaintenance() {
+    const el = $("maintenanceList"); if (!el) return;
+    try {
+      const r = await fetch("/api/v1/maintenance/plans", { headers: auth() });
+      if (!r.ok) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Yüklenemedi.</div>`; return; }
+      renderMaintenance(await r.json());
+    } catch (_) { if (el) el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Bağlantı hatası.</div>`; }
+  }
+
+  function renderMaintenance(items) {
+    const el = $("maintenanceList"); if (!el) return;
+    if (!items.length) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Bakım planı yok.</div>`; return; }
+    el.innerHTML = items.map(m => {
+      const kmInfo = m.nextDueKm != null ? `${Number(m.nextDueKm).toLocaleString("tr")} km` : "";
+      const dateInfo = m.nextDueAt ? new Date(m.nextDueAt).toLocaleDateString("tr-TR") : "";
+      const dueStr = [kmInfo, dateInfo].filter(Boolean).join(" / ");
+      return `<div class="flex items-center justify-between gap-2 bg-white/5 rounded-lg px-3 py-2">
+        <div class="min-w-0">
+          <div class="flex items-center gap-1 text-body-md font-bold text-on-surface">
+            ${m.overdue ? `<span class="material-symbols-outlined text-body-md text-error" style="font-variation-settings:'FILL' 1">warning</span>` : ""}
+            <span class="truncate">${esc(m.plate)} · ${esc(m.name)}</span>
+          </div>
+          <div class="text-[10px] mt-0.5 ${m.overdue ? "text-error" : "text-on-surface-variant"}">${dueStr || "Tarih yok"}</div>
+        </div>
+        <button onclick="markServiced(${m.planId})" class="shrink-0 px-2 py-1 bg-primary/10 text-primary rounded-lg text-[10px] font-bold hover:bg-primary/20 active:scale-95 transition-all">Yapıldı</button>
+      </div>`;
+    }).join("");
+  }
+
+  window.markServiced = async function (planId) {
+    try {
+      const r = await fetch(`/api/v1/maintenance/${planId}/serviced`, { method: "POST", headers: auth() });
+      if (!r.ok) { toast("Kayıt hatası", "error"); return; }
+      toast("Bakım kaydedildi · Plan güncellendi", "build");
+      loadMaintenance();
+    } catch (_) { toast("Bağlantı hatası", "error"); }
+  };
+
+  function initMaintenance() {
+    const toggle = $("mtnAddToggle"), form = $("mtnAddForm");
+    if (toggle && form) toggle.onclick = () => { const h = form.classList.toggle("hidden"); if (!h) populateMtnVehicles(); };
+    if ($("mtnSaveBtn")) $("mtnSaveBtn").onclick = createMaintenancePlan;
+  }
+
+  function populateMtnVehicles() {
+    const sel = $("mtnVehicle"); if (!sel) return;
+    sel.innerHTML = [...vehicles.values()].map(v => `<option value="${v.id}">${esc(v.plate)}</option>`).join("");
+  }
+
+  async function createMaintenancePlan() {
+    const vehicleId = +$("mtnVehicle").value;
+    const name = ($("mtnName").value || "").trim();
+    const intervalKm = +$("mtnKm").value || null;
+    const intervalDays = +$("mtnDays").value || null;
+    if (!vehicleId || !name) { toast("Araç ve plan adı gerekli", "error"); return; }
+    try {
+      const r = await fetch("/api/v1/maintenance/plans", {
+        method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleId, name, intervalKm, intervalDays })
+      });
+      if (!r.ok) { toast("Plan oluşturulamadı", "error"); return; }
+      ["mtnName", "mtnKm", "mtnDays"].forEach(id => { if ($(id)) $(id).value = ""; });
+      $("mtnAddForm").classList.add("hidden");
+      toast(`"${name}" planı oluşturuldu`, "build");
+      loadMaintenance();
+    } catch (_) { toast("Bağlantı hatası", "error"); }
+  }
 
   // ── Sürücü QR'ı ───────────────────────────────────────────────────────────
   // Tek genel kod: araca özel değil, sadece sürücü sayfasına yönlendirir. Sürücü
