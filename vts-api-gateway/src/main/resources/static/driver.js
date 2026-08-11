@@ -114,6 +114,7 @@
     loadReplyOptions();
     startMessages();
     startBroadcasts();
+    startMaintenance();
   }
 
   $("stopBtn").onclick = function () {
@@ -125,6 +126,7 @@
     stopGps();
     stopMessages();
     stopBroadcasts();
+    stopMaintenance();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     session = null;
@@ -415,6 +417,7 @@
     stopGps();
     stopMessages();
     stopBroadcasts();
+    stopMaintenance();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     setTimeout(function () {
@@ -623,7 +626,7 @@
   }
 
   // Kaydırarak sekme geçişi: sola kaydır → sonraki sekme, sağa → önceki.
-  var TAB_ORDER = ["tabDrive", "tabMap", "tabMsg", "tabAnnounce"];
+  var TAB_ORDER = ["tabDrive", "tabMap", "tabMsg", "tabAnnounce", "tabMaintenance"];
   function currentTabId() {
     var a = document.querySelector(".navBtn.active");
     return a ? a.getAttribute("data-tab") : "tabDrive";
@@ -648,7 +651,7 @@
     }, { passive: true });
   }
   function showTab(id) {
-    ["tabDrive", "tabMap", "tabMsg", "tabAnnounce"].forEach(function (t) {
+    ["tabDrive", "tabMap", "tabMsg", "tabAnnounce", "tabMaintenance"].forEach(function (t) {
       var el = $(t); if (!el) return;
       var show = t === id;
       el.classList.toggle("hidden", !show);
@@ -671,6 +674,7 @@
       setTimeout(remeasure, 380);
     }
     if (id === "tabAnnounce") clearAnnounceBadge();
+    if (id === "tabMaintenance") { clearMtnBadge(); loadMaintenance(); }
   }
 
   // ── Gömülü harita (kendi konum + rota izi) ────────────────────────────────
@@ -856,6 +860,96 @@
     else el.classList.add("hidden");
   }
   function clearAnnounceBadge() { bcUnread = 0; updateAnnounceBadge(); }
+
+  // ── Bakım (sürücü işaretler; admin yalnızca görür) ────────────────────────
+  var MTN_POLL_MS = 30000, mtnTimer = null, mtnPolling = false, mtnData = [];
+  var MTN_LABEL = { PENDING: "Bekleniyor", IN_PROGRESS: "Bakımda", DONE: "Yapıldı" };
+  var MTN_STEPS = ["PENDING", "IN_PROGRESS", "DONE"];
+
+  function startMaintenance() { if (mtnTimer) clearInterval(mtnTimer); pollMaintenance(); mtnTimer = setInterval(pollMaintenance, MTN_POLL_MS); }
+  function stopMaintenance() { if (mtnTimer) { clearInterval(mtnTimer); mtnTimer = null; } }
+
+  function pollMaintenance() {
+    if (!session || !navigator.onLine || mtnPolling) return;
+    mtnPolling = true;
+    fetch("/api/v1/track/maintenance", { headers: { "X-Device-Session": session.sessionToken } })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (list) {
+        mtnData = list || [];
+        updateMtnBadge();
+        if (!$("tabMaintenance").classList.contains("hidden")) renderMaintenance(mtnData);
+      })
+      .catch(function () {})
+      .then(function () { mtnPolling = false; });
+  }
+
+  // Sekmeye girince hızlı yükleme (poll'u beklemeden).
+  function loadMaintenance() {
+    if (mtnData.length) renderMaintenance(mtnData);
+    pollMaintenance();
+  }
+
+  function dueNeedingAction() {
+    return mtnData.filter(function (m) { return m.due && m.status !== "DONE"; }).length;
+  }
+  function updateMtnBadge() {
+    var el = $("mtnBadge"); if (!el) return;
+    var n = dueNeedingAction();
+    if (n > 0 && $("tabMaintenance").classList.contains("hidden")) {
+      el.textContent = n > 99 ? "99+" : n; el.classList.remove("hidden");
+    } else el.classList.add("hidden");
+  }
+  function clearMtnBadge() { var el = $("mtnBadge"); if (el) el.classList.add("hidden"); }
+
+  function renderMaintenance(list) {
+    var box = $("mtnList"); if (!box) return;
+    if (!list.length) { box.innerHTML = '<div class="note" style="text-align:left">Bu araç için tanımlı bakım yok.</div>'; return; }
+    box.innerHTML = "";
+    list.forEach(function (m) {
+      var card = document.createElement("div");
+      card.className = "mtnCard" + (m.due && m.status !== "DONE" ? " due" : "");
+
+      var head = document.createElement("div"); head.className = "h";
+      var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = m.name || "Bakım";
+      var badge = document.createElement("span");
+      badge.className = "mtnBadge " + (m.status || "PENDING");
+      badge.textContent = MTN_LABEL[m.status] || "Bekleniyor";
+      head.appendChild(nm); head.appendChild(badge); card.appendChild(head);
+
+      var bits = [];
+      if (m.nextDueKm != null) bits.push(Number(m.nextDueKm).toLocaleString("tr") + " km");
+      if (m.nextDueAt) bits.push(new Date(m.nextDueAt).toLocaleDateString("tr-TR"));
+      var sub = document.createElement("div"); sub.className = "sub";
+      sub.textContent = (m.due ? "Vadesi geldi · " : "Sonraki: ") + (bits.join(" / ") || "tarih yok");
+      card.appendChild(sub);
+
+      var actions = document.createElement("div"); actions.className = "mtnActions";
+      MTN_STEPS.forEach(function (st) {
+        var b = document.createElement("button");
+        b.textContent = MTN_LABEL[st];
+        if (m.status === st) b.className = "on";
+        b.onclick = function () { setMtnStatus(m.planId, st, b); };
+        actions.appendChild(b);
+      });
+      card.appendChild(actions);
+      box.appendChild(card);
+    });
+  }
+
+  function setMtnStatus(planId, status, btn) {
+    if (btn) btn.disabled = true;
+    fetch("/api/v1/track/maintenance/" + planId + "/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Device-Session": session.sessionToken },
+      body: JSON.stringify({ status: status })
+    })
+      .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function () {
+        if (navigator.vibrate) navigator.vibrate(40);
+        pollMaintenance();   // sunucudaki gerçek durumu (DONE sonrası kaydırma dahil) geri al
+      })
+      .catch(function () { if (btn) btn.disabled = false; });
+  }
 
   // ── PWA service worker ────────────────────────────────────────────────────
   if ("serviceWorker" in navigator) {

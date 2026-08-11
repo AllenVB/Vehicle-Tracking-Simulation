@@ -1255,6 +1255,13 @@
     } catch (_) { if (el) el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Bağlantı hatası.</div>`; }
   }
 
+  // Durumu sürücü işaretler; admin yalnızca görür (salt-okunur rozet).
+  const MTN_STATUS = {
+    PENDING:     { label: "Bekleniyor", cls: "bg-amber-500/15 text-amber-400" },
+    IN_PROGRESS: { label: "Bakımda",    cls: "bg-blue-500/15 text-blue-400" },
+    DONE:        { label: "Yapıldı",    cls: "bg-primary/15 text-primary" }
+  };
+
   function renderMaintenance(items) {
     const el = $("maintenanceList"); if (!el) return;
     if (!items.length) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Bakım planı yok.</div>`; return; }
@@ -1262,6 +1269,7 @@
       const kmInfo = m.nextDueKm != null ? `${Number(m.nextDueKm).toLocaleString("tr")} km` : "";
       const dateInfo = m.nextDueAt ? new Date(m.nextDueAt).toLocaleDateString("tr-TR") : "";
       const dueStr = [kmInfo, dateInfo].filter(Boolean).join(" / ");
+      const st = MTN_STATUS[m.status] || MTN_STATUS.PENDING;
       return `<div class="flex items-center justify-between gap-2 bg-white/5 rounded-lg px-3 py-2">
         <div class="min-w-0">
           <div class="flex items-center gap-1 text-body-md font-bold text-on-surface">
@@ -1270,19 +1278,10 @@
           </div>
           <div class="text-[10px] mt-0.5 ${m.overdue ? "text-error" : "text-on-surface-variant"}">${dueStr || "Tarih yok"}</div>
         </div>
-        <button onclick="markServiced(${m.planId})" class="shrink-0 px-2 py-1 bg-primary/10 text-primary rounded-lg text-[10px] font-bold hover:bg-primary/20 active:scale-95 transition-all">Yapıldı</button>
+        <span class="shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold ${st.cls}">${st.label}</span>
       </div>`;
     }).join("");
   }
-
-  window.markServiced = async function (planId) {
-    try {
-      const r = await fetch(`/api/v1/maintenance/${planId}/serviced`, { method: "POST", headers: auth() });
-      if (!r.ok) { toast("Kayıt hatası", "error"); return; }
-      toast("Bakım kaydedildi · Plan güncellendi", "build");
-      loadMaintenance();
-    } catch (_) { toast("Bağlantı hatası", "error"); }
-  };
 
   function initMaintenance() {
     const toggle = $("mtnAddToggle"), form = $("mtnAddForm");

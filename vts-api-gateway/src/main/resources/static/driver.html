@@ -143,6 +143,24 @@
     .announce .t { font-weight: 800; margin-bottom: 3px; }
     .announce .meta { color: var(--muted); font-size: 11px; margin-top: 6px; }
 
+    /* ── Bakım ──────────────────────────────────────────────── */
+    .mtnList { display: flex; flex-direction: column; gap: 12px; max-height: calc(100dvh - 210px); overflow-y: auto;
+      -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    .mtnCard { background: #0c1a2b; border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+    .mtnCard.due { border-left: 3px solid var(--danger); }
+    .mtnCard .h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .mtnCard .nm { font-weight: 800; font-size: 15px; }
+    .mtnCard .sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .mtnBadge { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+    .mtnBadge.PENDING { background: rgba(245,180,60,.16); color: #f5b43c; }
+    .mtnBadge.IN_PROGRESS { background: rgba(80,150,245,.16); color: #6aa8ff; }
+    .mtnBadge.DONE { background: rgba(0,245,212,.14); color: var(--teal); }
+    .mtnActions { display: flex; gap: 8px; margin-top: 12px; }
+    .mtnActions button { flex: 1; margin: 0; padding: 10px 0; font-size: 13px; font-weight: 800; border-radius: 12px;
+      border: 1px solid var(--line); background: #0b1220; color: var(--text); }
+    .mtnActions button.on { border-color: var(--teal); color: var(--teal); background: rgba(0,245,212,.10); }
+    .mtnActions button:active { transform: scale(.96); }
+
     /* ── Üstten düşen duyuru banner'ı ───────────────────────── */
     .bcastBanner { position: fixed; left: 50%; transform: translateX(-50%); z-index: 60;
       width: calc(100% - 24px); max-width: 500px; background: rgba(18,50,74,.97);
@@ -263,6 +281,12 @@
         <div id="announceList" class="announceList"><div class="note" style="text-align:left">Henüz duyuru yok.</div></div>
       </div>
 
+      <!-- Sekme: Bakım -->
+      <div id="tabMaintenance" class="tabPanel card hidden">
+        <div class="sectionLabel">Aracın bakımları</div>
+        <div id="mtnList" class="mtnList"><div class="note" style="text-align:left">Bakım bilgisi yükleniyor…</div></div>
+      </div>
+
       <!-- Alt navigasyon -->
       <nav class="bottomNav" id="bottomNav">
         <button class="navBtn active" data-tab="tabDrive">
@@ -278,6 +302,10 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 11v2h4v-2h-4zm-2 6.61c.96.71 2.21 1.65 3.2 2.39.4-.53.8-1.07 1.2-1.6-.99-.74-2.24-1.68-3.2-2.4-.4.54-.8 1.08-1.2 1.61zM20.4 5.6c-.4-.53-.8-1.07-1.2-1.6-.99.74-2.24 1.68-3.2 2.4.4.53.8 1.07 1.2 1.6.96-.72 2.21-1.65 3.2-2.4zM4 9c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h1v4h2v-4h1l5 3V6L8 9H4zm11.5 3c0-1.33-.58-2.53-1.5-3.35v6.69c.92-.81 1.5-2.01 1.5-3.34z"/></svg>
           <span id="announceBadge" class="navBadge hidden">0</span>
           Duyurular</button>
+        <button class="navBtn" data-tab="tabMaintenance">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+          <span id="mtnBadge" class="navBadge hidden">0</span>
+          Bakım</button>
       </nav>
 
       <p class="note" style="margin-top:10px">Konumun yalnızca sürüş sırasında ve bu araç için paylaşılır.</p>

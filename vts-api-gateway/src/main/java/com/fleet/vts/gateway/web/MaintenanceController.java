@@ -8,7 +8,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Maintenance that is actually due, and marking it done.
@@ -132,50 +132,65 @@ public class MaintenanceController {
                 tenant);
     }
 
+    /** Sürücünün işaretleyebileceği durumlar (mobil uygulama üzerinden). */
+    public static final Set<String> DRIVER_STATUSES = Set.of("PENDING", "IN_PROGRESS", "DONE");
+
     /**
-     * Record that a plan was serviced and roll it forward.
+     * Plan durumunu ilerletir; yalnızca aracın sürücüsü çağırır (bkz. DriverMaintenanceController,
+     * araç sahipliği orada X-Device-Session ile doğrulanır). Admin işaretleme yetkisi yoktur.
      *
-     * <p>The next due point is computed from the odometer reading at service time, not from the
-     * previous due point. Otherwise a service done 3 000 km late would shorten the next
-     * interval by exactly that much, and the schedule would drift tighter every cycle.
+     * <p>{@code DONE} işaretlenince plan bir sonraki döngüye kaydırılır: yeni "vade", geç kalınsa
+     * bile servis anındaki odometreden hesaplanır — aksi halde her gecikme bir sonraki aralığı
+     * tam o kadar kısaltır ve program giderek sıkışırdı. Kaydırma sonrası vade ileri gittiği için
+     * rozet "Yapıldı" kalır; araç yeniden vadesine ulaşınca kendiliğinden "Bekleniyor"a döner.
      */
-    @PostMapping("/{planId}/serviced")
-    @PreAuthorize("hasAnyRole('ADMIN', 'FLEET_MANAGER')")
     @Transactional
-    public ResponseEntity<Map<String, Object>> markServiced(@AuthenticationPrincipal Jwt jwt,
-                                                            @PathVariable Long planId) {
-        long tenant = CurrentUser.tenantId(jwt);
-
-        int rolled = jdbc.update("""
-                UPDATE maintenance_plan mp
-                   SET last_service_km = v.odometer_km,
-                       last_service_at = now(),
-                       next_due_km = CASE WHEN mp.interval_km IS NULL THEN NULL
-                                          ELSE v.odometer_km + mp.interval_km END,
-                       next_due_at = CASE WHEN mp.interval_days IS NULL THEN NULL
-                                          ELSE now() + make_interval(days => mp.interval_days) END,
-                       updated_at = now()
-                  FROM vehicle v
-                 WHERE mp.id = ? AND mp.tenant_id = ? AND v.id = mp.vehicle_id
-                """, planId, tenant);
-
-        if (rolled == 0) {
-            return ResponseEntity.notFound().build();
+    public void applyStatus(long vehicleId, long planId, String status, String actor) {
+        if ("DONE".equals(status)) {
+            jdbc.update("""
+                    UPDATE maintenance_plan mp
+                       SET last_service_km = v.odometer_km,
+                           last_service_at = now(),
+                           next_due_km = CASE WHEN mp.interval_km IS NULL THEN NULL
+                                              ELSE v.odometer_km + mp.interval_km END,
+                           next_due_at = CASE WHEN mp.interval_days IS NULL THEN NULL
+                                              ELSE now() + make_interval(days => mp.interval_days) END,
+                           status = 'DONE',
+                           updated_at = now()
+                      FROM vehicle v
+                     WHERE mp.id = ? AND mp.vehicle_id = ? AND v.id = mp.vehicle_id
+                    """, planId, vehicleId);
+            jdbc.update("""
+                    INSERT INTO maintenance_record (tenant_id, vehicle_id, plan_id, service_at, odometer_km, performed_by)
+                    SELECT mp.tenant_id, mp.vehicle_id, mp.id, now(), v.odometer_km, ?
+                    FROM maintenance_plan mp JOIN vehicle v ON v.id = mp.vehicle_id
+                    WHERE mp.id = ?
+                    """, actor, planId);
+        } else {
+            jdbc.update("""
+                    UPDATE maintenance_plan
+                       SET status = ?, updated_at = now()
+                     WHERE id = ? AND vehicle_id = ?
+                    """, status, planId, vehicleId);
         }
+    }
 
-        jdbc.update("""
-                INSERT INTO maintenance_record (tenant_id, vehicle_id, plan_id, service_at, odometer_km, performed_by)
-                SELECT mp.tenant_id, mp.vehicle_id, mp.id, now(), v.odometer_km, ?
-                FROM maintenance_plan mp JOIN vehicle v ON v.id = mp.vehicle_id
-                WHERE mp.id = ?
-                """, jwt == null ? "system" : jwt.getSubject(), planId);
+    /**
+     * Depolanan durum + vade birleşiminden rozetin göstereceği durumu üretir. DONE olup araç
+     * yeniden vadesine ulaştıysa yeni döngü başlamış demektir → PENDING gösterilir.
+     */
+    public static String effectiveStatus(String raw, Long nextDueKm, OffsetDateTime nextDueAt, Long odometerKm) {
+        String s = raw == null ? "PENDING" : raw;
+        if ("DONE".equals(s) && isDue(nextDueKm, nextDueAt, odometerKm)) {
+            return "PENDING";
+        }
+        return s;
+    }
 
-        Map<String, Object> after = jdbc.queryForMap(
-                "SELECT next_due_km, next_due_at FROM maintenance_plan WHERE id = ?", planId);
-        return ResponseEntity.ok(Map.of(
-                "planId", planId,
-                "nextDueKm", String.valueOf(after.get("next_due_km")),
-                "nextDueAt", String.valueOf(after.get("next_due_at"))));
+    private static boolean isDue(Long nextDueKm, OffsetDateTime nextDueAt, Long odometerKm) {
+        boolean byKm = nextDueKm != null && odometerKm != null && odometerKm >= nextDueKm;
+        boolean byDate = nextDueAt != null && !nextDueAt.toInstant().isAfter(java.time.Instant.now());
+        return byKm || byDate;
     }
 
     /** Tenant'ın tüm aktif bakım planlarını araç plakasıyla birlikte listeler. */
@@ -186,7 +201,7 @@ public class MaintenanceController {
                         SELECT mp.id, mp.name, mp.vehicle_id, v.plate, v.odometer_km,
                                mp.interval_km, mp.interval_days,
                                mp.next_due_km, mp.next_due_at,
-                               mp.last_service_km, mp.last_service_at
+                               mp.last_service_km, mp.last_service_at, mp.status
                         FROM maintenance_plan mp
                         JOIN vehicle v ON v.id = mp.vehicle_id
                         WHERE mp.tenant_id = ? AND mp.enabled
@@ -203,12 +218,19 @@ public class MaintenanceController {
                         row.put("odometerKm", rs.getLong("odometer_km"));
                         row.put("intervalKm", rs.getObject("interval_km", Integer.class));
                         row.put("intervalDays", rs.getObject("interval_days", Integer.class));
-                        row.put("nextDueKm", rs.getObject("next_due_km", Long.class));
+                        Long nextDueKm = rs.getObject("next_due_km", Long.class);
+                        row.put("nextDueKm", nextDueKm);
                         OffsetDateTime dueAt = rs.getObject("next_due_at", OffsetDateTime.class);
                         row.put("nextDueAt", dueAt == null ? null : dueAt.toInstant());
                         OffsetDateTime svcAt = rs.getObject("last_service_at", OffsetDateTime.class);
                         row.put("lastServiceAt", svcAt == null ? null : svcAt.toInstant());
-                        row.put("overdue", isOverdue(rs.getObject("next_due_km", Long.class), dueAt));
+                        boolean overdue = isOverdue(nextDueKm, dueAt);
+                        row.put("overdue", overdue);
+                        // Durumu sürücü işaretler; admin yalnızca görür. DONE olup vadesi tekrar
+                        // gelmişse (bir sonraki döngü) rozeti otomatik "Bekleniyor"a çevir.
+                        String raw = rs.getString("status");
+                        Long odo = rs.getObject("odometer_km", Long.class);
+                        row.put("status", effectiveStatus(raw, nextDueKm, dueAt, odo));
                         out.add(row);
                     }
                     return out;
