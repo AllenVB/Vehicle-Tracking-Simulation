@@ -111,6 +111,46 @@
   .leaflet-draw-toolbar a:hover { background-color:#232926 !important; }
   .leaflet-draw-guide-dash { background:#4edea3 !important; }
   .leaflet-draw-tooltip { background:#1b201e !important; color:#e5e2e1 !important; border-color:#3c4a42 !important; }
+
+  /* ── Yüzen panel açılışları: display:none→görünür geçince animasyon kendiliğinden
+     yeniden oynar; kapanış exit'i yok (kabul edilebilir). ────────────────────── */
+  #selOverlay:not(.hidden), #chatPanel:not(.hidden) { animation:panelUp .28s cubic-bezier(.2,.7,.2,1) both; }
+  #geoPanel:not(.hidden), #pairPanel:not(.hidden) { animation:panelDrop .26s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes panelUp { from { opacity:0; transform:translateY(14px) scale(.985); } to { opacity:1; transform:none; } }
+  @keyframes panelDrop { from { opacity:0; transform:translateY(-10px) scale(.985); } to { opacity:1; transform:none; } }
+
+  /* ── Araç listesi kartları: hover'da hafif yüksel + durum çipi renk geçişi ──── */
+  .vcard { transition:transform .18s cubic-bezier(.2,.7,.2,1), background-color .2s, border-color .2s, box-shadow .2s; }
+  .vcard:hover { transform:translateY(-2px); box-shadow:0 8px 22px -12px rgba(0,0,0,.7); border-color:rgba(78,222,163,.28); }
+  .vcard:active { transform:translateY(0) scale(.99); }
+  .vchip, .vdot, .vspeed { transition:background-color .35s ease, color .35s ease, border-color .35s ease; }
+
+  /* ── Filo kartları: giriş (stagger) + hover'da yüksel ──────────────────────── */
+  .fleet-card { animation:cardIn .4s cubic-bezier(.2,.7,.2,1) both;
+    transition:transform .2s cubic-bezier(.2,.7,.2,1), box-shadow .2s, border-color .2s; }
+  .fleet-card:hover { transform:translateY(-3px); box-shadow:0 14px 32px -16px rgba(0,0,0,.8); border-color:rgba(78,222,163,.22); }
+  @keyframes cardIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+  #fleetGrid > *:nth-child(1){animation-delay:.00s} #fleetGrid > *:nth-child(2){animation-delay:.04s}
+  #fleetGrid > *:nth-child(3){animation-delay:.08s} #fleetGrid > *:nth-child(4){animation-delay:.12s}
+  #fleetGrid > *:nth-child(5){animation-delay:.16s} #fleetGrid > *:nth-child(6){animation-delay:.20s}
+  #fleetGrid > *:nth-child(7){animation-delay:.24s} #fleetGrid > *:nth-child(8){animation-delay:.28s}
+  #fleetGrid > *:nth-child(n+9){animation-delay:.30s}
+
+  /* ── Filo sağlığı mini kutuları + kritik uyarı satırları: hover geçişi ──────── */
+  #fleet-panel .bg-black\/20 { transition:transform .16s cubic-bezier(.2,.7,.2,1), background-color .2s; }
+  #fleet-panel .bg-black\/20:hover { transform:translateY(-2px); }
+  #fleetAlerts > *, #maintenanceList > * { transition:transform .16s cubic-bezier(.2,.7,.2,1), background-color .2s; }
+  #fleetAlerts > *:hover, #maintenanceList > *:hover { transform:translateX(2px); }
+
+  /* ── Toast: girişte anim-in zaten var; çıkışta yumuşak sönme ──────────────── */
+  #ffToast { transition:opacity .3s ease, transform .3s ease; }
+  #ffToast.toast-out { opacity:0; transform:translate(-50%,-8px); }
+
+  /* Erişilebilirlik: hareket azaltma tercihinde animasyonları kıs. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration:.001ms !important; animation-iteration-count:1 !important;
+      transition-duration:.001ms !important; }
+  }
 </style>
 <script>
   tailwind.config = { darkMode:"class", theme:{ extend:{

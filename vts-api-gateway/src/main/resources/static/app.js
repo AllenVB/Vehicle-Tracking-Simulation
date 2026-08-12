@@ -396,9 +396,15 @@
     }
     const ic = icon || "info";
     el.innerHTML = `<span class="material-symbols-outlined text-primary text-body-md" style="font-variation-settings:'FILL' 1">${esc(ic)}</span><span>${html}</span>`;
+    el.classList.remove("toast-out");
     el.style.display = "flex";
+    el.classList.remove("anim-in"); void el.offsetWidth; el.classList.add("anim-in");   // her çağrıda girişi yeniden tetikle
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.style.display = "none"; }, 5000);
+    // 5 sn sonra yumuşak sön, sonra gizle (ani kaybolma yerine).
+    toastTimer = setTimeout(() => {
+      el.classList.add("toast-out");
+      setTimeout(() => { if (el.classList.contains("toast-out")) el.style.display = "none"; }, 320);
+    }, 5000);
   }
 
   // ── Genel duyuru (admin → tüm kullanıcılar, pub/sub) ──────────────────────
@@ -871,7 +877,7 @@
     const fuel = p && p.fuelPct != null ? p.fuelPct : null;
     const loc = p && p.lat != null ? p.lat.toFixed(4) + ", " + p.lon.toFixed(4) : "Konum bekleniyor";
     const seen = relTime(p && p.ts);
-    return `<div class="glass-panel p-5 rounded-2xl relative overflow-hidden">
+    return `<div class="fleet-card glass-panel p-5 rounded-2xl relative overflow-hidden">
       <div class="absolute top-0 right-0 w-28 h-28 rounded-full blur-3xl -mr-14 -mt-14" style="background:${c}22"></div>
       <div class="flex justify-between items-start mb-4 relative">
         <div class="min-w-0">
