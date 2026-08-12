@@ -245,6 +245,21 @@
           <span id="gpsChip" class="gpsChip"><span class="d"></span><span id="gpsText">GPS —</span></span>
         </div>
 
+        <!-- Aktif görev kartı (varsa gösterilir) -->
+        <div id="jobCard" class="hidden" style="margin-top:12px;padding:14px;border-radius:16px;border:1px solid var(--line);border-left:3px solid var(--teal);background:#0c1a2b">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-weight:800;font-size:15px" id="jobCardTitle">—</div>
+            <span id="jobCardBadge" class="mtnBadge PENDING">—</span>
+          </div>
+          <div class="note" style="text-align:left;margin:4px 0 0" id="jobCardSub">—</div>
+          <a id="jobNavBtn" href="#" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:12px;padding:11px;border-radius:12px;background:rgba(0,245,212,.10);border:1px solid var(--teal);color:var(--teal);font-weight:800;text-decoration:none">🧭 Yol tarifi</a>
+          <div class="mtnActions" style="margin-top:8px">
+            <button data-jst="EN_ROUTE">Yola çıktım</button>
+            <button data-jst="ARRIVED">Vardım</button>
+            <button data-jst="DONE">Tamamla</button>
+          </div>
+        </div>
+
         <div id="permBanner" class="hidden" style="margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--danger);background:rgba(255,93,108,.10)">
           <div style="font-weight:700;color:var(--danger)">Konum izni gerekli</div>
           <div style="color:var(--muted);font-size:13px;margin-top:3px">Sürüşü paylaşmak için tarayıcı/telefon ayarlarından bu siteye konum erişimi ver, sonra "Tekrar dene"ye bas.</div>

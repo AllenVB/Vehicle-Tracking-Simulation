@@ -115,6 +115,7 @@
     startMessages();
     startBroadcasts();
     startMaintenance();
+    startJob();
   }
 
   $("stopBtn").onclick = function () {
@@ -127,6 +128,7 @@
     stopMessages();
     stopBroadcasts();
     stopMaintenance();
+    stopJob();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     session = null;
@@ -418,6 +420,7 @@
     stopMessages();
     stopBroadcasts();
     stopMaintenance();
+    stopJob();
     releaseWakeLock();
     localStorage.removeItem(SESSION_KEY);
     setTimeout(function () {
@@ -948,6 +951,61 @@
         if (navigator.vibrate) navigator.vibrate(40);
         pollMaintenance();   // sunucudaki gerçek durumu (DONE sonrası kaydırma dahil) geri al
       })
+      .catch(function () { if (btn) btn.disabled = false; });
+  }
+
+  // ── Görev (admin atar; sürücü durumu ilerletir) ──────────────────────────
+  var JOB_POLL_MS = 20000, jobTimer = null, jobPolling = false, curJob = null;
+  var JOB_BADGE = { ASSIGNED: "PENDING", EN_ROUTE: "IN_PROGRESS", ARRIVED: "DONE" };
+  var JOB_LABEL = { ASSIGNED: "Atandı", EN_ROUTE: "Yolda", ARRIVED: "Vardı" };
+
+  function startJob() {
+    if (jobTimer) clearInterval(jobTimer);
+    var card = $("jobCard");
+    if (card) card.querySelectorAll(".mtnActions button").forEach(function (b) {
+      b.onclick = function () { setJobStatus(b.getAttribute("data-jst"), b); };
+    });
+    pollJob();
+    jobTimer = setInterval(pollJob, JOB_POLL_MS);
+  }
+  function stopJob() { if (jobTimer) { clearInterval(jobTimer); jobTimer = null; } }
+
+  function pollJob() {
+    if (!session || !navigator.onLine || jobPolling) return;
+    jobPolling = true;
+    fetch("/api/v1/track/job", { headers: { "X-Device-Session": session.sessionToken } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { curJob = (j && j.jobId) ? j : null; renderJob(); })
+      .catch(function () {})
+      .then(function () { jobPolling = false; });
+  }
+
+  function renderJob() {
+    var card = $("jobCard"); if (!card) return;
+    if (!curJob) { card.classList.add("hidden"); return; }
+    card.classList.remove("hidden");
+    $("jobCardTitle").textContent = curJob.title || "Görev";
+    var badge = $("jobCardBadge");
+    badge.className = "mtnBadge " + (JOB_BADGE[curJob.status] || "PENDING");
+    badge.textContent = JOB_LABEL[curJob.status] || curJob.status;
+    var bits = [];
+    if (curJob.destLabel) bits.push(curJob.destLabel);
+    if (curJob.remainingKm != null) bits.push(curJob.remainingKm + " km");
+    if (curJob.etaMin != null) bits.push("~" + curJob.etaMin + " dk");
+    $("jobCardSub").textContent = bits.join(" · ") || "Hedefe git";
+    $("jobNavBtn").href = "https://www.google.com/maps/dir/?api=1&destination=" + curJob.destLat + "," + curJob.destLon;
+  }
+
+  function setJobStatus(status, btn) {
+    if (!curJob) return;
+    if (btn) btn.disabled = true;
+    fetch("/api/v1/track/job/" + curJob.jobId + "/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Device-Session": session.sessionToken },
+      body: JSON.stringify({ status: status })
+    })
+      .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function () { if (navigator.vibrate) navigator.vibrate(40); pollJob(); })
       .catch(function () { if (btn) btn.disabled = false; });
   }
 

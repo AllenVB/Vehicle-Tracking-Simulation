@@ -98,33 +98,73 @@ public class ShareController {
         long vehicleId = ((Number) meta.get("vehicle_id")).longValue();
         String plate = (String) meta.get("plate");
 
+        Map<String, Object> resp = new LinkedHashMap<>();
         // Redis: vts:pos:{vehicleId} → JSON ile lat/lon/speedKmh/heading/ts
         String cached = redis.opsForValue().get(POS_PREFIX + vehicleId);
+        boolean havePos = false;
         if (cached != null) {
             try {
-                Map<String, Object> pos = new LinkedHashMap<>(json.readValue(cached, MAP_TYPE));
-                pos.put("plate", plate);
-                pos.put("vehicleId", vehicleId);
-                return ResponseEntity.ok(pos);
+                resp.putAll(json.readValue(cached, MAP_TYPE));
+                havePos = true;
             } catch (Exception ignored) {}
         }
-
-        // DB fallback: vehicle_last_position
-        try {
-            Map<String, Object> db = new LinkedHashMap<>(jdbc.queryForMap("""
-                    SELECT ST_Y(location::geometry) AS lat,
-                           ST_X(location::geometry) AS lon,
-                           speed_kmh              AS "speedKmh",
-                           heading, ts
-                    FROM vehicle_last_position
-                    WHERE vehicle_id = ?
-                    """, vehicleId));
-            db.put("plate", plate);
-            db.put("vehicleId", vehicleId);
-            return ResponseEntity.ok(db);
-        } catch (Exception e) {
-            // Araç var ama hiç konum yok (yeni kayıt).
-            return ResponseEntity.ok(Map.of("plate", plate, "vehicleId", vehicleId));
+        if (!havePos) {
+            // DB fallback: vehicle_last_position
+            try {
+                resp.putAll(jdbc.queryForMap("""
+                        SELECT ST_Y(location::geometry) AS lat,
+                               ST_X(location::geometry) AS lon,
+                               speed_kmh              AS "speedKmh",
+                               heading, ts
+                        FROM vehicle_last_position
+                        WHERE vehicle_id = ?
+                        """, vehicleId));
+            } catch (Exception e) {
+                // Araç var ama hiç konum yok (yeni kayıt).
+            }
         }
+        resp.put("plate", plate);
+        resp.put("vehicleId", vehicleId);
+        appendActiveJob(resp, vehicleId);   // aktif görev varsa hedef + ETA ekle
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * Araca atanmış aktif görev varsa müşteri linkine hedefi ve varış tahminini ekler:
+     * müşteri "araç nereye gidiyor, yaklaşık ne zaman varır" bilgisini görür.
+     */
+    private void appendActiveJob(Map<String, Object> resp, long vehicleId) {
+        Map<String, Object> job;
+        try {
+            job = jdbc.queryForMap("""
+                    SELECT title, dest_label, dest_lat, dest_lon, status
+                    FROM dispatch_job
+                    WHERE vehicle_id = ? AND status IN ('ASSIGNED', 'EN_ROUTE', 'ARRIVED')
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """, vehicleId);
+        } catch (Exception e) {
+            return;   // aktif görev yok
+        }
+        double dlat = ((Number) job.get("dest_lat")).doubleValue();
+        double dlon = ((Number) job.get("dest_lon")).doubleValue();
+        Map<String, Object> dest = new LinkedHashMap<>();
+        dest.put("lat", dlat);
+        dest.put("lon", dlon);
+        dest.put("label", job.get("dest_label"));
+        dest.put("title", job.get("title"));
+        resp.put("dest", dest);
+        resp.put("jobStatus", job.get("status"));
+
+        Double lat = num(resp.get("lat")), lon = num(resp.get("lon")), spd = num(resp.get("speedKmh"));
+        if (lat != null && lon != null) {
+            double km = GeoEta.haversineKm(lat, lon, dlat, dlon);
+            resp.put("remainingKm", Math.round(km * 10) / 10.0);
+            resp.put("etaMin", GeoEta.etaMinutes(km, spd));
+        }
+    }
+
+    private static Double num(Object o) {
+        return (o instanceof Number n) ? n.doubleValue() : null;
     }
 }

@@ -365,6 +365,29 @@
   <button id="geoToggle" title="Bölgeleri yönet (geofence)" class="glass-panel rounded-full px-4 py-2 flex items-center gap-2 text-label-sm font-bold text-on-surface-variant active:scale-95 transition-transform">
     <span class="material-symbols-outlined text-body-md">pentagon</span> Bölgeler
   </button>
+  <button id="jobToggle" title="Görevleri yönet (varış noktası ata)" class="glass-panel rounded-full px-4 py-2 flex items-center gap-2 text-label-sm font-bold text-on-surface-variant active:scale-95 transition-transform">
+    <span class="material-symbols-outlined text-body-md">assignment</span> Görevler
+  </button>
+</div>
+
+<!-- ── Görev paneli ───────────────────────────────────────────────────────────── -->
+<div class="fixed right-6 z-50 glass-panel rounded-2xl p-4 w-72 hidden" id="jobPanel" style="top:18.5rem;max-height:calc(100vh - 20.5rem);overflow-y:auto">
+  <div class="flex items-center justify-between mb-3">
+    <div class="text-label-sm font-bold flex items-center gap-1.5 text-primary"><span class="material-symbols-outlined text-body-md">assignment</span> Aktif Görevler</div>
+    <button id="jobClose" class="text-on-surface-variant hover:text-on-surface">✕</button>
+  </div>
+  <div id="jobList" class="space-y-2 mb-3"></div>
+  <!-- Yeni görev formu (araç seçip "Görev ata" deyince + haritaya tıklayınca açılır) -->
+  <div id="jobForm" class="hidden border-t border-white/10 pt-3 space-y-2">
+    <p class="text-[10px] text-on-surface-variant uppercase tracking-wide">Yeni görev · <b id="jobFormPlate" class="text-on-surface"></b></p>
+    <input id="jobTitle" placeholder="Görev adı (ör. Kadıköy teslimat)" maxlength="120" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
+    <input id="jobDestLabel" placeholder="Hedef adı (opsiyonel)" maxlength="120" class="w-full bg-surface-container-lowest border border-white/10 rounded-lg px-3 py-2 text-body-md text-on-surface focus:outline-none focus:border-primary">
+    <p id="jobDestHint" class="text-[11px] text-primary">Haritada hedefi tıkla…</p>
+    <div class="flex gap-2">
+      <button id="jobAssignBtn" class="flex-1 py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 disabled:opacity-40" disabled>Ata</button>
+      <button id="jobCancelBtn" class="py-2 px-3 bg-white/5 border border-white/10 rounded-xl text-label-sm text-on-surface-variant active:scale-95">Vazgeç</button>
+    </div>
+  </div>
 </div>
 
 <!-- ── Geofence panel ─────────────────────────────────────────────────────────── -->
@@ -430,6 +453,7 @@
     <button id="selFollow" class="flex-1 py-2 bg-primary text-on-primary rounded-xl font-bold text-label-sm hover:brightness-110 active:scale-95 transition-all">Bu aracı takip et</button>
     <button id="selMsgBtn" title="Sürücü ile mesajlaş" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">chat</span></button>
     <button id="selShareBtn" title="Müşteri takip linki oluştur (24 sa)" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">share</span></button>
+    <button id="selJobBtn" title="Görev ata (haritada hedef seç)" class="w-10 flex items-center justify-center bg-white/5 rounded-xl border border-white/10 text-on-surface hover:bg-white/10 active:scale-95"><span class="material-symbols-outlined text-body-md">assignment</span></button>
   </div>
 </div>
 

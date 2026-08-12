@@ -82,6 +82,7 @@
     initPlayback();
     initFleet();
     initGeofence();
+    initJobs();
     initMaintenance();
     initChat();
     initBroadcast();
@@ -307,6 +308,7 @@
     };
     $("selMsgBtn").onclick = () => { if (selected != null) openChat(selected); };
     if ($("selShareBtn")) $("selShareBtn").onclick = () => { if (selected != null) shareVehicle(selected); };
+    if ($("selJobBtn")) $("selJobBtn").onclick = () => { if (selected != null) startJobAssign(selected); };
     if ($("plateToggle")) $("plateToggle").onclick = togglePlates;
   }
 
@@ -1202,6 +1204,7 @@
     if (!toggle || !panel) return;
     toggle.onclick = () => {
       const qp = $("pairPanel"); if (qp) qp.classList.add("hidden");   // aynı köşede: QR'ı kapat
+      const jp = $("jobPanel"); if (jp) jp.classList.add("hidden");    // ve Görevler'i kapat
       const hidden = panel.classList.toggle("hidden"); if (!hidden) loadGeofences();
     };
     $("geoClose").onclick = () => { panel.classList.add("hidden"); cancelDraw(); };
@@ -1297,6 +1300,149 @@
     } catch (_) {}
   };
 
+  // ── Görev atama + ETA ─────────────────────────────────────────────────────
+  let jobLayer = null, jobs = [], jobTimer = null;
+  let jobAssignVehicle = null, jobPendingDest = null, jobPickMarker = null, jobPicking = false;
+  const JOB_STATUS = {
+    ASSIGNED: { label: "Atandı", cls: "bg-amber-500/15 text-amber-400", color: "#f5b43c" },
+    EN_ROUTE: { label: "Yolda",  cls: "bg-blue-500/15 text-blue-400",   color: "#6aa8ff" },
+    ARRIVED:  { label: "Vardı",  cls: "bg-primary/15 text-primary",     color: "#4edea3" }
+  };
+
+  function initJobs() {
+    const toggle = $("jobToggle"), panel = $("jobPanel");
+    if (!toggle || !panel) return;
+    jobLayer = L.layerGroup().addTo(map);
+    toggle.onclick = () => {
+      $("pairPanel") && $("pairPanel").classList.add("hidden");
+      $("geoPanel") && $("geoPanel").classList.add("hidden");
+      const hidden = panel.classList.toggle("hidden");
+      if (!hidden) loadJobs(); else exitJobAssign();
+    };
+    $("jobClose").onclick = () => { panel.classList.add("hidden"); exitJobAssign(); };
+    $("jobAssignBtn").onclick = assignJob;
+    $("jobCancelBtn").onclick = exitJobAssign;
+    loadJobs();
+    jobTimer = setInterval(() => { if (!$("jobPanel").classList.contains("hidden") || jobLayer.getLayers().length) loadJobs(); }, 15000);
+  }
+
+  async function loadJobs() {
+    try {
+      const r = await fetch("/api/v1/jobs", { headers: auth() });
+      if (!r.ok) return;
+      jobs = await r.json();
+      renderJobLayers();
+      renderJobList();
+    } catch (_) {}
+  }
+
+  function renderJobLayers() {
+    if (!jobLayer) return;
+    jobLayer.clearLayers();
+    jobs.forEach(j => {
+      const st = JOB_STATUS[j.status] || JOB_STATUS.ASSIGNED;
+      const dest = [j.destLat, j.destLon];
+      L.marker(dest, {
+        icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 30], html:
+          `<div style="display:flex;flex-direction:column;align-items:center">
+             <span class="material-symbols-outlined" style="font-size:28px;color:${st.color};text-shadow:0 1px 3px #000">place</span>
+           </div>` })
+      }).bindTooltip(`${esc(j.title)}${j.etaMin != null ? " · ~" + j.etaMin + " dk" : ""}`, { className: "plate-label", direction: "top", offset: [0, -26] }).addTo(jobLayer);
+      // Aracın anlık konumundan hedefe kesikli çizgi
+      const p = pos.get(j.vehicleId);
+      if (p && p.lat != null) {
+        L.polyline([[p.lat, p.lon], dest], { color: st.color, weight: 2, dashArray: "6 8", opacity: .8 }).addTo(jobLayer);
+      }
+    });
+  }
+
+  function renderJobList() {
+    const el = $("jobList"); if (!el) return;
+    if (!jobs.length) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Aktif görev yok. Bir araç seçip “Görev ata”ya bas.</div>`; return; }
+    el.innerHTML = jobs.map(j => {
+      const st = JOB_STATUS[j.status] || JOB_STATUS.ASSIGNED;
+      const meta = [esc(j.destLabel || "Hedef")];
+      if (j.remainingKm != null) meta.push(`${j.remainingKm} km`);
+      meta.push(j.etaMin != null ? `ETA ~${j.etaMin} dk` : "ETA —");
+      return `<div class="bg-white/5 rounded-lg px-3 py-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-body-md font-bold text-on-surface truncate">${esc(j.plate)} · ${esc(j.title)}</span>
+          <span class="shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold ${st.cls}">${st.label}</span>
+        </div>
+        <div class="flex items-center justify-between mt-1">
+          <span class="text-[10px] text-on-surface-variant truncate">${meta.join(" · ")}</span>
+          <button onclick="cancelJob(${j.jobId})" class="shrink-0 text-on-surface-variant hover:text-error transition-colors" title="Görevi iptal et"><span class="material-symbols-outlined text-body-md">close</span></button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  window.cancelJob = async function (id) {
+    try {
+      const r = await fetch(`/api/v1/jobs/${id}/cancel`, { method: "POST", headers: auth() });
+      if (!r.ok) return;
+      toast("Görev iptal edildi", "assignment");
+      loadJobs();
+    } catch (_) {}
+  };
+
+  // Araç seçiliyken "Görev ata": paneli aç, haritadan hedef seçtir.
+  function startJobAssign(vehicleId) {
+    const v = vehicles.get(vehicleId); if (!v) return;
+    jobAssignVehicle = vehicleId; jobPendingDest = null;
+    $("pairPanel") && $("pairPanel").classList.add("hidden");
+    $("geoPanel") && $("geoPanel").classList.add("hidden");
+    $("jobPanel").classList.remove("hidden");
+    $("jobForm").classList.remove("hidden");
+    $("jobFormPlate").textContent = v.plate;
+    $("jobTitle").value = ""; $("jobDestLabel").value = "";
+    $("jobDestHint").textContent = "Haritada hedefi tıkla…";
+    $("jobAssignBtn").disabled = true;
+    jobPicking = true;
+    map.getContainer().style.cursor = "crosshair";
+    map.on("click", onJobPick);
+    toast("Haritada varış noktasını tıkla", "location_on");
+  }
+
+  function onJobPick(e) {
+    if (!jobPicking) return;
+    jobPendingDest = e.latlng;
+    if (jobPickMarker) map.removeLayer(jobPickMarker);
+    jobPickMarker = L.marker(jobPendingDest, {
+      icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 30],
+        html: `<span class="material-symbols-outlined" style="font-size:28px;color:#4edea3;text-shadow:0 1px 3px #000">place</span>` })
+    }).addTo(map);
+    $("jobDestHint").textContent = `Hedef: ${jobPendingDest.lat.toFixed(4)}, ${jobPendingDest.lng.toFixed(4)}`;
+    $("jobAssignBtn").disabled = false;
+  }
+
+  function exitJobAssign() {
+    jobPicking = false; jobAssignVehicle = null; jobPendingDest = null;
+    map.getContainer().style.cursor = "";
+    map.off("click", onJobPick);
+    if (jobPickMarker) { map.removeLayer(jobPickMarker); jobPickMarker = null; }
+    const f = $("jobForm"); if (f) f.classList.add("hidden");
+  }
+
+  async function assignJob() {
+    const title = ($("jobTitle").value || "").trim();
+    if (jobAssignVehicle == null || !jobPendingDest || !title) { toast("Görev adı ve haritada hedef gerekli", "error"); return; }
+    try {
+      const r = await fetch("/api/v1/jobs", {
+        method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vehicleId: jobAssignVehicle, title,
+          destLabel: ($("jobDestLabel").value || "").trim() || null,
+          destLat: jobPendingDest.lat, destLon: jobPendingDest.lng
+        })
+      });
+      if (!r.ok) { toast("Görev atanamadı", "error"); return; }
+      toast(`“${title}” görevi atandı`, "assignment_turned_in");
+      exitJobAssign();
+      loadJobs();
+    } catch (_) { toast("Bağlantı hatası", "error"); }
+  }
+
   // ── Bakım takibi ──────────────────────────────────────────────────────────
   async function loadMaintenance() {
     const el = $("maintenanceList"); if (!el) return;
@@ -1374,6 +1520,7 @@
     $("pairClose").onclick = () => panel.classList.add("hidden");
     $("pairBtn").onclick = () => {
       const gp = $("geoPanel"); if (gp) gp.classList.add("hidden");   // aynı köşede: Bölgeler'i kapat
+      const jp = $("jobPanel"); if (jp) jp.classList.add("hidden");   // ve Görevler'i kapat
       panel.classList.toggle("hidden");
     };
     let base = location.origin;
