@@ -125,16 +125,17 @@
   .vcard:active { transform:translateY(0) scale(.99); }
   .vchip, .vdot, .vspeed { transition:background-color .35s ease, color .35s ease, border-color .35s ease; }
 
-  /* ── Filo kartları: giriş (stagger) + hover'da yüksel ──────────────────────── */
-  .fleet-card { animation:cardIn .4s cubic-bezier(.2,.7,.2,1) both;
-    transition:transform .2s cubic-bezier(.2,.7,.2,1), box-shadow .2s, border-color .2s; }
+  /* ── Filo kartları: hover'da yüksel; giriş animasyonu YALNIZCA sekme ilk
+     açıldığında (.anim-cards) oynar — 5 sn'lik veri yenilemesinde DEĞİL. ──────── */
+  .fleet-card { transition:transform .2s cubic-bezier(.2,.7,.2,1), box-shadow .2s, border-color .2s; }
   .fleet-card:hover { transform:translateY(-3px); box-shadow:0 14px 32px -16px rgba(0,0,0,.8); border-color:rgba(78,222,163,.22); }
   @keyframes cardIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
-  #fleetGrid > *:nth-child(1){animation-delay:.00s} #fleetGrid > *:nth-child(2){animation-delay:.04s}
-  #fleetGrid > *:nth-child(3){animation-delay:.08s} #fleetGrid > *:nth-child(4){animation-delay:.12s}
-  #fleetGrid > *:nth-child(5){animation-delay:.16s} #fleetGrid > *:nth-child(6){animation-delay:.20s}
-  #fleetGrid > *:nth-child(7){animation-delay:.24s} #fleetGrid > *:nth-child(8){animation-delay:.28s}
-  #fleetGrid > *:nth-child(n+9){animation-delay:.30s}
+  #fleetGrid.anim-cards > * { animation:cardIn .4s cubic-bezier(.2,.7,.2,1) both; }
+  #fleetGrid.anim-cards > *:nth-child(1){animation-delay:.00s} #fleetGrid.anim-cards > *:nth-child(2){animation-delay:.04s}
+  #fleetGrid.anim-cards > *:nth-child(3){animation-delay:.08s} #fleetGrid.anim-cards > *:nth-child(4){animation-delay:.12s}
+  #fleetGrid.anim-cards > *:nth-child(5){animation-delay:.16s} #fleetGrid.anim-cards > *:nth-child(6){animation-delay:.20s}
+  #fleetGrid.anim-cards > *:nth-child(7){animation-delay:.24s} #fleetGrid.anim-cards > *:nth-child(8){animation-delay:.28s}
+  #fleetGrid.anim-cards > *:nth-child(n+9){animation-delay:.30s}
 
   /* ── Filo sağlığı mini kutuları + kritik uyarı satırları: hover geçişi ──────── */
   #fleet-panel .bg-black\/20 { transition:transform .16s cubic-bezier(.2,.7,.2,1), background-color .2s; }
@@ -386,7 +387,7 @@
 </div>
 
 <!-- ── QR pairing ──────────────────────────────────────────────────────────── -->
-<div class="fixed right-6 z-30 glass-panel rounded-2xl p-4 w-56 text-center hidden" id="pairPanel" style="top:12.5rem">
+<div class="fixed right-6 z-50 glass-panel rounded-2xl p-4 w-56 text-center hidden" id="pairPanel" style="top:18.5rem">
   <button id="pairClose" class="absolute top-2 right-3 text-on-surface-variant hover:text-on-surface">✕</button>
   <div class="text-label-sm font-bold mb-2 flex items-center justify-center gap-1.5 text-primary"><span class="material-symbols-outlined text-body-md">smartphone</span> Sürücü girişi</div>
   <div id="pairQr" class="bg-white rounded-xl p-2 flex justify-center min-h-[148px] items-center"></div>

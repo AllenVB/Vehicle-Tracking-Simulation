@@ -8,7 +8,7 @@
   const markers = new Map();    // id -> L.marker
   const tripCache = new Map();  // id -> {distanceKm, ecoScore, score}
   const recentVios = [];        // {vehicleId,ruleCode,value,threshold,occurredAt}
-  let fleetFilter = "all", dash = null, cluster = null, showPlates = false;
+  let fleetFilter = "all", dash = null, cluster = null, showPlates = false, fleetSig = "";
   const broadcasts = [];          // {id, sender, title, body, at} — en yeni önce (bildirim paneli)
   let inbox = [];                 // {id, vehicleId, plate, body, audio, at} — gelen sürücü mesajları
   const inboxDismissed = new Set(JSON.parse(localStorage.getItem("vts_inbox_dismissed") || "[]"));
@@ -205,7 +205,7 @@
     markers.forEach((m, id) => applyPlateLabel(m, id));
     if (cluster) cluster.refreshClusters();
   }
-  function sweep() { pos.forEach(p => drawMarker(p)); updateStats(); refreshCards(); if (cluster && view !== "history") cluster.refreshClusters(); if (selected != null) updateOverlay(); if (view === "fleet") renderFleet(); }
+  function sweep() { pos.forEach(p => drawMarker(p)); updateStats(); refreshCards(); if (cluster && view !== "history") cluster.refreshClusters(); if (selected != null) updateOverlay(); if (view === "fleet") refreshFleetCards(); }
   function fitAll() {
     const pts = []; pos.forEach(p => { if (p.lat != null) pts.push([p.lat, p.lon]); });
     if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.25));
@@ -877,8 +877,8 @@
     const fuel = p && p.fuelPct != null ? p.fuelPct : null;
     const loc = p && p.lat != null ? p.lat.toFixed(4) + ", " + p.lon.toFixed(4) : "Konum bekleniyor";
     const seen = relTime(p && p.ts);
-    return `<div class="fleet-card glass-panel p-5 rounded-2xl relative overflow-hidden">
-      <div class="absolute top-0 right-0 w-28 h-28 rounded-full blur-3xl -mr-14 -mt-14" style="background:${c}22"></div>
+    return `<div class="fleet-card glass-panel p-5 rounded-2xl relative overflow-hidden" data-fid="${id}">
+      <div class="fglow absolute top-0 right-0 w-28 h-28 rounded-full blur-3xl -mr-14 -mt-14" style="background:${c}22"></div>
       <div class="flex justify-between items-start mb-4 relative">
         <div class="min-w-0">
           <span class="text-label-sm font-bold text-primary block">#${v.trackId}</span>
@@ -886,17 +886,17 @@
           <p class="text-label-sm text-on-surface-variant truncate">${model}</p>
         </div>
         <div class="flex flex-col items-end gap-1.5 flex-none">
-          <span class="px-3 py-1 rounded-full text-label-sm font-bold border inline-flex items-center gap-1.5" style="color:${c};border-color:${c}55;background:${c}1a">
-            <span class="w-1.5 h-1.5 rounded-full" style="background:${c}"></span>${st.label}</span>
-          <span class="text-label-sm text-on-surface-variant">${speed} km/s</span>
+          <span class="fchip px-3 py-1 rounded-full text-label-sm font-bold border inline-flex items-center gap-1.5" style="color:${c};border-color:${c}55;background:${c}1a">
+            <span class="fdot w-1.5 h-1.5 rounded-full" style="background:${c}"></span><span class="flabel">${st.label}</span></span>
+          <span class="fspeed text-label-sm text-on-surface-variant">${speed} km/s</span>
         </div>
       </div>
-      ${fuel != null ? `<div class="mb-4 relative">
-        <div class="flex justify-between text-[11px] text-on-surface-variant mb-1"><span>Yakıt</span><span>${fuel}%</span></div>
-        <div class="w-full h-1.5 bg-white/5 rounded-full overflow-hidden"><div class="h-full rounded-full" style="width:${fuel}%;background:${fuel < 20 ? "#ffb4ab" : "#4edea3"}"></div></div></div>` : ""}
+      <div class="ffuel mb-4 relative ${fuel == null ? "hidden" : ""}">
+        <div class="flex justify-between text-[11px] text-on-surface-variant mb-1"><span>Yakıt</span><span class="ffueltxt">${fuel != null ? fuel : 0}%</span></div>
+        <div class="w-full h-1.5 bg-white/5 rounded-full overflow-hidden"><div class="ffuelbar h-full rounded-full transition-all duration-500" style="width:${fuel != null ? fuel : 0}%;background:${fuel != null && fuel < 20 ? "#ffb4ab" : "#4edea3"}"></div></div></div>
       <div class="flex items-start gap-2 text-on-surface-variant mb-4 relative">
         <span class="material-symbols-outlined text-primary text-body-md">location_on</span>
-        <p class="text-label-sm leading-tight">${loc} · ${seen}</p>
+        <p class="floc text-label-sm leading-tight">${loc} · ${seen}</p>
       </div>
       <div class="relative space-y-2">
         <button data-map="${id}" class="w-full py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-label-sm font-bold text-on-surface active:scale-95 transition-all flex items-center justify-center gap-1"><span class="material-symbols-outlined text-body-md">map</span> Haritada gör</button>
@@ -910,18 +910,25 @@
       </div>
     </div>`;
   }
-  function renderFleet() {
-    const grid = $("fleetGrid"); if (!grid) return;
-    const ids = [...vehicles.keys()];
+  // Filtre + arama sonucu gösterilecek araç id'leri (renderFleet ve yerinde
+  // güncelleme aynı mantığı paylaşsın diye tek yerde).
+  function fleetFiltered() {
     const q = ($("fleetSearch") ? $("fleetSearch").value : "").trim().toLocaleLowerCase("tr");
-    const filtered = ids.filter(id => {
+    return [...vehicles.keys()].filter(id => {
       if (q) { const v = vehicles.get(id); if (!v || !(v.plate || "").toLocaleLowerCase("tr").includes(q)) return false; }
       if (fleetFilter === "all") return true;
       const k = stateOf(id).key;
       if (fleetFilter === "move") return k === "move" || k === "vio";  // ihlal = hızlı giden = harekette
       return k === fleetFilter;
     });
-    $("fleetCount").textContent = vehicles.size + " araç yönetiliyor" + ((fleetFilter !== "all" || q) ? " · " + filtered.length + " gösteriliyor" : "");
+  }
+  // Kartların hangi araçlar/sırayla dizildiğinin imzası: değişmediyse DOM'u
+  // yeniden kurmayız (yalnızca yerinde güncelleriz) → 5 sn'de bir titreme olmaz.
+  function renderFleet() {
+    const grid = $("fleetGrid"); if (!grid) return;
+    const filtered = fleetFiltered();
+    fleetSig = filtered.join(",");
+    $("fleetCount").textContent = vehicles.size + " araç yönetiliyor" + ((fleetFilter !== "all" || ($("fleetSearch") && $("fleetSearch").value.trim())) ? " · " + filtered.length + " gösteriliyor" : "");
     $("fleetEmpty").classList.toggle("hidden", vehicles.size > 0);
     grid.innerHTML = filtered.map(fleetCard).join("");
     grid.querySelectorAll("[data-map]").forEach(b => b.onclick = () => showOnMap(+b.dataset.map));
@@ -931,6 +938,38 @@
     grid.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteVehicle(+b.dataset.del));
     renderFleetAlerts();
     updateFleetHealth();
+  }
+  // 5 sn'lik veri yenilemesi: DOM'u yeniden KURMADAN mevcut kartların dinamik
+  // alanlarını (durum çipi, hız, yakıt, konum) yerinde günceller. Yapısal değişiklik
+  // (bir araç filtre kategorisi değiştirip listeye girip çıkması) varsa tam çizer.
+  function refreshFleetCards() {
+    const grid = $("fleetGrid"); if (!grid) return;
+    const filtered = fleetFiltered();
+    if (filtered.join(",") !== fleetSig) { renderFleet(); return; }   // yapı değişti → tam çiz
+    filtered.forEach(id => {
+      const card = grid.querySelector(`[data-fid="${id}"]`); if (!card) return;
+      const p = pos.get(id), st = stateOf(id), c = st.color;
+      const speed = p && p.speedKmh != null ? p.speedKmh : "—";
+      const fuel = p && p.fuelPct != null ? p.fuelPct : null;
+      const loc = p && p.lat != null ? p.lat.toFixed(4) + ", " + p.lon.toFixed(4) : "Konum bekleniyor";
+      const glow = card.querySelector(".fglow"); if (glow) glow.style.background = c + "22";
+      const chip = card.querySelector(".fchip");
+      if (chip) { chip.style.color = c; chip.style.borderColor = c + "55"; chip.style.background = c + "1a"; }
+      const dot = card.querySelector(".fdot"); if (dot) dot.style.background = c;
+      const label = card.querySelector(".flabel"); if (label) label.textContent = st.label;
+      const sp = card.querySelector(".fspeed"); if (sp) sp.textContent = speed + " km/s";
+      const fu = card.querySelector(".ffuel");
+      if (fu) {
+        fu.classList.toggle("hidden", fuel == null);
+        if (fuel != null) {
+          const bar = fu.querySelector(".ffuelbar"); if (bar) { bar.style.width = fuel + "%"; bar.style.background = fuel < 20 ? "#ffb4ab" : "#4edea3"; }
+          const txt = fu.querySelector(".ffueltxt"); if (txt) txt.textContent = fuel + "%";
+        }
+      }
+      const lc = card.querySelector(".floc"); if (lc) lc.textContent = loc + " · " + relTime(p && p.ts);
+    });
+    updateFleetHealth();
+    renderFleetAlerts();
   }
   function renderFleetAlerts() {
     const el = $("fleetAlerts"); if (!el) return;
@@ -1134,6 +1173,10 @@
     } else { // fleet
       live.classList.add("hidden-content"); hist.classList.add("hidden-content");
       clearHistory(); renderFleet(); loadDashboard(); loadMaintenance();
+      // Giriş stagger'ı yalnızca sekme açılışında oynat, sonra sınıfı kaldır ki
+      // veri yenilemesi/filtre tekrar tetiklemesin.
+      const g = $("fleetGrid");
+      if (g) { g.classList.add("anim-cards"); setTimeout(() => g.classList.remove("anim-cards"), 700); }
     }
   };
 
@@ -1157,7 +1200,10 @@
   function initGeofence() {
     const toggle = $("geoToggle"), panel = $("geoPanel");
     if (!toggle || !panel) return;
-    toggle.onclick = () => { const hidden = panel.classList.toggle("hidden"); if (!hidden) loadGeofences(); };
+    toggle.onclick = () => {
+      const qp = $("pairPanel"); if (qp) qp.classList.add("hidden");   // aynı köşede: QR'ı kapat
+      const hidden = panel.classList.toggle("hidden"); if (!hidden) loadGeofences();
+    };
     $("geoClose").onclick = () => { panel.classList.add("hidden"); cancelDraw(); };
     $("geoDrawBtn").onclick = startDraw;
     $("geoCancelBtn").onclick = cancelDraw;
@@ -1326,7 +1372,10 @@
   async function initQr() {
     const panel = $("pairPanel"), qrEl = $("pairQr"), hint = $("pairHint");
     $("pairClose").onclick = () => panel.classList.add("hidden");
-    $("pairBtn").onclick = () => panel.classList.toggle("hidden");
+    $("pairBtn").onclick = () => {
+      const gp = $("geoPanel"); if (gp) gp.classList.add("hidden");   // aynı köşede: Bölgeler'i kapat
+      panel.classList.toggle("hidden");
+    };
     let base = location.origin;
     try { const cfg = await (await fetch("/api/v1/track/config")).json(); if (cfg && cfg.publicUrl) base = cfg.publicUrl.replace(/\/+$/, ""); } catch (_) {}
     const url = base + "/driver.html";
