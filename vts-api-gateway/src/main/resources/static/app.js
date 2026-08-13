@@ -1175,7 +1175,7 @@
       else $("histInfo").textContent = "Soldan bir araç ve gün seç.";
     } else { // fleet
       live.classList.add("hidden-content"); hist.classList.add("hidden-content");
-      clearHistory(); renderFleet(); loadDashboard(); loadMaintenance(); loadInspections();
+      clearHistory(); renderFleet(); loadDashboard(); loadMaintenance(); loadInspections(); loadScorecard();
       // Giriş stagger'ı yalnızca sekme açılışında oynat, sonra sınıfı kaldır ki
       // veri yenilemesi/filtre tekrar tetiklemesin.
       const g = $("fleetGrid");
@@ -1300,6 +1300,38 @@
       loadGeofences();
     } catch (_) {}
   };
+
+  // ── Araç/sürücü karnesi (leaderboard) ─────────────────────────────────────
+  const GRADE_CLS = { A: "bg-primary/15 text-primary", B: "bg-blue-500/15 text-blue-400", C: "bg-amber-500/15 text-amber-400", D: "bg-error/15 text-error" };
+  const RANK_MARK = { 1: "🥇", 2: "🥈", 3: "🥉" };
+
+  async function loadScorecard() {
+    const el = $("scorecardList"); if (!el) return;
+    try {
+      const r = await fetch("/api/v1/scorecard", { headers: auth() });
+      if (!r.ok) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Yüklenemedi.</div>`; return; }
+      renderScorecard(await r.json());
+    } catch (_) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Bağlantı hatası.</div>`; }
+  }
+
+  function renderScorecard(rows) {
+    const el = $("scorecardList"); if (!el) return;
+    if (!rows.length) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Araç yok.</div>`; return; }
+    el.innerHTML = rows.map(r => {
+      const g = GRADE_CLS[r.grade] || GRADE_CLS.D;
+      const mark = RANK_MARK[r.rank] || `<span class="text-on-surface-variant font-bold w-5 inline-block text-center">${r.rank}</span>`;
+      const vio = r.violations > 0 ? `${r.violations} ihlal` : "temiz";
+      return `<div class="flex items-center gap-2 bg-white/5 rounded-lg px-2.5 py-1.5">
+        <span class="text-body-md w-5 text-center">${mark}</span>
+        <div class="min-w-0 flex-1">
+          <div class="text-body-md font-bold text-on-surface truncate">${esc(r.plate)}</div>
+          <div class="text-[10px] ${r.severe > 0 ? "text-error" : "text-on-surface-variant"}">${vio}</div>
+        </div>
+        <span class="text-body-md font-bold text-on-surface tabular-nums">${r.score}</span>
+        <span class="shrink-0 w-6 h-6 flex items-center justify-center rounded-lg text-[11px] font-black ${g}">${r.grade}</span>
+      </div>`;
+    }).join("");
+  }
 
   // ── Araç kontrolleri (DVIR) ───────────────────────────────────────────────
   let inspDefectsOnly = false;
