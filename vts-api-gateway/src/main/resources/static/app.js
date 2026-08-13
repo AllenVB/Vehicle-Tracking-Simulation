@@ -24,6 +24,12 @@
   const $ = id => document.getElementById(id);
   const auth = () => ({ Authorization: "Bearer " + token });
   const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // Sağ-üstteki yüzen paneller aynı köşeyi paylaşır; aynı anda yalnızca biri açık kalsın
+  // diye her açıcı önce diğerlerini kapatır (except = açılacak panelin id'si, korunur).
+  const FLOATING_PANELS = ["geoPanel", "jobPanel", "pairPanel", "bellPanel", "bcastComposer"];
+  const closeFloatingPanels = except => FLOATING_PANELS.forEach(id => {
+    if (id !== except) { const e = $(id); if (e) e.classList.add("hidden"); }
+  });
   const RULE_TR = { SPEED_LIMIT: "Hız aşımı", HARSH_BRAKING: "Sert fren", HARSH_ACCELERATION: "Ani hızlanma", HARSH_ACCEL: "Ani hızlanma", HARSH_CORNERING: "Sert viraj", IDLING: "Uzun rölanti", GEOFENCE: "Bölge ihlali", ROUTE_DEVIATION: "Rota sapması" };
   const ruleLabel = c => RULE_TR[c] || c || "İhlal";
   // "Son görülme" relatif zaman: az önce / N dk önce / N sa önce / N gün önce.
@@ -418,8 +424,9 @@
   function initBroadcast() {
     const composer = $("bcastComposer"), panel = $("bellPanel");
     const pop = el => { el.classList.remove("anim-pop"); void el.offsetWidth; el.classList.add("anim-pop"); };
-    $("bcastComposeBtn").onclick = e => { e.stopPropagation(); panel.classList.add("hidden"); composer.classList.toggle("hidden");
-      if (!composer.classList.contains("hidden")) { pop(composer); $("bcastBody").focus(); } };
+    $("bcastComposeBtn").onclick = e => { e.stopPropagation();
+      const show = composer.classList.contains("hidden"); closeFloatingPanels();
+      if (show) { composer.classList.remove("hidden"); pop(composer); $("bcastBody").focus(); } };
     $("bcastClose").onclick = () => composer.classList.add("hidden");
     // Önem seçici (Bilgi/Acil) — segmented toggle.
     document.querySelectorAll(".bcast-sev").forEach(btn => btn.onclick = () => {
@@ -438,8 +445,9 @@
     });
     $("bcastSend").onclick = sendBroadcast;
     $("bcastBody").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendBroadcast(); });
-    $("bellBtn").onclick = e => { e.stopPropagation(); composer.classList.add("hidden");
-      panel.classList.toggle("hidden"); if (!panel.classList.contains("hidden")) pop(panel); };   // okundu = kullanıcı işaretler
+    $("bellBtn").onclick = e => { e.stopPropagation();
+      const show = panel.classList.contains("hidden"); closeFloatingPanels();
+      if (show) { panel.classList.remove("hidden"); pop(panel); } };   // okundu = kullanıcı işaretler
     $("bellClear").onclick = markBroadcastsRead;
     // Panel/composer/QR dışına tıklayınca kapan.
     const qrPanel = $("pairPanel");
@@ -990,13 +998,14 @@
 
   // ── Geçmiş rota (gün seçici + playback) ──────────────────────────────────
   let histLayer = null, histVeh = null, histDay = 0, histPrev = null, histPts = [];
+  const HIST_DAYS_BACK = 29;   // bugün dahil son 30 gün (backend daysAgo'yu 0..29 clamp'ler)
   let histVios = [], speedVios = [];   // 6b: seçili araç+günün gerçek ihlalleri / hız ihlalleri
   let histScore = null;                // {score, ecoScore, distanceKm} — o günün ihlallerinden
   function currentDay() { const el = $("daySelect"); return el ? (parseInt(el.value, 10) || 0) : 0; }
   function dayLabel(d) { return new Date(Date.now() - d * 86400000).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", weekday: "short" }); }
   function initDaySelect() {
     const sel = $("daySelect");
-    for (let d = 0; d <= 6; d++) { const o = document.createElement("option"); o.value = String(d); o.textContent = d === 0 ? "Bugün · " + dayLabel(0) : dayLabel(d); sel.appendChild(o); }
+    for (let d = 0; d <= HIST_DAYS_BACK; d++) { const o = document.createElement("option"); o.value = String(d); o.textContent = d === 0 ? "Bugün · " + dayLabel(0) : dayLabel(d); sel.appendChild(o); }
     sel.onchange = () => { const vid = +$("histVehicle").value; if (vid) loadHistory(vid, currentDay(), false); };
     $("histVehicle").onchange = () => { const vid = +$("histVehicle").value; if (vid) { select(vid); loadHistory(vid, currentDay(), true); } };
     $("histExport").onclick = exportCsv;
@@ -1071,7 +1080,7 @@
   async function loadHistory(id, day, autoFind) {
     clearHistory(); histVeh = id; histDay = day;
     let pts = await fetchDay(id, day);
-    if (autoFind && !pts.length) { for (let d = day + 1; d <= 6; d++) { const p2 = await fetchDay(id, d); if (p2.length) { day = d; histDay = d; pts = p2; $("daySelect").value = String(d); break; } } }
+    if (autoFind && !pts.length) { for (let d = day + 1; d <= HIST_DAYS_BACK; d++) { const p2 = await fetchDay(id, d); if (p2.length) { day = d; histDay = d; pts = p2; $("daySelect").value = String(d); break; } } }
     if (id !== histVeh) return;
     histVios = await fetchDayViolations(id, pts);            // 6b: gerçek ihlaller (çizimden önce)
     if (id !== histVeh) return;                              // await sırasında seçim değişebilir
@@ -1204,9 +1213,9 @@
     const toggle = $("geoToggle"), panel = $("geoPanel");
     if (!toggle || !panel) return;
     toggle.onclick = () => {
-      const qp = $("pairPanel"); if (qp) qp.classList.add("hidden");   // aynı köşede: QR'ı kapat
-      const jp = $("jobPanel"); if (jp) jp.classList.add("hidden");    // ve Görevler'i kapat
-      const hidden = panel.classList.toggle("hidden"); if (!hidden) loadGeofences();
+      const show = panel.classList.contains("hidden");
+      closeFloatingPanels();                       // aynı köşedeki diğer panelleri kapat
+      if (show) { panel.classList.remove("hidden"); loadGeofences(); }
     };
     $("geoClose").onclick = () => { panel.classList.add("hidden"); cancelDraw(); };
     $("geoDrawBtn").onclick = startDraw;
@@ -1390,10 +1399,9 @@
     if (!toggle || !panel) return;
     jobLayer = L.layerGroup().addTo(map);
     toggle.onclick = () => {
-      $("pairPanel") && $("pairPanel").classList.add("hidden");
-      $("geoPanel") && $("geoPanel").classList.add("hidden");
-      const hidden = panel.classList.toggle("hidden");
-      if (!hidden) loadJobs(); else exitJobAssign();
+      const show = panel.classList.contains("hidden");
+      closeFloatingPanels();                       // aynı köşedeki diğer panelleri kapat
+      if (show) { panel.classList.remove("hidden"); loadJobs(); } else exitJobAssign();
     };
     $("jobClose").onclick = () => { panel.classList.add("hidden"); exitJobAssign(); };
     $("jobAssignBtn").onclick = assignJob;
@@ -1466,8 +1474,7 @@
   function startJobAssign(vehicleId) {
     const v = vehicles.get(vehicleId); if (!v) return;
     jobAssignVehicle = vehicleId; jobPendingDest = null;
-    $("pairPanel") && $("pairPanel").classList.add("hidden");
-    $("geoPanel") && $("geoPanel").classList.add("hidden");
+    closeFloatingPanels("jobPanel");               // Görevler dışındaki köşe panellerini kapat
     $("jobPanel").classList.remove("hidden");
     $("jobForm").classList.remove("hidden");
     $("jobFormPlate").textContent = v.plate;
@@ -1595,9 +1602,9 @@
     const panel = $("pairPanel"), qrEl = $("pairQr"), hint = $("pairHint");
     $("pairClose").onclick = () => panel.classList.add("hidden");
     $("pairBtn").onclick = () => {
-      const gp = $("geoPanel"); if (gp) gp.classList.add("hidden");   // aynı köşede: Bölgeler'i kapat
-      const jp = $("jobPanel"); if (jp) jp.classList.add("hidden");   // ve Görevler'i kapat
-      panel.classList.toggle("hidden");
+      const show = panel.classList.contains("hidden");
+      closeFloatingPanels();                       // aynı köşedeki diğer panelleri kapat
+      if (show) panel.classList.remove("hidden");
     };
     let base = location.origin;
     try { const cfg = await (await fetch("/api/v1/track/config")).json(); if (cfg && cfg.publicUrl) base = cfg.publicUrl.replace(/\/+$/, ""); } catch (_) {}
