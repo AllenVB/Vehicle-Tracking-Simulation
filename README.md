@@ -6,9 +6,7 @@ sürücünün telefonundaki tarayıcı-içi GPS izleyici veya ham TCP konuşan b
 harita üzerinde canlı** izlenir. Üç arayüz aynı gateway'den sunulur: operatör konsolu, sürücü
 uygulaması (PWA) ve müşteriye açık takip linki.
 
-<img width="1920" height="1001" alt="ff1" src="https://github.com/user-attachments/assets/83f6d979-179e-4a04-aef3-9b5667a3b69c" />
-<img width="1920" height="1004" alt="ff geçmiş" src="https://github.com/user-attachments/assets/d8749096-2672-448c-abe5-ee479fd4e2e6" />
-<img width="1920" height="1009" alt="ff filo" src="https://github.com/user-attachments/assets/7a1b5a85-beaf-4856-9d63-47ee80b6ca78" />
+![FleetFlow — Canlı Harita](docs/screenshots/01-canli-harita.png)
 
 ---
 
@@ -130,24 +128,42 @@ cihaz girerse mevcut telefon **409** alır ve akışı durdurup yeniden giriş i
 
 Giriş: `admin` / `password` (JWT arka planda alınır).
 
+#### Canlı harita
+
+![Operatör konsolu — Canlı Harita](docs/screenshots/01-canli-harita.png)
+
 - **Canlı harita:** Tüm filo tek WebSocket aboneliğinden beslenir (polling yok); marker kümeleme,
   plaka etiketleri, ihlal/durak renk kodları, viewport (bbox) filtresi.
-- **Geçmiş oynatma:** Araç + gün seçilir; günün izi harita üzerinde oynatılır, hız/eco/skor özeti.
-- **Filo yönetimi:** Araç ekle/sil, sürücü şifresi ata/göster, CSV filo raporu, plaka arama/filtre.
-  Kartlar 5 sn'de bir **yerinde** güncellenir (yeniden kurulmaz → titremez).
 - **Bölgeler (geofence):** Haritaya **poligon çizerek** yasak/güvenli bölge oluşturma
   (`POST /api/v1/geofences`); silmek yerine `active=false` (ihlal geçmişi bölgeye referans verir).
   Kural motoru listeyi 60 sn'de bir yeniler.
 - **Görev atama + ETA:** Araç seçilip haritada hedef tıklanır; sürücüye görev düşer, operatör aktif
   görevleri **canlı ETA** ile izler (haversine, anlık hız). Müşteri linki de hedef + ETA gösterir.
+- **Duyuru + mesajlaşma:** Operatör tüm sürücülere genel duyuru yayınlar (banner + çan); araç bazlı
+  metin/sesli mesajlaşma (WebSocket). Sağ-üstteki paneller (Bölgeler / Görevler / QR / bildirim /
+  duyuru) tek merkezden senkron — aynı anda yalnızca biri açık.
+
+#### Filo, karne, bakım ve araç kontrolleri
+
+![Operatör konsolu — Filo](docs/screenshots/02-filo.png)
+
+![Operatör konsolu — Araç Karnesi · Bakım · DVIR](docs/screenshots/03-filo-karne-bakim-dvir.png)
+
+- **Filo yönetimi:** Araç ekle/sil, sürücü şifresi ata/göster, CSV filo raporu, plaka arama/filtre.
+  Kartlar 5 sn'de bir **yerinde** güncellenir (yeniden kurulmaz → titremez).
+- **Araç karnesi:** Son 30 günün ihlallerinden araç/sürücü başına **0–100 güvenlik puanı + A/B/C/D
+  notu** ve sıralama (leaderboard, 🥇🥈🥉 ilk üç).
 - **Bakım takibi:** Km/tarih tabanlı planlar; **durumu sürücü işaretler** (Bekleniyor → Bakımda →
   Yapıldı), operatör salt-okunur rozet görür.
 - **Araç kontrolleri (DVIR):** Sürücünün gönderdiği sefer-öncesi kontrol listeleri; kusurlu maddeler
   kırmızı işaretlenir, "sadece kusurlu" filtresi.
-- **Araç karnesi:** Son 30 günün ihlallerinden araç/sürücü başına **0–100 güvenlik puanı + A/B/C/D
-  notu** ve sıralama (leaderboard).
-- **Duyuru + mesajlaşma:** Operatör tüm sürücülere genel duyuru yayınlar (banner + çan); araç bazlı
-  metin/sesli mesajlaşma (WebSocket).
+
+#### Geçmiş oynatma
+
+![Operatör konsolu — Geçmiş oynatma](docs/screenshots/04-gecmis.png)
+
+- **Geçmiş oynatma:** Araç + gün seçilir (**son 30 gün**); günün izi harita üzerinde oynatılır,
+  toplam mesafe / ihlal / durak, hız/eco/skor özeti ve CSV dışa aktarma.
 
 ### 2) Sürücü uygulaması (PWA) — `/driver.html`
 
