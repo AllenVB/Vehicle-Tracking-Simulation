@@ -676,6 +676,7 @@
       };
       setTimeout(remeasure, 80);
       setTimeout(remeasure, 380);
+      setTimeout(updateMapJob, 200);   // aktif görev varsa hedef + çizgi + navigasyon göster
     }
     if (id === "tabAnnounce") clearAnnounceBadge();
     if (id === "tabMaintenance") { clearMtnBadge(); loadMaintenance(); }
@@ -683,6 +684,7 @@
 
   // ── Gömülü harita (kendi konum + rota izi) ────────────────────────────────
   var lmap = null, meMarker = null, trail = null, trailPts = [], mapFollow = true, mapReady = false;
+  var jobDestMarker = null, jobDestLine = null;
   function initMap() {
     if (mapReady || typeof L === "undefined") return;
     lmap = L.map("map", { zoomControl: true, attributionControl: false }).setView([41.02, 29.0], 15);
@@ -701,6 +703,36 @@
     if (!meMarker) meMarker = L.marker([lat, lon], { icon: meIcon(), zIndexOffset: 1000 }).addTo(lmap);
     else meMarker.setLatLng([lat, lon]);
     if (mapFollow) lmap.panTo([lat, lon], { animate: true, duration: .4 });
+  }
+
+  // Görev haritada: hedef işareti (📍) + konumdan hedefe kesikli çizgi + navigasyon butonu.
+  // "Harita kısmına tıklandığında hedefe GPS açılsın": hedef işaretine veya butona dokun.
+  function openJobNav() {
+    if (!curJob) return;
+    window.open("https://www.google.com/maps/dir/?api=1&destination=" + curJob.destLat + "," + curJob.destLon, "_blank");
+  }
+  function updateMapJob() {
+    var nb = $("mapNavBtn");
+    if (!mapReady || !lmap) return;
+    var active = curJob && curJob.status !== "DONE" && curJob.destLat != null;
+    if (!active) {
+      if (jobDestMarker) { lmap.removeLayer(jobDestMarker); jobDestMarker = null; }
+      if (jobDestLine) { lmap.removeLayer(jobDestLine); jobDestLine = null; }
+      if (nb) nb.style.display = "none";
+      return;
+    }
+    var dll = [Number(curJob.destLat), Number(curJob.destLon)];
+    if (!jobDestMarker) {
+      jobDestMarker = L.marker(dll, { icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 30],
+        html: '<span style="font-size:26px;filter:drop-shadow(0 1px 2px #000)">📍</span>' }) }).addTo(lmap);
+      jobDestMarker.on("click", openJobNav);
+    } else jobDestMarker.setLatLng(dll);
+    var me = meMarker ? meMarker.getLatLng() : (lastFix ? L.latLng(lastFix.lat, lastFix.lon) : null);
+    if (me) {
+      if (!jobDestLine) jobDestLine = L.polyline([me, dll], { color: "#00f5d4", weight: 3, dashArray: "6 8", opacity: .8 }).addTo(lmap);
+      else jobDestLine.setLatLngs([me, dll]);
+    }
+    if (nb) { nb.style.display = ""; nb.onclick = openJobNav; }
   }
   // "Bugün" mini özeti (mesafe/süre/durak) — iz noktalarından türetilir.
   var tripDistM = 0, tripStartMs = 0, tripStops = 0, stopStartMs = 0, stopCounted = false;
@@ -724,6 +756,7 @@
     placeMe(lat, lon);
     var ms = $("mapSpeed"); if (ms) ms.textContent = speedKmh == null ? "–" : speedKmh;
     updateTripSummary();
+    updateMapJob();   // araç ilerledikçe hedefe çizgi ucu takip etsin
   }
   function updateTripSummary() {
     var d = $("tripDist"); if (d) d.textContent = (tripDistM / 1000).toFixed(1);
@@ -957,8 +990,8 @@
 
   // ── Görev (admin atar; sürücü durumu ilerletir) ──────────────────────────
   var JOB_POLL_MS = 20000, jobTimer = null, jobPolling = false, curJob = null;
-  var JOB_BADGE = { ASSIGNED: "PENDING", EN_ROUTE: "IN_PROGRESS", ARRIVED: "DONE" };
-  var JOB_LABEL = { ASSIGNED: "Atandı", EN_ROUTE: "Yolda", ARRIVED: "Vardı" };
+  var JOB_BADGE = { ASSIGNED: "PENDING", EN_ROUTE: "IN_PROGRESS", ARRIVED: "DONE", DONE: "DONE" };
+  var JOB_LABEL = { ASSIGNED: "Atandı", EN_ROUTE: "Yolda", ARRIVED: "Vardı", DONE: "Tamamlandı" };
 
   function startJob() {
     if (jobTimer) clearInterval(jobTimer);
@@ -983,7 +1016,7 @@
 
   function renderJob() {
     var card = $("jobCard"); if (!card) return;
-    if (!curJob) { card.classList.add("hidden"); return; }
+    if (!curJob) { card.classList.add("hidden"); updateMapJob(); return; }
     card.classList.remove("hidden");
     $("jobCardTitle").textContent = curJob.title || "Görev";
     var badge = $("jobCardBadge");
@@ -995,6 +1028,12 @@
     if (curJob.etaMin != null) bits.push("~" + curJob.etaMin + " dk");
     $("jobCardSub").textContent = bits.join(" · ") || "Hedefe git";
     $("jobNavBtn").href = "https://www.google.com/maps/dir/?api=1&destination=" + curJob.destLat + "," + curJob.destLon;
+    // Aksiyon butonları: aktif durumu vurgula, hepsini tekrar etkinleştir (kart kaybolmaz).
+    card.querySelectorAll(".mtnActions button").forEach(function (b) {
+      b.disabled = false;
+      b.classList.toggle("on", b.getAttribute("data-jst") === curJob.status);
+    });
+    updateMapJob();   // harita sekmesindeki hedef işareti + çizgiyi güncelle
   }
 
   function setJobStatus(status, btn) {
@@ -1006,7 +1045,14 @@
       body: JSON.stringify({ status: status })
     })
       .then(function (r) { if (!r.ok) throw 0; return r.json(); })
-      .then(function () { if (navigator.vibrate) navigator.vibrate(40); pollJob(); })
+      .then(function () {
+        if (navigator.vibrate) navigator.vibrate(40);
+        curJob.status = status;   // iyimser: kart kaybolmadan yeni durumu göster
+        renderJob();
+        // DONE: kart "Tamamlandı" olarak kalır; hemen poll etme (poll boş döner, kart yok olurdu).
+        // EN_ROUTE/ARRIVED: poll ile ETA'yı tazele.
+        if (status !== "DONE") pollJob();
+      })
       .catch(function () { if (btn) btn.disabled = false; });
   }
 

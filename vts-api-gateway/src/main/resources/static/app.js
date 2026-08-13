@@ -245,6 +245,7 @@
     if (id == null) { ov.classList.add("hidden"); followId = null; clearSelTrack(); if (view === "history") clearHistory(); return; }
     updateOverlay();
     loadTrip(id);
+    drawSelectedJobLine();   // araç seçilince görev hedefine çizgi (varsa)
     ov.classList.remove("hidden");
     const p = pos.get(id);
     if (p && view === "live") map.panTo([p.lat, p.lon]);
@@ -264,7 +265,10 @@
     if (latlngs.length < 2) return;
     selTrackLayer = L.polyline(latlngs, { color: "#3b82f6", weight: 4, opacity: .8 }).addTo(map);
   }
-  function clearSelTrack() { if (selTrackLayer) { map.removeLayer(selTrackLayer); selTrackLayer = null; } }
+  function clearSelTrack() {
+    if (selTrackLayer) { map.removeLayer(selTrackLayer); selTrackLayer = null; }
+    if (selJobLine) { map.removeLayer(selJobLine); selJobLine = null; }
+  }
   function updateOverlay() {
     const v = vehicles.get(selected), p = pos.get(selected);
     $("selTitle").textContent = "#" + (v ? v.trackId : "?") + " · " + (v ? v.plate : "");
@@ -1386,7 +1390,7 @@
   }
 
   // ── Görev atama + ETA ─────────────────────────────────────────────────────
-  let jobLayer = null, jobs = [], jobTimer = null;
+  let jobLayer = null, jobs = [], jobTimer = null, selJobLine = null;
   let jobAssignVehicle = null, jobPendingDest = null, jobPickMarker = null, jobPicking = false;
   const JOB_STATUS = {
     ASSIGNED: { label: "Atandı", cls: "bg-amber-500/15 text-amber-400", color: "#f5b43c" },
@@ -1407,7 +1411,9 @@
     $("jobAssignBtn").onclick = assignJob;
     $("jobCancelBtn").onclick = exitJobAssign;
     loadJobs();
-    jobTimer = setInterval(() => { if (!$("jobPanel").classList.contains("hidden") || jobLayer.getLayers().length) loadJobs(); }, 15000);
+    // Koşulsuz 15 sn yenileme: sürücü durum değişikliği (Yolda/Vardı/Tamamlandı) admin
+    // görev paneline ve haritaya gecikmeden yansısın (geri bildirim görünürlüğü).
+    jobTimer = setInterval(loadJobs, 15000);
   }
 
   async function loadJobs() {
@@ -1417,27 +1423,34 @@
       jobs = await r.json();
       renderJobLayers();
       renderJobList();
+      drawSelectedJobLine();   // seçili aracın hedef çizgisini güncel tut
     } catch (_) {}
   }
 
+  // Hedef markörleri: tüm aktif görevler için (çizgi değil — çizgi seçime bağlı).
   function renderJobLayers() {
     if (!jobLayer) return;
     jobLayer.clearLayers();
     jobs.forEach(j => {
       const st = JOB_STATUS[j.status] || JOB_STATUS.ASSIGNED;
-      const dest = [j.destLat, j.destLon];
-      L.marker(dest, {
+      L.marker([j.destLat, j.destLon], {
         icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 30], html:
-          `<div style="display:flex;flex-direction:column;align-items:center">
-             <span class="material-symbols-outlined" style="font-size:28px;color:${st.color};text-shadow:0 1px 3px #000">place</span>
-           </div>` })
-      }).bindTooltip(`${esc(j.title)}${j.etaMin != null ? " · ~" + j.etaMin + " dk" : ""}`, { className: "plate-label", direction: "top", offset: [0, -26] }).addTo(jobLayer);
-      // Aracın anlık konumundan hedefe kesikli çizgi
-      const p = pos.get(j.vehicleId);
-      if (p && p.lat != null) {
-        L.polyline([[p.lat, p.lon], dest], { color: st.color, weight: 2, dashArray: "6 8", opacity: .8 }).addTo(jobLayer);
-      }
+          `<span class="material-symbols-outlined" style="font-size:28px;color:${st.color};text-shadow:0 1px 3px #000">place</span>` })
+      }).bindTooltip(`${esc(j.plate)} · ${esc(j.title)}${j.etaMin != null ? " · ~" + j.etaMin + " dk" : ""}`, { className: "plate-label", direction: "top", offset: [0, -26] }).addTo(jobLayer);
     });
+  }
+
+  // Araca tıklanınca o aracın görev hedefine doğru vurgulu kesikli çizgi.
+  function drawSelectedJobLine() {
+    if (selJobLine) { map.removeLayer(selJobLine); selJobLine = null; }
+    if (selected == null || view !== "live") return;
+    const job = jobs.find(j => j.vehicleId === selected);
+    if (!job) return;
+    const p = pos.get(selected);
+    if (!p || p.lat == null) return;   // araç konumu yoksa çizgi çizilemez (hedef markörü yine görünür)
+    const st = JOB_STATUS[job.status] || JOB_STATUS.ASSIGNED;
+    selJobLine = L.polyline([[p.lat, p.lon], [job.destLat, job.destLon]],
+      { color: st.color, weight: 3.5, dashArray: "8 8", opacity: .95 }).addTo(map);
   }
 
   function renderJobList() {
