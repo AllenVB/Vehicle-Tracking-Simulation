@@ -174,6 +174,14 @@
     /* Durum rozeti renk geçişi (Bekleniyor→Bakımda→Yapıldı yumuşasın) */
     .mtnBadge { transition: background-color .35s ease, color .35s ease; }
 
+    /* ── Sefer öncesi araç kontrolü (DVIR) ──────────────────────── */
+    .inspRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+    .inspRow .nm { font-size: 14px; font-weight: 600; }
+    .inspBtns { display: flex; gap: 6px; }
+    .inspBtns button { margin: 0; width: auto; padding: 7px 13px; border-radius: 10px; border: 1px solid var(--line); background: #0b1220; color: var(--muted); font-weight: 700; font-size: 12px; transition: all .15s; }
+    .inspBtns button.ok { border-color: var(--teal); color: var(--teal); background: rgba(0,245,212,.10); }
+    .inspBtns button.bad { border-color: var(--danger); color: var(--danger); background: rgba(255,93,108,.12); }
+
     /* ── Üstten düşen duyuru banner'ı ───────────────────────── */
     .bcastBanner { position: fixed; left: 50%; transform: translateX(-50%); z-index: 60;
       width: calc(100% - 24px); max-width: 500px; background: rgba(18,50,74,.97);
@@ -313,6 +321,15 @@
       <div id="tabMaintenance" class="tabPanel card hidden">
         <div class="sectionLabel">Aracın bakımları</div>
         <div id="mtnList" class="mtnList"><div class="note" style="text-align:left">Bakım bilgisi yükleniyor…</div></div>
+
+        <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px">
+          <div class="sectionLabel">Sefer öncesi araç kontrolü</div>
+          <div id="inspList"></div>
+          <input id="inspNote" placeholder="Not (opsiyonel — kusur açıklaması)" maxlength="500"
+                 style="width:100%;margin-top:10px;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1220;color:var(--text);font-size:14px">
+          <button id="inspSubmit" style="margin-top:10px">Kontrolü gönder</button>
+          <div id="inspResult" class="note" style="text-align:left;margin-top:8px"></div>
+        </div>
       </div>
 
       <!-- Alt navigasyon -->

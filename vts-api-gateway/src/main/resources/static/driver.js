@@ -116,6 +116,7 @@
     startBroadcasts();
     startMaintenance();
     startJob();
+    buildInspection();
   }
 
   $("stopBtn").onclick = function () {
@@ -1007,6 +1008,53 @@
       .then(function (r) { if (!r.ok) throw 0; return r.json(); })
       .then(function () { if (navigator.vibrate) navigator.vibrate(40); pollJob(); })
       .catch(function () { if (btn) btn.disabled = false; });
+  }
+
+  // ── Sefer öncesi araç kontrolü (DVIR) ─────────────────────────────────────
+  var INSP_ITEMS = [["tires", "Lastikler"], ["brakes", "Frenler"], ["lights", "Far & sinyaller"],
+    ["fluids", "Sıvı seviyeleri"], ["body", "Kaporta & hasar"], ["horn", "Korna & aynalar"]];
+  var inspState = {}, inspBuilt = false;
+
+  function buildInspection() {
+    if (inspBuilt) return;
+    var box = $("inspList"); if (!box) return;
+    inspBuilt = true;
+    box.innerHTML = "";
+    INSP_ITEMS.forEach(function (it) {
+      var key = it[0];
+      inspState[key] = "ok";   // varsayılan: iyi (tek dokunuşla "hepsi iyi" gönderilebilir)
+      var row = document.createElement("div"); row.className = "inspRow";
+      var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = it[1];
+      var btns = document.createElement("div"); btns.className = "inspBtns";
+      var ok = document.createElement("button"); ok.textContent = "İyi"; ok.className = "ok";
+      var bad = document.createElement("button"); bad.textContent = "Kusurlu";
+      ok.onclick = function () { inspState[key] = "ok"; ok.className = "ok"; bad.className = ""; };
+      bad.onclick = function () { inspState[key] = "defect"; bad.className = "bad"; ok.className = ""; };
+      btns.appendChild(ok); btns.appendChild(bad);
+      row.appendChild(nm); row.appendChild(btns); box.appendChild(row);
+    });
+    var btn = $("inspSubmit"); if (btn) btn.onclick = submitInspection;
+  }
+
+  function submitInspection() {
+    if (!session) return;
+    var btn = $("inspSubmit"), res = $("inspResult");
+    btn.disabled = true;
+    fetch("/api/v1/track/inspection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Device-Session": session.sessionToken },
+      body: JSON.stringify({ items: inspState, note: ($("inspNote").value || "").trim() })
+    })
+      .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function (d) {
+        if (navigator.vibrate) navigator.vibrate(60);
+        res.style.color = d.overall === "DEFECT" ? "var(--danger)" : "var(--teal)";
+        res.textContent = d.overall === "DEFECT"
+          ? "Kusur bildirildi — merkez bilgilendirildi." : "Kontrol tamam — araç uygun. Teşekkürler.";
+        $("inspNote").value = "";
+      })
+      .catch(function () { res.style.color = "var(--danger)"; res.textContent = "Gönderilemedi, tekrar dene."; })
+      .then(function () { btn.disabled = false; });
   }
 
   // ── PWA service worker ────────────────────────────────────────────────────

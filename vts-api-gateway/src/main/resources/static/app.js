@@ -84,6 +84,7 @@
     initGeofence();
     initJobs();
     initMaintenance();
+    initInspections();
     initChat();
     initBroadcast();
     Promise.all([loadBroadcasts(), loadInbox()]).then(seedReadOnce);   // ilk açılışta geçmiş = okundu
@@ -1174,7 +1175,7 @@
       else $("histInfo").textContent = "Soldan bir araç ve gün seç.";
     } else { // fleet
       live.classList.add("hidden-content"); hist.classList.add("hidden-content");
-      clearHistory(); renderFleet(); loadDashboard(); loadMaintenance();
+      clearHistory(); renderFleet(); loadDashboard(); loadMaintenance(); loadInspections();
       // Giriş stagger'ı yalnızca sekme açılışında oynat, sonra sınıfı kaldır ki
       // veri yenilemesi/filtre tekrar tetiklemesin.
       const g = $("fleetGrid");
@@ -1299,6 +1300,49 @@
       loadGeofences();
     } catch (_) {}
   };
+
+  // ── Araç kontrolleri (DVIR) ───────────────────────────────────────────────
+  let inspDefectsOnly = false;
+  const INSP_LABELS = { tires: "Lastik", brakes: "Fren", lights: "Far", fluids: "Sıvı", body: "Kaporta", horn: "Korna" };
+
+  function initInspections() {
+    const t = $("inspDefectsToggle");
+    if (t) t.onclick = () => {
+      inspDefectsOnly = !inspDefectsOnly;
+      t.classList.toggle("text-error", inspDefectsOnly);
+      t.classList.toggle("text-on-surface-variant", !inspDefectsOnly);
+      t.textContent = inspDefectsOnly ? "Tümünü göster" : "Sadece kusurlu";
+      loadInspections();
+    };
+  }
+
+  async function loadInspections() {
+    const el = $("inspectionList"); if (!el) return;
+    try {
+      const r = await fetch("/api/v1/inspections?defectsOnly=" + inspDefectsOnly, { headers: auth() });
+      if (!r.ok) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Yüklenemedi.</div>`; return; }
+      renderInspections(await r.json());
+    } catch (_) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">Bağlantı hatası.</div>`; }
+  }
+
+  function renderInspections(items) {
+    const el = $("inspectionList"); if (!el) return;
+    if (!items.length) { el.innerHTML = `<div class="text-label-sm text-on-surface-variant">${inspDefectsOnly ? "Kusurlu kontrol yok." : "Sefer öncesi kontrol kaydı yok."}</div>`; return; }
+    el.innerHTML = items.map(it => {
+      const defect = it.overall === "DEFECT";
+      let defects = [];
+      try { const m = JSON.parse(it.items || "{}"); defects = Object.keys(m).filter(k => m[k] === "defect").map(k => INSP_LABELS[k] || k); } catch (_) {}
+      const when = it.inspectedAt ? relTime(it.inspectedAt) : "";
+      return `<div class="bg-white/5 rounded-lg px-3 py-2">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-body-md font-bold text-on-surface truncate">${esc(it.plate)}</span>
+          <span class="shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold ${defect ? "bg-error/15 text-error" : "bg-primary/15 text-primary"}">${defect ? "Kusurlu" : "Uygun"}</span>
+        </div>
+        <div class="text-[10px] mt-0.5 ${defect ? "text-error" : "text-on-surface-variant"}">${when}${defects.length ? " · " + defects.join(", ") : ""}</div>
+        ${it.note ? `<div class="text-[10px] mt-1 text-on-surface-variant italic">“${esc(it.note)}”</div>` : ""}
+      </div>`;
+    }).join("");
+  }
 
   // ── Görev atama + ETA ─────────────────────────────────────────────────────
   let jobLayer = null, jobs = [], jobTimer = null;
