@@ -417,3 +417,6 @@ Bir ölçüm birden çok servisten geçtiği için "harita neden geç güncellen
 zaman çizelgesinde görünür (http://localhost:16686). Örnekleme **%2** (`TRACING_SAMPLE_RATE`); Kafka
 propagasyonu (`spring.kafka.*.observation-enabled`) olmadan zincir Kafka'da kopar. İzler bellekte
 tutulur, kalıcı değildir.
+
+
+Sistem şuan geliştirilme aşamasında . Mobile app ile desteklenerek kullanışlı bir uygulama yapmak hedefim.
