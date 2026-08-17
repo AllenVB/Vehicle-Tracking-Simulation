@@ -211,6 +211,7 @@
     const btn = $("plateToggle");
     if (btn) { btn.classList.toggle("text-primary", showPlates); btn.classList.toggle("text-on-surface-variant", !showPlates); }
     markers.forEach((m, id) => applyPlateLabel(m, id));
+    if (pbMarker && histVeh != null) applyPlateLabel(pbMarker, histVeh);   // geçmiş oynatma marker'ı da
     if (cluster) cluster.refreshClusters();
   }
   function sweep() { pos.forEach(p => drawMarker(p)); updateStats(); refreshCards(); if (cluster && view !== "history") cluster.refreshClusters(); if (selected != null) updateOverlay(); if (view === "fleet") refreshFleetCards(); }
@@ -1139,6 +1140,7 @@
       html: `<div style="width:16px;height:16px;border-radius:50%;background:#4edea3;border:3px solid #131313;box-shadow:0 0 12px rgba(78,222,163,.9)"></div>` });
     if (!pbMarker) pbMarker = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1000 }).addTo(map);
     else { pbMarker.setLatLng([p.lat, p.lon]); pbMarker.setIcon(icon); }
+    applyPlateLabel(pbMarker, histVeh);   // Plakalar açıksa oynatma marker'ında plaka göster
     map.panTo([p.lat, p.lon], { animate: true, duration: .3 });
     const sp = $("pbSpeedNow"); if (sp) sp.textContent = p.speedKmh != null ? p.speedKmh : "–";
   }
