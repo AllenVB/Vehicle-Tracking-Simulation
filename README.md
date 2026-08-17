@@ -6,8 +6,7 @@ sürücünün telefonundaki tarayıcı-içi GPS izleyici veya ham TCP konuşan b
 harita üzerinde canlı** izlenir. Üç arayüz aynı gateway'den sunulur: operatör konsolu, sürücü
 uygulaması (PWA) ve müşteriye açık takip linki.
 
-![FleetFlow — Canlı Harita](docs/screenshots/01-canli-harita.png)
-
+<img width="1920" height="998" alt="ff1" src="https://github.com/user-attachments/assets/45e3ab96-0548-4b70-a4e1-79460f04ebef" />
 ---
 
 ## İçindekiler
@@ -130,7 +129,7 @@ Giriş: `admin` / `password` (JWT arka planda alınır).
 
 #### Canlı harita
 
-![Operatör konsolu — Canlı Harita](docs/screenshots/01-canli-harita.png)
+<img width="1920" height="998" alt="ff1" src="https://github.com/user-attachments/assets/bac9cda1-ed3e-40bb-a320-5141effd5bf1" />
 
 - **Canlı harita:** Tüm filo tek WebSocket aboneliğinden beslenir (polling yok); marker kümeleme,
   plaka etiketleri, ihlal/durak renk kodları, viewport (bbox) filtresi.
@@ -145,9 +144,9 @@ Giriş: `admin` / `password` (JWT arka planda alınır).
 
 #### Filo, karne, bakım ve araç kontrolleri
 
-![Operatör konsolu — Filo](docs/screenshots/02-filo.png)
+<img width="1920" height="1007" alt="ff2" src="https://github.com/user-attachments/assets/730f4b48-6070-4c3f-83c9-4e00580e6994" />
 
-![Operatör konsolu — Araç Karnesi · Bakım · DVIR](docs/screenshots/03-filo-karne-bakim-dvir.png)
+<img width="1920" height="1006" alt="ff3" src="https://github.com/user-attachments/assets/98b98530-e7ec-43df-a90c-898116f1a8a8" />
 
 - **Filo yönetimi:** Araç ekle/sil, sürücü şifresi ata/göster, CSV filo raporu, plaka arama/filtre.
   Kartlar 5 sn'de bir **yerinde** güncellenir (yeniden kurulmaz → titremez).
@@ -160,7 +159,7 @@ Giriş: `admin` / `password` (JWT arka planda alınır).
 
 #### Geçmiş oynatma
 
-![Operatör konsolu — Geçmiş oynatma](docs/screenshots/04-gecmis.png)
+<img width="1920" height="1007" alt="ff4" src="https://github.com/user-attachments/assets/d669aa97-bb29-43b0-ae06-6abb6b62798c" />
 
 - **Geçmiş oynatma:** Araç + gün seçilir (**son 30 gün**); günün izi harita üzerinde oynatılır,
   toplam mesafe / ihlal / durak, hız/eco/skor özeti ve CSV dışa aktarma.
