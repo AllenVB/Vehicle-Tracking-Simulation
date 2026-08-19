@@ -1,0 +1,9 @@
+{
+  "appId": "com.fleetflow.driver",
+  "appName": "FleetFlow Sürücü",
+  "webDir": "www",
+  "server": {
+    "url": "http://192.168.4.141:8080/driver.html",
+    "cleartext": true
+  }
+}

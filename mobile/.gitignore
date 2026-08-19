@@ -1,0 +1,18 @@
+# Bağımlılıklar (yeniden üretilebilir — npm install)
+node_modules/
+
+# Android build çıktıları (android/.gitignore da kapsar; güvenlik için burada da)
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/.idea/
+android/local.properties
+
+# Üretilen paket
+*.apk
+*.aab
+
+# Sistem
+.DS_Store
+Thumbs.db

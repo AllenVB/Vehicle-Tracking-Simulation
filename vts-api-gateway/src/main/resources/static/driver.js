@@ -146,15 +146,48 @@
     startGps();
   };
 
+  // APK (Capacitor) içinde native arka plan GPS'i, tarayıcıda klasik watchPosition kullan.
+  var capWatcherId = null;
+  function inCapacitor() {
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  }
+  function bgGeo() {
+    var C = window.Capacitor; if (!C) return null;
+    if (C.Plugins && C.Plugins.BackgroundGeolocation) return C.Plugins.BackgroundGeolocation;
+    return C.registerPlugin ? C.registerPlugin("BackgroundGeolocation") : null;
+  }
   function startGps() {
+    if (inCapacitor()) { startBgGps(); return; }
     if (!navigator.geolocation) { setStatus("off", "Bu cihaz konum desteklemiyor."); return; }
     watchId = navigator.geolocation.watchPosition(onPos, onErr, {
       enableHighAccuracy: true, maximumAge: 1000, timeout: 15000
     });
   }
+  // Native: foreground service ile ekran kapalıyken de konum gelir; her fix onPos'a beslenir.
+  function startBgGps() {
+    var Bg = bgGeo();
+    if (!Bg) { setStatus("off", "Konum servisi yüklenemedi."); return; }
+    Bg.addWatcher({
+      backgroundMessage: "Konumun sürüş boyunca paylaşılıyor.",
+      backgroundTitle: "FleetFlow — Takip aktif",
+      requestPermissions: true,
+      stale: false,
+      distanceFilter: 8
+    }, function (location, error) {
+      if (error) { if (error.code === "NOT_AUTHORIZED") onErr({ code: 1 }); return; }
+      if (!location) return;
+      onPos({
+        coords: { latitude: location.latitude, longitude: location.longitude,
+                  accuracy: location.accuracy, speed: location.speed },
+        timestamp: location.time || Date.now()
+      });
+    }).then(function (id) { capWatcherId = id; })
+      .catch(function () { setStatus("off", "Konum başlatılamadı."); });
+  }
 
   function stopGps() {
     if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+    if (capWatcherId != null) { var Bg = bgGeo(); if (Bg) Bg.removeWatcher({ id: capWatcherId }); capWatcherId = null; }
   }
 
   function onErr(e) {
@@ -687,10 +720,13 @@
   var jobDestMarker = null, jobDestLine = null;
   function initMap() {
     if (mapReady || typeof L === "undefined") return;
-    lmap = L.map("map", { zoomControl: true, attributionControl: false }).setView([41.02, 29.0], 15);
+    lmap = L.map("map", { zoomControl: false, attributionControl: false }).setView([41.02, 29.0], 15);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(lmap);
     trail = L.polyline(trailPts, { color: "#00f5d4", weight: 4, opacity: .85 }).addTo(lmap);
     lmap.on("dragstart", function () { mapFollow = false; });   // kullanıcı gezerken takibi bırak
+    var zi = $("mapZoomIn"), zo = $("mapZoomOut");              // büyük +/- zoom butonları (mobil)
+    if (zi) zi.onclick = function () { lmap.zoomIn(); };
+    if (zo) zo.onclick = function () { lmap.zoomOut(); };
     mapReady = true;
     if (lastFix) placeMe(lastFix.lat, lastFix.lon);
   }
