@@ -80,9 +80,10 @@ services:
     image: timescale/timescaledb-ha:pg16
     container_name: vts-postgres
     ports:
-      # Host 5433 to avoid clashing with any local Postgres on 5432; services
-      # still reach it in-network as postgres:5432. Host tools: localhost:5433.
-      - "5433:5432"
+      # Host 5435 to avoid clashing with local Postgres and other projects (5433
+      # is held by otobeyin-main-db); services still reach it in-network as
+      # postgres:5432. Host tools: localhost:5435.
+      - "5435:5432"
     environment:
       POSTGRES_DB: vts
       POSTGRES_USER: vts
